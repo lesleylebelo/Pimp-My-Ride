@@ -16,17 +16,30 @@ import AppTextInput from "../components/AppTextInput";
 import PrimaryButton from "../components/PrimaryButton";
 import colors from "../theme/colors";
 import { spacing } from "../theme/typography";
+import { validateEmailField } from "../utils/validators";
 
-export default function SignInScreen({ navigation }) {
-  const [role, setRole] = useState("owner"); // "owner" | "shop"
+export default function SignInScreen({ navigation, route }) {
+  const initialRole = route?.params?.role === "shop" ? "shop" : "owner";
+  const [role, setRole] = useState(initialRole); // "owner" | "shop"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
 
   const isOwner = role === "owner";
 
   const handleSignIn = () => {
+    const emailError = validateEmailField(email);
+    const passwordError = !password ? "Password is required." : null;
+    if (emailError || passwordError) {
+      setErrors({ email: emailError, password: passwordError });
+      return;
+    }
+    setErrors({});
+    setLoading(true);
     // Frontend-only for now — wire up Firebase Authentication here later.
     // (No Home/Feed screen exists yet in this stage of the build.)
+    setTimeout(() => setLoading(false), 700);
   };
 
   return (
@@ -73,21 +86,30 @@ export default function SignInScreen({ navigation }) {
             label="Email Address"
             placeholder="example@gmail.com"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(text) => {
+              setEmail(text);
+              if (errors.email) setErrors((e) => ({ ...e, email: null }));
+            }}
             keyboardType="email-address"
             autoCapitalize="none"
+            error={errors.email}
           />
           <AppTextInput
             label="Password"
             placeholder="Enter your password"
             value={password}
-            onChangeText={setPassword}
+            onChangeText={(text) => {
+              setPassword(text);
+              if (errors.password) setErrors((e) => ({ ...e, password: null }));
+            }}
             secureTextEntry
+            showPasswordToggle
+            error={errors.password}
           />
 
           <Pressable
             style={styles.forgotWrap}
-            onPress={() => {}}
+            onPress={() => navigation.navigate("ForgotPassword", { role })}
           >
             <Text style={styles.forgotText}>Forgot Password?</Text>
           </Pressable>
@@ -95,6 +117,7 @@ export default function SignInScreen({ navigation }) {
           <PrimaryButton
             title="Sign In"
             onPress={handleSignIn}
+            loading={loading}
             style={{ marginTop: spacing.sm }}
           />
 

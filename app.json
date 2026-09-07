@@ -6,7 +6,9 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "backgroundColor": "#0E3B2C",
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": false
     },
@@ -17,6 +19,9 @@
     },
     "web": {
       "bundler": "metro"
-    }
+    },
+    "plugins": [
+      "expo-status-bar"
+    ]
   }
 }

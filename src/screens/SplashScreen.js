@@ -6,7 +6,7 @@ import colors from "../theme/colors";
 export default function SplashScreen({ navigation }) {
   useEffect(() => {
     const timer = setTimeout(() => {
-      navigation.replace("SignIn");
+      navigation.replace("RoleSelection");
     }, 1800);
     return () => clearTimeout(timer);
   }, [navigation]);

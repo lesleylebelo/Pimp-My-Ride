@@ -15,6 +15,10 @@ export const colors = {
   divider: "#CFCFCF",
   disabledSurface: "#EDEDED",
   link: "#0E3B2C",
+  error: "#C0392B",
+  errorSurface: "#FBEAE8",
+  success: "#1F7A4D",
+  successSurface: "#E8F5EC",
 };
 
 export default colors;
