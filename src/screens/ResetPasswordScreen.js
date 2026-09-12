@@ -1,3 +1,6 @@
+import { verifyPasswordResetCode, confirmPasswordReset } from 'firebase/auth';
+import { firebase } from '../services/firebase';
+import { authError } from '../utils/authErrors';
 import React, { useState } from "react";
 import {
   View,
@@ -53,7 +56,8 @@ export default function ResetPasswordScreen({ navigation, route }) {
 
   const handleBack = () => navigation.goBack();
 
-  const handleResetPassword = () => {
+  const handleResetPassword = async () => {
+    if (loading) return;
     const passwordError = validatePasswordField(password);
     const confirmError = validateConfirmPasswordField(password, confirmPassword);
     if (passwordError || confirmError) {
@@ -62,12 +66,15 @@ export default function ResetPasswordScreen({ navigation, route }) {
     }
     setErrors({});
     setLoading(true);
-    // Frontend-only for now — swap this timeout for a real Firebase Auth
-    // confirmPasswordReset() call once the backend is wired up.
-    setTimeout(() => {
-      setLoading(false);
-      navigation.replace("ResetSuccess", { role });
-    }, 700);
+    try {
+      const code = route?.params?.oobCode;
+      if (!code) throw new Error('Open the reset link in your email to reset your password.');
+      await verifyPasswordResetCode(firebase().auth,code);
+      await confirmPasswordReset(firebase().auth,code,password);
+      navigation.replace('ResetSuccess',{role});
+    } catch(e) {setErrors({password:authError(e)});}
+    finally {setLoading(false);}
+
   };
 
   return (

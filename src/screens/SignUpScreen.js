@@ -1,4 +1,11 @@
-import React, { useState, useEffect } from "react";
+import { useFocusEffect } from '@react-navigation/native';
+import { Alert } from 'react-native';
+import { useAuth } from '../context/AuthContext';
+import { register, uploadDocuments } from '../services/accounts';
+import { authError } from '../utils/authErrors';
+import { registrationErrors } from '../utils/registration';
+import DocumentPickerField from '../components/DocumentPickerField';
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -19,6 +26,7 @@ import colors from "../theme/colors";
 import { spacing } from "../theme/typography";
 
 const initialForm = {
+  agreed: false,
   fullName: "",
   email: "",
   phone: "",
@@ -41,9 +49,14 @@ export default function SignUpScreen({ navigation, route }) {
   const [step, setStep] = useState(1);
   const [form, setForm] = useState(initialForm);
 
+  const {run} = useAuth();
+  const [errors,setErrors] = useState({});
+  const [loading,setLoading] = useState(false);
+  const [submitError,setSubmitError] = useState('');
+  useEffect(() => { setRole(initialRole);setStep(1);setErrors({}); }, [initialRole]);
   const totalSteps = role === "shop" ? 3 : 1;
 
-  const setField = (key) => (value) => setForm((f) => ({ ...f, [key]: value }));
+  const setField = (key) => (value) => { setForm((f) => ({ ...f, [key]: value }));setErrors(e=>({...e,[key]:null})); };
 
   const goBack = () => {
     if (step > 1) {
@@ -53,33 +66,36 @@ export default function SignUpScreen({ navigation, route }) {
     }
   };
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       goBack();
       return true;
     });
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
+  }, [step, navigation]));
 
   const handleRoleChange = (nextRole) => {
+    setErrors({});setSubmitError('');
     setRole(nextRole);
     setStep(1);
   };
 
-  const handlePrimaryAction = () => {
-    if (role === "owner") {
-      // Frontend-only for now — wire up Firebase Auth here later.
-      navigation.replace("SignIn");
-      return;
-    }
-    // Custom Shop flow
-    if (step < 3) {
-      setStep((s) => s + 1);
-    } else {
-      // Frontend-only for now — wire up submission/verification here later.
-      navigation.replace("SignIn");
-    }
+  const handlePrimaryAction = async () => {
+    if (loading) return;
+    const issues=registrationErrors(form,role,step);setErrors(issues);
+    if(Object.keys(issues).length) return;
+    if(role==='shop' && step<3) {setStep(step+1);return;}
+    setLoading(true);setSubmitError('');
+    try { await run(async()=> {
+      await register(form,role);
+      if(role==='shop') {
+        try {await uploadDocuments(form);}
+        catch(error) {Alert.alert('Account created — documents need attention','Your account is saved. You can retry the documents from your account screen. '+authError(error));}
+      }
+    }); }
+    catch(error) {setSubmitError(authError(error));Alert.alert('Registration needs attention',authError(error));}
+    finally {setLoading(false);}
   };
 
   const headerTitle = "Create Account";
@@ -102,7 +118,8 @@ export default function SignUpScreen({ navigation, route }) {
         >
           <AuthHeader title={headerTitle} subtitle={headerSubtitle} />
 
-          <View style={styles.body}>
+          <View style={styles.body} pointerEvents={loading ? "none" : "auto"}>
+            {step > 1 && <Pressable onPress={goBack}><Text style={styles.termsLink}>Back</Text></Pressable>}
             {step === 2 && <Text style={styles.stepHeading}>Shop Details</Text>}
             {step === 3 && <Text style={styles.stepHeading}>Verification</Text>}
 
@@ -111,33 +128,35 @@ export default function SignUpScreen({ navigation, route }) {
             )}
 
             {step === 1 && role === "owner" && (
-              <OwnerFields form={form} setField={setField} />
+              <OwnerFields form={form} setField={setField} errors={errors} />
             )}
 
             {step === 1 && role === "shop" && (
-              <ShopAccountFields form={form} setField={setField} />
+              <ShopAccountFields form={form} setField={setField} errors={errors} />
             )}
 
             {step === 2 && role === "shop" && (
-              <ShopDetailsFields form={form} setField={setField} />
+              <ShopDetailsFields form={form} setField={setField} errors={errors} />
             )}
 
             {step === 3 && role === "shop" && (
-              <VerificationFields form={form} setField={setField} />
+              <VerificationFields form={form} setField={setField} errors={errors} />
             )}
 
-            {step === 1 && (
-              <Text style={styles.terms}>
-                I agree to PimpMyRide&apos;s{" "}
-                <Text style={styles.termsLink}>Terms of Service</Text> and{" "}
-                <Text style={styles.termsLink}>Privacy Policy</Text>
-              </Text>
-            )}
+            {step === 1 && <View>
+              <Pressable accessibilityRole="checkbox" accessibilityState={{checked:form.agreed}} onPress={()=>setField('agreed')(!form.agreed)}>
+                <Text style={styles.terms}>{form.agreed ? '☑' : '☐'} I accept the terms and privacy notice.</Text>
+              </Pressable>
+              <Pressable onPress={()=>navigation.navigate('Legal')}><Text style={styles.termsLink}>Read terms and privacy notice</Text></Pressable>
+              {errors.agreed && <Text style={{color:colors.error}}>{errors.agreed}</Text>}
+            </View>}
+            <Text accessibilityRole="alert" style={{color:colors.error}}>{submitError}</Text>
 
             <PrimaryButton
               title={
                 role === "owner" ? "Create Account" : step === 3 ? "Submit Registration" : "Next"
               }
+              loading={loading}
               onPress={handlePrimaryAction}
               style={{ marginTop: spacing.lg }}
             />
@@ -145,7 +164,7 @@ export default function SignUpScreen({ navigation, route }) {
             {step === 1 && (
               <View style={styles.footerRow}>
                 <Text style={styles.footerText}>Already have an account? </Text>
-                <Pressable onPress={() => navigation.navigate("SignIn")}>
+                <Pressable onPress={() => navigation.navigate("SignIn", { role })}>
                   <Text style={styles.footerLink}>Sign In</Text>
                 </Pressable>
               </View>
@@ -157,7 +176,7 @@ export default function SignUpScreen({ navigation, route }) {
   );
 }
 
-function OwnerFields({ form, setField }) {
+function OwnerFields({ form, setField, errors }) {
   return (
     <>
       <AppTextInput
@@ -165,12 +184,14 @@ function OwnerFields({ form, setField }) {
         placeholder="Enter your full name"
         value={form.fullName}
         onChangeText={setField("fullName")}
+        error={errors.fullName}
       />
       <AppTextInput
         label="Email Address"
         placeholder="example@gmail.com"
         value={form.email}
         onChangeText={setField("email")}
+        error={errors.email}
         keyboardType="email-address"
         autoCapitalize="none"
       />
@@ -179,6 +200,7 @@ function OwnerFields({ form, setField }) {
         placeholder="+27 XX XXX XXX"
         value={form.phone}
         onChangeText={setField("phone")}
+        error={errors.phone}
         keyboardType="phone-pad"
       />
       <AppTextInput
@@ -186,6 +208,9 @@ function OwnerFields({ form, setField }) {
         placeholder="Min. 8 characters"
         value={form.password}
         onChangeText={setField("password")}
+        error={errors.password}
+        showPasswordToggle
+        autoCapitalize="none"
         secureTextEntry
       />
       <AppTextInput
@@ -193,13 +218,16 @@ function OwnerFields({ form, setField }) {
         placeholder="Re-enter password"
         value={form.confirmPassword}
         onChangeText={setField("confirmPassword")}
+        error={errors.confirmPassword}
+        showPasswordToggle
+        autoCapitalize="none"
         secureTextEntry
       />
     </>
   );
 }
 
-function ShopAccountFields({ form, setField }) {
+function ShopAccountFields({ form, setField, errors }) {
   return (
     <>
       <AppTextInput
@@ -207,12 +235,14 @@ function ShopAccountFields({ form, setField }) {
         placeholder="Enter your full name"
         value={form.fullName}
         onChangeText={setField("fullName")}
+        error={errors.fullName}
       />
       <AppTextInput
         label="Email Address"
         placeholder="example@gmail.com"
         value={form.email}
         onChangeText={setField("email")}
+        error={errors.email}
         keyboardType="email-address"
         autoCapitalize="none"
       />
@@ -221,6 +251,7 @@ function ShopAccountFields({ form, setField }) {
         placeholder="+27 XX XXX XXX"
         value={form.phone}
         onChangeText={setField("phone")}
+        error={errors.phone}
         keyboardType="phone-pad"
       />
       <AppTextInput
@@ -228,6 +259,9 @@ function ShopAccountFields({ form, setField }) {
         placeholder="Min. 8 characters"
         value={form.password}
         onChangeText={setField("password")}
+        error={errors.password}
+        showPasswordToggle
+        autoCapitalize="none"
         secureTextEntry
       />
       <AppTextInput
@@ -235,13 +269,16 @@ function ShopAccountFields({ form, setField }) {
         placeholder="Re-enter password"
         value={form.confirmPassword}
         onChangeText={setField("confirmPassword")}
+        error={errors.confirmPassword}
+        showPasswordToggle
+        autoCapitalize="none"
         secureTextEntry
       />
     </>
   );
 }
 
-function ShopDetailsFields({ form, setField }) {
+function ShopDetailsFields({ form, setField, errors }) {
   return (
     <>
       <AppTextInput
@@ -249,64 +286,53 @@ function ShopDetailsFields({ form, setField }) {
         placeholder="Enter your shop name"
         value={form.shopName}
         onChangeText={setField("shopName")}
+        error={errors.shopName}
       />
       <AppTextInput
         label="Business Registration Number"
         placeholder="Enter your business registration number"
         value={form.regNumber}
         onChangeText={setField("regNumber")}
+        error={errors.regNumber}
       />
       <AppTextInput
         label="Physical Address"
         placeholder="Enter your physical address"
         value={form.address}
         onChangeText={setField("address")}
+        error={errors.address}
       />
       <AppTextInput
         label="City"
         placeholder="Enter your city"
         value={form.city}
         onChangeText={setField("city")}
+        error={errors.city}
       />
       <AppTextInput
         label="Province"
         placeholder="Enter your province"
         value={form.province}
         onChangeText={setField("province")}
+        error={errors.province}
       />
       <AppTextInput
         label="Services offered"
         placeholder="Services you offer"
         value={form.services}
         onChangeText={setField("services")}
+        error={errors.services}
         multiline
       />
     </>
   );
 }
 
-function VerificationFields({ form, setField }) {
-  // File picking is stubbed for now — wire up expo-image-picker /
-  // expo-document-picker here when backend/storage integration begins.
-  return (
-    <>
-      <UploadField
-        label="CIPC Registration Certificate"
-        fileName={form.cipcCert}
-        onPress={() => setField("cipcCert")("document.pdf")}
-      />
-      <UploadField
-        label="Proof of Address"
-        fileName={form.proofOfAddress}
-        onPress={() => setField("proofOfAddress")("document.pdf")}
-      />
-      <UploadField
-        label="Owner/Representative ID"
-        fileName={form.ownerId}
-        onPress={() => setField("ownerId")("document.pdf")}
-      />
-    </>
-  );
+function VerificationFields({ form, setField, errors }) {
+ return <>
+ <Text style={{marginBottom:16}}>PDF, JPG or PNG, up to 5 MB per file. For this academic demo, use sample documents with fictional details.</Text>
+ {Object.entries({cipcCert:'CIPC Registration Certificate',proofOfAddress:'Proof of Address',ownerId:'Owner/Representative ID'}).map(([key,label])=><DocumentPickerField key={key} label={label} value={form[key]} onChange={setField(key)} error={errors[key]}/>)}
+ </>;
 }
 
 const styles = StyleSheet.create({

@@ -1,3 +1,6 @@
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { firebase } from '../services/firebase';
+import { authError } from '../utils/authErrors';
 import React, { useState } from "react";
 import {
   View,
@@ -52,24 +55,24 @@ export default function ForgotPasswordScreen({ navigation, route }) {
     : "owner";
   const content = ROLE_CONTENT[role];
 
+  const [sent,setSent] = useState(false);
   const [email, setEmail] = useState("");
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const handleBack = () => navigation.goBack();
 
-  const handleSendResetLink = () => {
+  const handleSendResetLink = async () => {
+    if (loading) return;
     const emailError = validateEmailField(email);
     setError(emailError);
     if (emailError) return;
 
     setLoading(true);
-    // Frontend-only for now — swap this timeout for a real Firebase Auth
-    // sendPasswordResetEmail() call once the backend is wired up.
-    setTimeout(() => {
-      setLoading(false);
-      navigation.navigate("ResetPassword", { role, email: email.trim() });
-    }, 700);
+    try { await sendPasswordResetEmail(firebase().auth,email.trim());setSent(true); }
+    catch(e) { if(e.code === 'auth/user-not-found') setSent(true);else setError(authError(e)); }
+    finally {setLoading(false);}
+
   };
 
   return (
@@ -100,7 +103,7 @@ export default function ForgotPasswordScreen({ navigation, route }) {
             placeholder={content.placeholder}
             value={email}
             onChangeText={(text) => {
-              setEmail(text);
+              setEmail(text);setSent(false);
               if (error) setError(null);
             }}
             keyboardType="email-address"
@@ -109,12 +112,14 @@ export default function ForgotPasswordScreen({ navigation, route }) {
           />
 
           <PrimaryButton
-            title="Send Reset Link"
+            title={sent ? "Email requested" : "Send Reset Link"}
+            disabled={sent}
             onPress={handleSendResetLink}
             loading={loading}
             style={styles.sendButton}
           />
 
+          {sent && <Text style={{color:colors.primary,marginTop:16}}>If an account exists for this email, you will receive a reset link. Open it to choose a new password, then return here to sign in. Check your spam folder too.</Text>}
           <OrDivider />
 
           <OutlineButton

@@ -1,4 +1,7 @@
-import React, { useState } from "react";
+import { useAuth } from '../context/AuthContext';
+import { login } from '../services/accounts';
+import { authError } from '../utils/authErrors';
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -21,14 +24,19 @@ import { validateEmailField } from "../utils/validators";
 export default function SignInScreen({ navigation, route }) {
   const initialRole = route?.params?.role === "shop" ? "shop" : "owner";
   const [role, setRole] = useState(initialRole); // "owner" | "shop"
+  const { run } = useAuth();
+  const [submitError, setSubmitError] = useState('');
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
 
   const isOwner = role === "owner";
+  useEffect(() => { setRole(initialRole); setPassword(''); setErrors({}); setSubmitError(''); }, [initialRole]);
 
-  const handleSignIn = () => {
+  const handleSignIn = async () => {
+    if (loading) return;
+    setSubmitError('');
     const emailError = validateEmailField(email);
     const passwordError = !password ? "Password is required." : null;
     if (emailError || passwordError) {
@@ -37,9 +45,9 @@ export default function SignInScreen({ navigation, route }) {
     }
     setErrors({});
     setLoading(true);
-    // Frontend-only for now — wire up Firebase Authentication here later.
-    // (No Home/Feed screen exists yet in this stage of the build.)
-    setTimeout(() => setLoading(false), 700);
+    try { await run(() => login(email, password, role)); }
+    catch (error) { setSubmitError(authError(error)); }
+    finally { setLoading(false); }
   };
 
   return (
@@ -60,24 +68,14 @@ export default function SignInScreen({ navigation, route }) {
             </View>
           </View>
 
-          <RoleToggle role={role} onChange={setRole} />
+          <RoleToggle role={role} onChange={(next) => { setRole(next);setPassword('');setErrors({});setSubmitError(''); }} />
 
-          {isOwner && (
-            <View style={styles.socialRow}>
-              <SocialButton
-                provider="google"
-                label="Google"
-                onPress={() => {}}
-                style={{ marginRight: spacing.sm }}
-              />
-              <SocialButton provider="apple" label="Apple" onPress={() => {}} />
-            </View>
-          )}
+
 
           <View style={styles.dividerRow}>
             <View style={styles.dividerLine} />
             <Text style={styles.dividerText}>
-              {isOwner ? "or continue with email" : "continue with email"}
+              continue with email
             </Text>
             <View style={styles.dividerLine} />
           </View>
@@ -114,6 +112,7 @@ export default function SignInScreen({ navigation, route }) {
             <Text style={styles.forgotText}>Forgot Password?</Text>
           </Pressable>
 
+          <Text accessibilityRole="alert" style={{color:colors.error,marginBottom:12}}>{submitError}</Text>
           <PrimaryButton
             title="Sign In"
             onPress={handleSignIn}

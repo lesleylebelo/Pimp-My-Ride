@@ -1,4 +1,7 @@
-import React, { useState } from "react";
+import { useAuth } from '../context/AuthContext';
+import { login } from '../services/accounts';
+import { authError } from '../utils/authErrors';
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -19,12 +22,16 @@ import { spacing } from "../theme/typography";
 import { validateEmailField } from "../utils/validators";
 
 export default function AdminSignInScreen({ navigation }) {
+  const { run } = useAuth();
+  const [submitError, setSubmitError] = useState('');
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
 
-  const handleSignIn = () => {
+  const handleSignIn = async () => {
+    if (loading) return;
+    setSubmitError('');
     const emailError = validateEmailField(email);
     const passwordError = !password ? "Password is required." : null;
     if (emailError || passwordError) {
@@ -33,9 +40,9 @@ export default function AdminSignInScreen({ navigation }) {
     }
     setErrors({});
     setLoading(true);
-    // Frontend-only for now — wire up Firebase Authentication here later.
-    // (No admin dashboard exists yet in this stage of the build.)
-    setTimeout(() => setLoading(false), 700);
+    try { await run(() => login(email, password, "admin")); }
+    catch (error) { setSubmitError(authError(error)); }
+    finally { setLoading(false); }
   };
 
   return (
@@ -91,7 +98,8 @@ export default function AdminSignInScreen({ navigation }) {
               <Text style={styles.forgotText}>Forgot Password?</Text>
             </Pressable>
 
-            <PrimaryButton
+            <Text accessibilityRole="alert" style={{color:colors.error,marginBottom:12}}>{submitError}</Text>
+          <PrimaryButton
               title="Sign In"
               onPress={handleSignIn}
               loading={loading}
