@@ -3,10 +3,15 @@ import { Pressable, Text, ActivityIndicator, StyleSheet } from "react-native";
 import colors from "../theme/colors";
 import { radius, typography } from "../theme/typography";
 
-export default function PrimaryButton({ title, onPress, style, disabled, loading }) {
+export default function PrimaryButton({ title, onPress, style, textStyle, disabled, loading, accessibilityHint, testID }) {
   const isDisabled = disabled || loading;
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled: !!isDisabled, busy: !!loading }}
+      testID={testID}
       onPress={onPress}
       disabled={isDisabled}
       style={({ pressed }) => [
@@ -19,7 +24,7 @@ export default function PrimaryButton({ title, onPress, style, disabled, loading
       {loading ? (
         <ActivityIndicator color={colors.white} />
       ) : (
-        <Text style={styles.text}>{title}</Text>
+        <Text style={[styles.text, textStyle]}>{title}</Text>
       )}
     </Pressable>
   );

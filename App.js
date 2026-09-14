@@ -1,6 +1,10 @@
 import { View, Text, ActivityIndicator } from 'react-native';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import AccountScreen from './src/screens/AccountScreen';
+import OwnerHomeScreen from './src/screens/OwnerHomeScreen';
+import ShopHomeScreen from './src/screens/ShopHomeScreen';
+import AdminHomeScreen from './src/screens/AdminHomeScreen';
+import { getAuthenticatedRoute } from './src/utils/landingRoute';
 import LegalScreen from './src/screens/LegalScreen';
 import React from "react";
 import { StatusBar } from "expo-status-bar";
@@ -18,21 +22,28 @@ import ResetSuccessScreen from "./src/screens/ResetSuccessScreen";
 import AdminSignInScreen from "./src/screens/AdminSignInScreen";
 
 const Stack = createNativeStackNavigator();
+const authenticatedScreens = {
+  Account: AccountScreen,
+  OwnerHome: OwnerHomeScreen,
+  ShopHome: ShopHomeScreen,
+  AdminHome: AdminHomeScreen,
+};
 
 export default function App() { return <AuthProvider><AppNavigation /></AuthProvider>; }
 function AppNavigation() {
-  const {user,initializing,working} = useAuth();
+  const {user,profile,error,initializing,working} = useAuth();
+  const authenticatedRoute = getAuthenticatedRoute(user, profile, error);
   if (initializing) return <SafeAreaProvider><View style={{flex:1,justifyContent:"center",alignItems:"center"}}><ActivityIndicator color="#0E3B2C"/><Text>Please wait…</Text></View></SafeAreaProvider>;
   return (
     <SafeAreaProvider>
       <StatusBar style="auto" />
       <NavigationContainer>
         <Stack.Navigator
-          key={user ? "authenticated" : "guest"}
-          initialRouteName={user ? "Account" : "Splash"}
+          key={user ? `${user.uid}:${authenticatedRoute}` : "guest"}
+          initialRouteName={user ? authenticatedRoute : "Splash"}
           screenOptions={{ headerShown: false }}
         >
-          {user ? <Stack.Screen name="Account" component={AccountScreen}/> : <>
+          {user ? <Stack.Screen name={authenticatedRoute} component={authenticatedScreens[authenticatedRoute]}/> : <>
           <Stack.Screen name="Legal" component={LegalScreen}/>
           <Stack.Screen name="Splash" component={SplashScreen} />
           <Stack.Screen name="RoleSelection" component={RoleSelectionScreen} />

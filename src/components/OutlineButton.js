@@ -15,10 +15,20 @@ export default function OutlineButton({
   iconSet = "ionicons",
   onPress,
   style,
+  textStyle,
+  disabled = false,
+  accessibilityHint,
+  testID,
 }) {
   const IconComponent = iconSet === "material" ? MaterialCommunityIcons : Ionicons;
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      testID={testID}
       onPress={onPress}
       style={({ pressed }) => [styles.button, pressed && styles.pressed, style]}
     >
@@ -30,7 +40,7 @@ export default function OutlineButton({
           style={styles.icon}
         />
       ) : null}
-      <Text style={styles.text}>{title}</Text>
+      <Text style={[styles.text, textStyle]}>{title}</Text>
     </Pressable>
   );
 }
