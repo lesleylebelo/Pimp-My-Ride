@@ -15,7 +15,7 @@ function load(file) {
   );
   return mod.exports;
 }
-const { getAuthenticatedRoute } = load(path.resolve(__dirname, '../src/utils/landingRoute.js'));
+const { getAuthenticatedRoute } = load(path.resolve(__dirname, '../src/navigation/landingRoute.js'));
 const verified = { uid: 'example-user', emailVerified: true };
 
 test('verified profiles reach only their matching role landing page', () => {

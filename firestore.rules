@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function own(uid) { return request.auth != null && request.auth.uid == uid; }
+  function verified() { return request.auth != null && request.auth.token.email_verified == true; }
+  function admin() { return verified() && request.auth.token.admin == true
+   && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'; }
+  function text(value, limit) { return value is string && value.size() > 0 && value.size() <= limit; }
+  function validShop(shop) {
+   return shop is map
+    && shop.keys().hasAll(['shopName','regNumber','address','city','province','services'])
+    && shop.keys().hasOnly(['shopName','regNumber','address','city','province','services'])
+    && text(shop.shopName,500) && text(shop.regNumber,500) && text(shop.address,500)
+    && text(shop.city,500) && text(shop.province,500) && text(shop.services,500);
+  }
+  function pendingShop(uid) {
+   let profile = get(/databases/$(database)/documents/users/$(uid)).data;
+   return profile.role == 'shop' && profile.verificationStatus == 'pending';
+  }
+  function hasDocuments(uid) {
+   return exists(/databases/$(database)/documents/users/$(uid)/documents/cipcCert)
+    && exists(/databases/$(database)/documents/users/$(uid)/documents/proofOfAddress)
+    && exists(/databases/$(database)/documents/users/$(uid)/documents/ownerId);
+  }
+  match /users/{uid} {
+   // A user may read their own profile before verification to finish onboarding.
+   allow get: if own(uid) || admin();
+   allow list: if admin();
+   allow create: if own(uid)
+    && request.resource.data.keys().hasAll(['fullName','email','phone','role','createdAt','termsVersion','termsAcceptedAt'])
+    && request.resource.data.keys().hasOnly(['fullName','email','phone','role','createdAt','termsVersion','termsAcceptedAt','shop','verificationStatus'])
+    && text(request.resource.data.fullName,200)
+    && text(request.resource.data.phone,30)
+    && request.resource.data.phone.matches('^(0[0-9]{9}|[+]27[0-9]{9})$')
+    && request.resource.data.email == request.auth.token.email
+    && request.resource.data.createdAt == request.time && request.resource.data.termsAcceptedAt == request.time
+    && request.resource.data.termsVersion == 'academic-v1'
+    && ((request.resource.data.role == 'owner' && !request.resource.data.keys().hasAny(['shop','verificationStatus']))
+     || (request.resource.data.role == 'shop' && request.resource.data.verificationStatus == 'pending' && validShop(request.resource.data.shop)));
+   // Clients cannot promote themselves or edit roles. Approval requires a verified trusted admin.
+   allow update: if admin() && resource.data.role == 'shop'
+    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['verificationStatus'])
+    && request.resource.data.verificationStatus in ['pending','approved','rejected']
+    && (request.resource.data.verificationStatus != 'approved' || hasDocuments(uid));
+   allow delete: if false;
+   match /documents/{kind} {
+    allow read: if (own(uid) && verified()) || admin();
+    allow create, update: if own(uid) && verified() && pendingShop(uid)
+     && kind in ['cipcCert','proofOfAddress','ownerId']
+     && request.resource.data.keys().hasAll(['path','name','size','contentType','uploadedAt'])
+     && request.resource.data.keys().hasOnly(['path','name','size','contentType','uploadedAt'])
+     && request.resource.data.path == 'verification/' + uid + '/' + kind
+     && text(request.resource.data.name,255)
+     && request.resource.data.size is int && request.resource.data.size > 0 && request.resource.data.size <= 5 * 1024 * 1024
+     && request.resource.data.contentType in ['application/pdf','image/jpeg','image/png']
+     && request.resource.data.uploadedAt == request.time;
+   }
+  }
+  // All other collections remain denied until their feature rules are implemented.
+ }
+}

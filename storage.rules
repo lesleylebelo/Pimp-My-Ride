@@ -1,0 +1,21 @@
+rules_version = '2';
+service firebase.storage {
+ match /b/{bucket}/o {
+  function own(uid) {return request.auth != null && request.auth.uid == uid;}
+  function verified() {return request.auth != null && request.auth.token.email_verified == true;}
+  function admin() {return request.auth != null && request.auth.token.email_verified == true && request.auth.token.admin == true
+    && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+    && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';}
+  function pendingShop(uid) {return firestore.exists(/databases/(default)/documents/users/$(uid))
+    && firestore.get(/databases/(default)/documents/users/$(uid)).data.role == 'shop'
+    && firestore.get(/databases/(default)/documents/users/$(uid)).data.verificationStatus == 'pending';}
+  match /verification/{uid}/{kind} {
+   allow read: if (own(uid) && verified()) || admin();
+   allow create, update: if own(uid) && verified() && pendingShop(uid)
+    && kind in ['cipcCert','proofOfAddress','ownerId']
+    && request.resource.size > 0 && request.resource.size <= 5 * 1024 * 1024
+    && request.resource.contentType in ['application/pdf','image/jpeg','image/png'];
+   allow delete: if own(uid) && verified() && pendingShop(uid);
+  }
+ }
+}

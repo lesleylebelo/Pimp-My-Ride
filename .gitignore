@@ -44,17 +44,34 @@ yarn-error.*
 /ios
 /android
 
+# debug and local credentials
+*.log
+*service-account*.json
+
+# Local environment configuration
+.env
+.env.*
+!.env.example
+
+# Firebase administrator credentials
+*firebase-adminsdk*.json
+*service-account*.json
+serviceAccount*.json
+credentials.json
+
+# Private keys and signing credentials
+*.pem
+*.key
+*.p8
+*.p12
+*.jks
+*.keystore
+*.mobileprovision
+
+# Dependencies, generated files and logs
 node_modules/
 .expo/
+.firebase/
 dist/
 web-build/
 *.log
-.env
-.DS_Store
-
-dist/
-*service-account*.json
-firebase-debug.log
-*-debug.log
-firestore.rules
-storage.rules

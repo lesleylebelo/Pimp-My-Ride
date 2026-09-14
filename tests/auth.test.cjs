@@ -5,8 +5,8 @@ const babel=require('@babel/core');
 const path=require('node:path');
 // Load the same dependency-free helpers used in the React Native screens.
 function load(file){const src=fs.readFileSync(file,'utf8');const {code}=babel.transformSync(src,{configFile:false,babelrc:false,plugins:[require.resolve('@babel/plugin-transform-modules-commonjs')]});const mod={exports:{}};new Function('require','module','exports',code)(name=>load(path.resolve(path.dirname(file),name+'.js')),mod,mod.exports);return mod.exports;}
-const {registrationErrors,fileError,accountStage}=load(path.resolve(__dirname,'../src/utils/registration.js'));
-const valid={fullName:'Demo Owner',email:'owner@example.com',phone:'0821234567',password:'Password123',confirmPassword:'Password123',agreed:true};
+const {registrationErrors,fileError,accountStage}=load(path.resolve(__dirname,'../src/features/auth/utils/registration.js'));
+const valid={fullName:'Demo Owner',email:'owner@example.com',phone:'0821234567',password:'Password1234',confirmPassword:'Password1234',agreed:true};
 test('valid owner registration and international SA phone accepted',()=>{assert.deepEqual(registrationErrors(valid,'owner',1),{});assert.deepEqual(registrationErrors({...valid,phone:'+27 82 123 4567'},'owner',1),{});});
 test('registration rejects blank fields, bad email/phone, weak or mismatched password and missing consent',()=>{const e=registrationErrors({fullName:' ',email:'bad',phone:'123',password:'a',confirmPassword:'b'},'owner',1);for(const key of ['fullName','email','phone','password','confirmPassword','agreed'])assert.ok(e[key]);});
 test('shop details cannot skip required fields',()=>assert.equal(Object.keys(registrationErrors({},'shop',2)).length,6));

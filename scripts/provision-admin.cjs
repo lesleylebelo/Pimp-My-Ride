@@ -7,8 +7,9 @@ async function main(){
  if(!projectId||!uid) throw new Error('Usage: node scripts/provision-admin.cjs PROJECT_ID EXISTING_AUTH_UID');
  initializeApp({credential:applicationDefault(),projectId});
  const auth=getAuth(),user=await auth.getUser(uid);
+ if(!user.emailVerified)throw new Error('Verify this account email before provisioning administrator access.');
  await auth.setCustomUserClaims(uid,{...user.customClaims,admin:true});
- await getFirestore().collection('users').doc(uid).set({fullName:user.displayName || 'Project administrator',email:user.email,phone:user.phoneNumber || '',role:'admin',createdAt:FieldValue.serverTimestamp()});
- console.log('Administrator provisioned. Verify the email, then sign in again.');
+ await getFirestore().collection('users').doc(uid).set({fullName:user.displayName || 'Project administrator',email:user.email,phone:user.phoneNumber || '',role:'admin',createdAt:FieldValue.serverTimestamp()},{merge:true});
+ console.log('Administrator provisioned. Refresh the ID token or sign in again.');
 }
 main().catch(error=>{console.error(error.message);process.exitCode=1;});
