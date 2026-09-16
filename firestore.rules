@@ -23,7 +23,6 @@ service cloud.firestore {
     && exists(/databases/$(database)/documents/users/$(uid)/documents/ownerId);
   }
   match /users/{uid} {
-   // A user may read their own profile before verification to finish onboarding.
    allow get: if own(uid) || admin();
    allow list: if admin();
    allow create: if own(uid)
@@ -37,7 +36,6 @@ service cloud.firestore {
     && request.resource.data.termsVersion == 'academic-v1'
     && ((request.resource.data.role == 'owner' && !request.resource.data.keys().hasAny(['shop','verificationStatus']))
      || (request.resource.data.role == 'shop' && request.resource.data.verificationStatus == 'pending' && validShop(request.resource.data.shop)));
-   // Clients cannot promote themselves or edit roles. Approval requires a verified trusted admin.
    allow update: if admin() && resource.data.role == 'shop'
     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['verificationStatus'])
     && request.resource.data.verificationStatus in ['pending','approved','rejected']
@@ -56,6 +54,5 @@ service cloud.firestore {
      && request.resource.data.uploadedAt == request.time;
    }
   }
-  // All other collections remain denied until their feature rules are implemented.
  }
 }
