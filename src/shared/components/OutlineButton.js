@@ -4,11 +4,6 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import colors from "../theme/colors";
 import { radius, typography } from "../theme/typography";
 
-/**
- * Secondary action button: white background, green border/text.
- * Used for "Back to Sign In", "Back to Role Selection", and the
- * Role Selection screen's "Sign In" action.
- */
 export default function OutlineButton({
   title,
   icon,

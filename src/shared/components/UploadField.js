@@ -3,8 +3,6 @@ import {Pressable, StyleSheet, Text, View} from 'react-native';
 import colors from '../theme/colors';
 import {spacing} from '../theme/typography';
 
-// The file picker is intentionally kept separate from validation and upload.
-// This component only presents the action and the selected filename.
 export default function UploadField({label, fileName, onPress}) {
   return (
     <View style={styles.wrapper}>

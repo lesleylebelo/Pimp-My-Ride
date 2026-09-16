@@ -1,7 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// Firebase's persistence adapter shape. Chunk values below historic iOS size limits.
-// A manifest switches only after all chunks are written, preserving the old session on failure.
+
 export function createSecurePersistence(store, legacy) {
  let queue=Promise.resolve();
  const options={keychainAccessible:store.WHEN_UNLOCKED_THIS_DEVICE_ONLY};
@@ -11,7 +10,6 @@ export function createSecurePersistence(store, legacy) {
  const clean=async(key,m)=>{if(m)await Promise.all(Array.from({length:m.count},(_,i)=>store.deleteItemAsync(`${key}.${m.id}.${i}`,options)));};
  return {
   getItem:key=>serial(async()=>{
-   // Do not migrate plaintext credentials; this upgrade requires one fresh sign-in.
    await legacy.removeItem(key);
    const root=encode(key),m=await manifest(root);
    if(!m)return null;

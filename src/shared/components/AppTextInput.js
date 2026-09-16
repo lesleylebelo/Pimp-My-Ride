@@ -4,15 +4,6 @@ import { Ionicons } from "@expo/vector-icons";
 import colors from "../theme/colors";
 import { radius, typography, spacing } from "../theme/typography";
 
-/**
- * Labeled input used across every auth screen.
- *
- * - `icon`: optional leading Ionicons glyph (e.g. "mail-outline").
- * - `error`: shows a red-outlined field + red helper text below it.
- * - `helperText`: muted hint text below the field (hidden when `error` is set).
- * - `showPasswordToggle`: renders an eye icon that flips `secureTextEntry`
- *   locally, so callers just pass `secureTextEntry` as normal.
- */
 export default function AppTextInput({
   label,
   value,

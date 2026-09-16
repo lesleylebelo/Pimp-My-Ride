@@ -4,14 +4,6 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import colors from "../../../shared/theme/colors";
 import { spacing, radius } from "../../../shared/theme/typography";
 
-/**
- * Full-width dark green header block used at the top of the Sign Up flow
- * (and, with an icon, the Admin Sign In screen).
- * title: e.g. "Create Account"
- * subtitle: optional line under the title (only shown on step 1)
- * icon: optional glyph shown in a bordered badge above the title
- * iconSet: "ionicons" (default) or "material"
- */
 export default function AuthHeader({ title, subtitle, icon, iconSet = "ionicons" }) {
   const IconComponent = iconSet === "material" ? MaterialCommunityIcons : Ionicons;
   return (

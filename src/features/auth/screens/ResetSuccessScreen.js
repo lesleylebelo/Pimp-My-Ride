@@ -8,8 +8,6 @@ import { spacing } from "../../../shared/theme/typography";
 
 export default function ResetSuccessScreen({ navigation }) {
   const handleBackToSignIn = () => {
-    // Clear Forgot/Reset Password off the stack entirely so the user can't
-    // navigate back into a completed reset flow — no dead ends.
     navigation.reset({
       index: 0,
       routes: [

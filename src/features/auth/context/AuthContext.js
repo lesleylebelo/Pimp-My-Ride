@@ -25,7 +25,6 @@ export function AuthProvider({children}) {
   try {
    if(u){
     if(offline)throw Object.assign(new Error('Offline'),{code:'app/offline'});
-    // Refresh Auth first: detect verification, disabled/deleted users and changed claims.
     await timeout(reload(u));
     const token=await timeout(getIdTokenResult(u,true));
     const snapshot=await timeout(getDocFromServer(doc(firebase().db,'users',u.uid)));
@@ -34,7 +33,6 @@ export function AuthProvider({children}) {
      profile=null;error='Administrator authorization is missing. Contact the project administrator.';
     }
     if(generation===epoch.current){
-     // Cache failures must not invalidate a successful online login.
      if(u.emailVerified && !error)await saveProfileCache(u.uid,profile).catch(()=>{});
      else await clearProfileCache(u.uid).catch(()=>{});
     }
@@ -57,7 +55,6 @@ export function AuthProvider({children}) {
    }
   }finally{if(generation===epoch.current)inFlight.current=false;}
   if(generation!==epoch.current || !active.current || firebase().auth.currentUser?.uid!==u?.uid)return;
-  // Snapshot emailVerified into a new object because Firebase mutates the User instance.
   setState({user:u ? {uid:u.uid,email:u.email,emailVerified:u.emailVerified} : null,profile,error,offline,cachedAt,initializing:false});
  },[]);
  useEffect(()=>{
@@ -76,7 +73,6 @@ export function AuthProvider({children}) {
  },[sync]);
  useEffect(()=>{
   if(!state.user)return;
-  // Check other-device verification too. Pause polling while backgrounded or offline.
   const timer=setInterval(()=>{
    if(AppState.currentState==='active' && online.current && !lock.current && !inFlight.current)void sync();
   },state.user.emailVerified?60000:5000);

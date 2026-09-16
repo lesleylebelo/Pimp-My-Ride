@@ -22,10 +22,6 @@ import colors from "../../../shared/theme/colors";
 import { spacing } from "../../../shared/theme/typography";
 import { validateEmailField } from "../utils/validators";
 
-// Content that differs by role. The Client/Owner and Shop flows are
-// logically separate from Admin (different icon, copy and destination) even
-// though they share one component — this keeps the design consistent
-// without duplicating near-identical screens three times.
 export default function ForgotPasswordScreen({ navigation, route }) {
   const content={icon:'car-sport-outline',iconSet:'ionicons',placeholder:'example@gmail.com',subtitle:"Enter your email address to request a password reset link."};
   const [sent,setSent] = useState(false);

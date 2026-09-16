@@ -3,11 +3,6 @@ import { View, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import colors from "../theme/colors";
 
-/**
- * Rounded-square logo mark used on Splash and the Sign In / Sign Up headers.
- * variant="onDark"  -> white box + green icon   (used on the green Splash screen)
- * variant="onLight" -> green box + white icon   (used on light-background headers)
- */
 export default function LogoMark({ size = 72, iconSize, variant = "onDark" }) {
   const onDark = variant === "onDark";
   return (

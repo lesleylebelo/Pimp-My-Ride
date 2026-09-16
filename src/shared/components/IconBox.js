@@ -3,13 +3,6 @@ import { View, StyleSheet } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import colors from "../theme/colors";
 
-/**
- * A rounded-square icon badge. Used for the Role Selection cards and the
- * large centered icon on Forgot/Reset Password screens.
- *
- * iconSet: "ionicons" (default) or "material" (for MaterialCommunityIcons,
- * needed for the admin shield-with-person glyph).
- */
 export default function IconBox({
   icon,
   iconSet = "ionicons",

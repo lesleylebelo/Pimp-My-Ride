@@ -10,7 +10,7 @@ export async function login(email, password) {
  const { user } = await signInWithEmailAndPassword(auth, email.trim(), password);
  try {
   const snapshot = await getDocFromServer(doc(db, 'users', user.uid));
-  if (!snapshot.exists()) return user; // Partial registrations recover their own profile.
+  if (!snapshot.exists()) return user; 
   const role = snapshot.data().role;
   if (!['owner','shop','admin'].includes(role)) throw new Error('Account access is unavailable. Contact the project administrator.');
   if (role === 'admin' && (await getIdTokenResult(user,true)).claims.admin !== true) throw new Error('This account does not have administrator access.');
@@ -24,7 +24,7 @@ export async function register(form, role) {
  await createUserWithEmailAndPassword(auth, form.email.trim(), form.password);
  await completeProfile(form, role);
 }
-// Can be retried after a partial failure without creating another Auth account.
+
 export async function completeProfile(form, role) {
  await requireConnection();
  if (!['owner','shop'].includes(role)) throw new Error('This role cannot register.');
@@ -40,8 +40,7 @@ export async function completeProfile(form, role) {
   data.verificationStatus = 'pending';
  }
  await setDoc(doc(db,'users',user.uid), data);
- // Verification can also be resent from the account screen if this fails.
- try { await sendEmailVerification(user); } catch (_) { /* Resend remains available. */ }
+ try { await sendEmailVerification(user); } catch (_) {}
 }
 export async function uploadDocuments(files) {
  await requireConnection();
@@ -59,7 +58,6 @@ export async function uploadDocuments(files) {
   const blob = await response.blob();
   try { await uploadBytes(ref(storage,path), blob, {contentType:file.mimeType}); }
   finally { if (blob.close) blob.close(); }
-  // Store private paths, never public download-token URLs.
   await setDoc(doc(db,'users',user.uid,'documents',kind), {
    path, name:file.name, size:file.size, contentType:file.mimeType, uploadedAt:serverTimestamp(),
   });

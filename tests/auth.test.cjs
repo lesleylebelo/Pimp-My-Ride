@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const babel=require('@babel/core');
 const path=require('node:path');
-// Load the same dependency-free helpers used in the React Native screens.
+
 function load(file){const src=fs.readFileSync(file,'utf8');const {code}=babel.transformSync(src,{configFile:false,babelrc:false,plugins:[require.resolve('@babel/plugin-transform-modules-commonjs')]});const mod={exports:{}};new Function('require','module','exports',code)(name=>load(path.resolve(path.dirname(file),name+'.js')),mod,mod.exports);return mod.exports;}
 const {registrationErrors,fileError,accountStage}=load(path.resolve(__dirname,'../src/features/auth/utils/registration.js'));
 const valid={fullName:'Demo Owner',email:'owner@example.com',phone:'0821234567',password:'Password1234',confirmPassword:'Password1234',agreed:true};

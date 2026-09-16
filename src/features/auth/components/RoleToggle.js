@@ -3,10 +3,6 @@ import { View, Pressable, Text, StyleSheet } from "react-native";
 import colors from "../../../shared/theme/colors";
 import { radius, typography } from "../../../shared/theme/typography";
 
-/**
- * Two-way segmented control: "Vehicle Owner" | "Custom Shop"
- * role: "owner" | "shop"
- */
 export default function RoleToggle({ role, onChange }) {
   return (
     <View style={styles.container}>

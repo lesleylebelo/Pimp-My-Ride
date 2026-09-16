@@ -4,11 +4,6 @@ import { Ionicons } from "@expo/vector-icons";
 import colors from "../../../shared/theme/colors";
 import { spacing } from "../../../shared/theme/typography";
 
-/**
- * Lightweight top bar with a back chevron and a centered title, used on
- * Forgot Password / Reset Password screens (as opposed to the big hero
- * headers used on Sign In / Sign Up / Role Selection / Admin Sign In).
- */
 export default function AuthNavHeader({ title, onBack }) {
   return (
     <View style={styles.row}>

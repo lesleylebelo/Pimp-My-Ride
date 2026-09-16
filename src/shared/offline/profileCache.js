@@ -1,7 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 const PREFIX = '@pmr/landing/v1/';
 export const CACHE_AGE = 24 * 60 * 60 * 1000;
-// Display hints only. Never use this cache for API authorization or admin access.
 export function cacheRecord(uid, profile, now = Date.now()) {
  if (!uid || !['owner','shop'].includes(profile?.role)) return null;
  if (profile.role === 'shop' && profile.verificationStatus !== 'approved') return null;
