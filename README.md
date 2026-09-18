@@ -1,6 +1,6 @@
 # PimpMyRide
 
-A mobile marketplace connecting vehicle owners with **vehicle customization shops**.
+A mobile marketplace connecting vehicle owners with **verified vehicle customization shops**.
 
 PimpMyRide allows customers to manage multiple vehicles under one account, post service requests for their vehicles, and receive quotations from verified customization shops. Customers can compare quotations, choose a suitable shop, and book an appointment.
 
