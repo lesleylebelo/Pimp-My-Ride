@@ -64,7 +64,7 @@ export function LandingShell({ title, tabs, feature, showFeature, onClose, child
     setSignOutError('');
     try { await logout(); } catch (error) { setSignOutError(authError(error)); }
   }
-  // Fonts are packaged locally. Fall back to system text if font loading fails.
+  
   if (!loaded && !fontError) return <SafeAreaView style={ui.loading}><ActivityIndicator color={colors.primary} accessibilityLabel="Loading page" /></SafeAreaView>;
   return (
     <FontContext.Provider value={loaded}>

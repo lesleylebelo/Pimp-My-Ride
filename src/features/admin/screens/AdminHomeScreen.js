@@ -1,18 +1,20 @@
-import React from 'react';
-import { LandingButton, LandingShell, LandingText, ui, useLandingFeedback } from '../../../shared/components/landing/LandingUI';
-
-export default function AdminHomeScreen() {
-  const feedback = useLandingFeedback();
-  const soon = feedback.showFeature;
-  return <LandingShell title="Admin Overview" admin {...feedback}>
-    <LandingText weight="semibold" style={ui.green}>PimpMyRide administration</LandingText>
-    <LandingText style={ui.muted}>Review registrations and keep the marketplace running smoothly.</LandingText>
-    <LandingText style={ui.sample}>Example overview · Sample counts</LandingText>
-    <LandingText weight="semibold" style={{ fontSize: 22, lineHeight: 31 }}>1 pending application</LandingText>
-    <LandingText weight="semibold" style={[ui.green, { fontSize: 15, lineHeight: 22 }]}>1 open report</LandingText>
-    <LandingButton title="Review Shop Applications" onPress={() => soon('Shop applications')} />
-    {['Review Reported Content', 'Manage Vehicle Owners', 'Manage Shop Accounts', 'Recent Activity', 'Platform Summary'].map(title =>
-      <LandingButton key={title} title={title} outline onPress={() => soon(title)} />
-    )}
-  </LandingShell>;
+import React,{useState} from 'react';
+import {Text} from 'react-native';
+import {useAuth} from '../../auth/context/AuthContext';
+import {useAdminData} from '../services/useAdminData';
+import {Page,Card,Button,Notice,styles} from '../components/AdminUI';
+export default function AdminHomeScreen({navigation}){
+ const [signOutError,setSignOutError]=useState('');
+ const {logout}=useAuth(),{data,busy,error,refresh}=useAdminData('dashboard');
+ return <Page title="Control centre"><Text style={styles.muted}>Manage the people and services behind PimpMyRide.</Text><Notice busy={busy} error={error||signOutError}/>
+ {data&&<Card><Text style={styles.heading}>{data.accounts} accounts</Text><Text>{data.pending} shops awaiting review · {data.suspended} suspended accounts</Text><Text>{data.categories} active service categories</Text></Card>}
+ <Button title="Accounts & access" onPress={()=>navigation.navigate('AdminAccounts',{filter:'all'})}/>
+ <Button title="Review shop applications" onPress={()=>navigation.navigate('AdminAccounts',{filter:'pending'})}/>
+ <Button title="Service categories" onPress={()=>navigation.navigate('AdminCategories')}/>
+ <Button title="Online & last seen" onPress={()=>navigation.navigate('AdminPresence')}/>
+ <Button title="Audit log" onPress={()=>navigation.navigate('AdminAudit')}/>
+ <Button title="Confirm identity for sensitive actions" onPress={()=>navigation.navigate('AdminConfirm')}/>
+ <Button title="Refresh overview" disabled={busy} onPress={refresh}/>
+ <Button title="Sign out" onPress={()=>logout().catch(()=>setSignOutError('Could not complete sign-out. Please try again.'))}/>
+ </Page>;
 }

@@ -3,7 +3,7 @@ import { useAuth } from '../features/auth/context/AuthContext';
 import AccountScreen from '../features/auth/screens/AccountScreen';
 import OwnerHomeScreen from '../features/customer/screens/OwnerHomeScreen';
 import ShopHomeScreen from '../features/shop/screens/ShopHomeScreen';
-import AdminHomeScreen from '../features/admin/screens/AdminHomeScreen';
+import AdminHomeScreen from '../features/admin/AdminNavigator';
 import { getAuthenticatedRoute } from './landingRoute';
 import LegalScreen from '../features/auth/screens/LegalScreen';
 import React from "react";

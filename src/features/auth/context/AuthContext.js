@@ -1,3 +1,4 @@
+import {endPresence} from '../../activity/sessionLifecycle';
 import React, {createContext, useCallback, useContext, useEffect, useRef, useState} from 'react';
 import {AppState} from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
@@ -25,6 +26,7 @@ export function AuthProvider({children}) {
   try {
    if(u){
     if(offline)throw Object.assign(new Error('Offline'),{code:'app/offline'});
+   
     await timeout(reload(u));
     const token=await timeout(getIdTokenResult(u,true));
     const snapshot=await timeout(getDocFromServer(doc(firebase().db,'users',u.uid)));
@@ -33,6 +35,7 @@ export function AuthProvider({children}) {
      profile=null;error='Administrator authorization is missing. Contact the project administrator.';
     }
     if(generation===epoch.current){
+     
      if(u.emailVerified && !error)await saveProfileCache(u.uid,profile).catch(()=>{});
      else await clearProfileCache(u.uid).catch(()=>{});
     }
@@ -55,6 +58,7 @@ export function AuthProvider({children}) {
    }
   }finally{if(generation===epoch.current)inFlight.current=false;}
   if(generation!==epoch.current || !active.current || firebase().auth.currentUser?.uid!==u?.uid)return;
+ 
   setState({user:u ? {uid:u.uid,email:u.email,emailVerified:u.emailVerified} : null,profile,error,offline,cachedAt,initializing:false});
  },[]);
  useEffect(()=>{
@@ -73,6 +77,7 @@ export function AuthProvider({children}) {
  },[sync]);
  useEffect(()=>{
   if(!state.user)return;
+  
   const timer=setInterval(()=>{
    if(AppState.currentState==='active' && online.current && !lock.current && !inFlight.current)void sync();
   },state.user.emailVerified?60000:5000);
@@ -101,6 +106,7 @@ export function AuthProvider({children}) {
  async function logout(){
   return run(async()=>{
    const uid=firebase().auth.currentUser?.uid;
+   await endPresence();
    await signOut(firebase().auth);
    await clearProfileCache(uid);
   });

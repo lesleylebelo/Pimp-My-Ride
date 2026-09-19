@@ -1,4 +1,3 @@
-// Matches one or more consecutive percent-encoded bytes (e.g. `%C3%A5`).
 const token = '%[a-f0-9]{2}';
 const multiMatcher = new RegExp(`(${token})+`, 'gi');
 
@@ -107,13 +106,11 @@ function decode(input) {
 }
 
 function customDecodeURIComponent(input) {
-	
 	const replaceMap = {
 		'%FE%FF': '\uFFFD\uFFFD',
 		'%FF%FE': '\uFFFD\uFFFD',
 	};
 
-	
 	let match = multiMatcher.exec(input);
 
 	while (match) {

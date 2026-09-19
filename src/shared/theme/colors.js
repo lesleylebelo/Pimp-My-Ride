@@ -1,3 +1,4 @@
+// Colours sampled directly from the Figma prototype exports.
 // Primary green: rgb(14,59,44) -> #0E3B2C
 // Page background: rgb(242,242,242) -> #F2F2F2
 

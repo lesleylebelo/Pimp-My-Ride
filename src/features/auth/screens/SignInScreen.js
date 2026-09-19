@@ -1,3 +1,4 @@
+import {useLoginCooldown} from '../hooks/useLoginCooldown';
 import { useAuth } from '../context/AuthContext';
 import { login } from '../services/accounts';
 import { authError } from '../utils/authErrors';
@@ -21,6 +22,7 @@ import { validateEmailField } from "../utils/validators";
 
 export default function SignInScreen({ navigation, route }) {
   const { run, offline } = useAuth();
+  const cooldown = useLoginCooldown();
   const [submitError, setSubmitError] = useState('');
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -29,7 +31,7 @@ export default function SignInScreen({ navigation, route }) {
 
 
   const handleSignIn = async () => {
-    if (loading) return;
+    if (loading || cooldown.seconds !== 0) return;
     setSubmitError('');
     const emailError = validateEmailField(email);
     const passwordError = !password ? "Password is required." : null;
@@ -106,12 +108,12 @@ export default function SignInScreen({ navigation, route }) {
           </Pressable>
 
           <Text>{offline ? "You are offline. Connect to sign in." : "Your account determines which workspace opens."}</Text>
-          <Text accessibilityRole="alert" style={{color:colors.error,marginBottom:12}}>{submitError}</Text>
+          <Text accessibilityRole="alert" style={{color:colors.error,marginBottom:12}}>{cooldown.error || submitError}</Text>
           <PrimaryButton
-            title="Sign In"
+            title={cooldown.seconds > 0 ? `Try again in ${cooldown.seconds}s` : 'Sign In'}
             onPress={handleSignIn}
             loading={loading}
-            disabled={offline}
+            disabled={offline || cooldown.seconds !== 0}
             style={{ marginTop: spacing.sm }}
           />
 
