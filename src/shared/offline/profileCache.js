@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const PREFIX = '@pmr/landing/v1/';
 export const CACHE_AGE = 24 * 60 * 60 * 1000;
 export function cacheRecord(uid, profile, now = Date.now()) {
+ if (profile?.accountStatus && profile.accountStatus !== 'active') return null;
  if (!uid || !['owner','shop'].includes(profile?.role)) return null;
  if (profile.role === 'shop' && profile.verificationStatus !== 'approved') return null;
  return {version:1, uid, savedAt:now, profile:{role:profile.role,

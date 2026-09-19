@@ -29,6 +29,7 @@ export function registrationErrors(form, role, step) {
 }
 export function accountStage(user, profile) {
  if (!profile) return 'incomplete';
+ if (profile.accountStatus && profile.accountStatus !== 'active') return 'restricted';
  if (!['owner','shop','admin'].includes(profile.role)) return 'invalid';
  if (!user?.emailVerified) return 'verify';
  if (profile.role === 'shop' && profile.verificationStatus !== 'approved') return profile.verificationStatus === 'rejected' ? 'rejected' : 'pending';

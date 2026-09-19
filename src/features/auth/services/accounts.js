@@ -1,3 +1,4 @@
+import {guardedLogin} from './loginCooldown';
 import { requireConnection } from '../../../shared/services/network';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, getIdTokenResult, sendEmailVerification } from 'firebase/auth';
 import { doc, getDocFromServer, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -7,10 +8,11 @@ import { DOCUMENT_KEYS, fileError } from '../utils/registration';
 export async function login(email, password) {
  await requireConnection();
  const { auth, db } = firebase();
- const { user } = await signInWithEmailAndPassword(auth, email.trim(), password);
+ const { user } = await guardedLogin(() => signInWithEmailAndPassword(auth, email.trim(), password));
  try {
   const snapshot = await getDocFromServer(doc(db, 'users', user.uid));
   if (!snapshot.exists()) return user; 
+  if (snapshot.data().accountStatus && snapshot.data().accountStatus !== 'active') throw new Error('This account is restricted. Contact the project administrator.');
   const role = snapshot.data().role;
   if (!['owner','shop','admin'].includes(role)) throw new Error('Account access is unavailable. Contact the project administrator.');
   if (role === 'admin' && (await getIdTokenResult(user,true)).claims.admin !== true) throw new Error('This account does not have administrator access.');
@@ -40,7 +42,8 @@ export async function completeProfile(form, role) {
   data.verificationStatus = 'pending';
  }
  await setDoc(doc(db,'users',user.uid), data);
- try { await sendEmailVerification(user); } catch (_) {}
+ 
+ try { await sendEmailVerification(user); } catch (_) {  }
 }
 export async function uploadDocuments(files) {
  await requireConnection();
@@ -58,6 +61,7 @@ export async function uploadDocuments(files) {
   const blob = await response.blob();
   try { await uploadBytes(ref(storage,path), blob, {contentType:file.mimeType}); }
   finally { if (blob.close) blob.close(); }
+  
   await setDoc(doc(db,'users',user.uid,'documents',kind), {
    path, name:file.name, size:file.size, contentType:file.mimeType, uploadedAt:serverTimestamp(),
   });

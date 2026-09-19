@@ -72,6 +72,7 @@ export default function SignUpScreen({ navigation, route }) {
       return true;
     });
     return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, navigation]));
 
   const handleRoleChange = (nextRole) => {

@@ -1,0 +1,10 @@
+import React from 'react';
+import {View,Text,ScrollView,Pressable,TextInput,StyleSheet,ActivityIndicator} from 'react-native';
+import {SafeAreaView} from 'react-native-safe-area-context';
+export const styles=StyleSheet.create({page:{padding:20,gap:14,paddingBottom:40},title:{fontSize:26,fontWeight:'800',color:'#103C2E'},card:{backgroundColor:'#fff',borderRadius:14,padding:16,gap:10,borderWidth:1,borderColor:'#E0E6E2'},heading:{fontSize:18,fontWeight:'700',color:'#173C30'},muted:{color:'#52635C',lineHeight:21},row:{flexDirection:'row',flexWrap:'wrap',gap:8},input:{backgroundColor:'#fff',borderWidth:1,borderColor:'#BCCBC2',padding:12,borderRadius:8,color:'#142A20',minHeight:46},button:{backgroundColor:'#103C2E',padding:13,borderRadius:9,alignItems:'center'},danger:{backgroundColor:'#8A2929'}});
+export function Page({title,children}){return <SafeAreaView style={{flex:1,backgroundColor:'#F2F5F3'}} edges={['bottom']}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}><Text style={styles.title}>{title}</Text>{children}</ScrollView></SafeAreaView>;}
+export const Card=({children})=><View style={styles.card}>{children}</View>;
+export function Button({title,onPress,disabled,danger}){return <Pressable accessibilityRole="button" accessibilityState={{disabled:!!disabled}} disabled={disabled} onPress={onPress} style={[styles.button,danger&&styles.danger,disabled&&{opacity:0.45}]}><Text style={{color:'#fff',fontWeight:'700'}}>{title}</Text></Pressable>;}
+export function Field({label,value,onChangeText,...props}){return <View style={{gap:5}}><Text>{label}</Text><TextInput accessibilityLabel={label} style={styles.input} value={value||''} onChangeText={onChangeText} {...props}/></View>;}
+export function Notice({error,busy}){return <>{busy&&<ActivityIndicator color="#103C2E"/>}{!!error&&<Text accessibilityRole="alert" style={{color:'#8A2929',lineHeight:21}}>{error}</Text>}</>;}
+export const when=value=>value?new Date(value).toLocaleString():'Not recorded';

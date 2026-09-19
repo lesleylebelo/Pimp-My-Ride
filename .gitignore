@@ -48,11 +48,6 @@ yarn-error.*
 *.log
 *service-account*.json
 
-# Local environment configuration
-.env
-.env.*
-!.env.example
-
 # Firebase administrator credentials
 *firebase-adminsdk*.json
 *service-account*.json
@@ -75,3 +70,4 @@ node_modules/
 dist/
 web-build/
 *.log
+

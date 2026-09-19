@@ -10,6 +10,7 @@ async function setup({role='owner',verified=true,admin=false,cached=null}={}){
  let claims={admin};let reloadError=null;let nextVerified=verified;const cleared=[];let stopped=0;
  const app={currentState:'active',addEventListener:(_,fn)=>{appListener=fn;return {remove(){stopped++;}};}};
  const mocks={
+ '../../activity/sessionLifecycle':{endPresence:async()=>{}},
  'react':React,'react/jsx-runtime':require('react/jsx-runtime'),
  'react-native':{AppState:app},'@react-native-community/netinfo':{addEventListener:fn=>{networkListener=fn;return()=>stopped++;}},
  'firebase/auth':{onAuthStateChanged:(_,fn)=>{authListener=fn;queueMicrotask(fn);return()=>stopped++;},reload:async()=>{if(reloadError)throw reloadError;user.emailVerified=nextVerified;},getIdTokenResult:async()=>({claims}),signOut:async()=>{auth.currentUser=null;authListener();}},

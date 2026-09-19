@@ -16,3 +16,5 @@ test('all roles require verification',()=>{for(const role of ['owner','shop','ad
 test('owner and admin verified sessions are ready',()=>{for(const role of ['owner','admin'])assert.equal(accountStage({emailVerified:true},{role}),'ready');});
 test('shop approval gating fails closed for unknown state',()=>{for(const status of ['pending',undefined,'unexpected'])assert.equal(accountStage({emailVerified:true},{role:'shop',verificationStatus:status}),'pending');assert.equal(accountStage({emailVerified:true},{role:'shop',verificationStatus:'approved'}),'ready');assert.equal(accountStage({emailVerified:true},{role:'shop',verificationStatus:'rejected'}),'rejected');});
 test('missing/unknown profiles cannot reach welcome state',()=>{assert.equal(accountStage({emailVerified:true},null),'incomplete');assert.equal(accountStage({emailVerified:true},{role:'root'}),'invalid');});
+
+test('suspended and archived accounts cannot reach any landing page',()=>{for(const role of ['owner','shop','admin'])for(const accountStatus of ['suspended','archived'])assert.equal(accountStage({emailVerified:true},{role,accountStatus,verificationStatus:'approved'}),'restricted');});
