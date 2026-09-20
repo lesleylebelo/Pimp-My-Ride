@@ -3,9 +3,9 @@
 // Page background: rgb(242,242,242) -> #F2F2F2
 
 export const colors = {
-  primary: "#0E3B2C", 
+  primary: "#0E3B2C", // deep forest green - header/buttons/active states
   primaryPressed: "#0B2E22",
-  background: "#F2F2F2", 
+  background: "#F2F2F2", // light page background
   white: "#FFFFFF",
   black: "#000000",
   textPrimary: "#111111",

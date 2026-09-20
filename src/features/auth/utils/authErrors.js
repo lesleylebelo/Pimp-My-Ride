@@ -1,4 +1,5 @@
 export function authError(error) {
+ if(error?.code?.startsWith('api/'))return error.message;
  const messages = {
  'auth/invalid-credential': 'Email or password is incorrect.',
  'auth/wrong-password': 'Email or password is incorrect.',

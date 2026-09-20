@@ -3,7 +3,6 @@ import { initializeAuth, getAuth, getReactNativePersistence } from 'firebase/aut
 import {securePersistence} from './securePersistence';
 import { Platform } from 'react-native';
 import { getFirestore } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
 const config = {
  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -21,6 +20,6 @@ export function firebase() {
  let auth;
  try { auth = Platform.OS === 'web' ? getAuth(app) : initializeAuth(app, { persistence: getReactNativePersistence(securePersistence) }); }
  catch (error) { if (error.code !== 'auth/already-initialized') throw error; auth = getAuth(app); }
- instance = { auth, db: getFirestore(app), storage: getStorage(app) };
+ instance = { auth, db: getFirestore(app) };
  return instance;
 }
