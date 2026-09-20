@@ -48,26 +48,29 @@ yarn-error.*
 *.log
 *service-account*.json
 
-# Firebase administrator credentials
+# Private server credentials and local emulators
 *firebase-adminsdk*.json
-*service-account*.json
-serviceAccount*.json
-credentials.json
+service-account*.json
+functions/node_modules/
+*-debug.log
 
-# Private keys and signing credentials
-*.pem
-*.key
-*.p8
-*.p12
-*.jks
-*.keystore
-*.mobileprovision
+# Backend credentials and dependencies
+backend/node_modules/
+backend/.env
+backend/.env.example
+*admin-credentials*.json
 
-# Dependencies, generated files and logs
-node_modules/
-.expo/
-.firebase/
-dist/
-web-build/
-*.log
+App.json
+babel.config.js
+eas.json
+firebase.json
+firestore.indexes.json
+firestore.rules
+package-lock.json
+package.json
+render.yaml
+stirge.rules
 
+.claude/
+
+assets/

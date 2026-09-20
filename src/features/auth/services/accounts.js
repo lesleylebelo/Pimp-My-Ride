@@ -1,8 +1,9 @@
+import {apiRequest} from '../../../shared/services/api';
+import {Platform} from 'react-native';
 import {guardedLogin} from './loginCooldown';
 import { requireConnection } from '../../../shared/services/network';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, getIdTokenResult, sendEmailVerification } from 'firebase/auth';
-import { doc, getDocFromServer, setDoc, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadBytes } from 'firebase/storage';
+import { doc, getDocFromServer } from 'firebase/firestore';
 import { firebase } from '../../../shared/services/firebase';
 import { DOCUMENT_KEYS, fileError } from '../utils/registration';
 export async function login(email, password) {
@@ -35,19 +36,18 @@ export async function completeProfile(form, role) {
  if (!user) throw new Error('Please sign in again.');
  const data = {
   fullName: form.fullName.trim(), email: user.email, phone: form.phone.replace(/[\s()-]/g,''), role,
-  createdAt: serverTimestamp(), termsVersion: 'academic-v1', termsAcceptedAt: serverTimestamp(),
+  termsVersion: 'academic-v2', agreed: form.agreed === true,
  };
  if (role === 'shop') {
   data.shop = Object.fromEntries(['shopName','regNumber','address','city','province','services'].map(k => [k, form[k].trim()]));
   data.verificationStatus = 'pending';
  }
- await setDoc(doc(db,'users',user.uid), data);
- 
+ await apiRequest('profile',data);
  try { await sendEmailVerification(user); } catch (_) {  }
 }
 export async function uploadDocuments(files) {
  await requireConnection();
- const { auth, storage, db } = firebase();
+ const { auth } = firebase();
  const user = auth.currentUser;
  if (!user) throw new Error('Please sign in again.');
  if (!user.emailVerified) throw new Error('Verify your email before uploading shop documents.');
@@ -55,15 +55,10 @@ export async function uploadDocuments(files) {
   const error = fileError(files[kind]); if (error) throw new Error(error);
  }
  for (const kind of DOCUMENT_KEYS) {
-  const file = files[kind];
-  const path = `verification/${user.uid}/${kind}`;
-  const response = await fetch(file.uri);
-  const blob = await response.blob();
-  try { await uploadBytes(ref(storage,path), blob, {contentType:file.mimeType}); }
-  finally { if (blob.close) blob.close(); }
-  
-  await setDoc(doc(db,'users',user.uid,'documents',kind), {
-   path, name:file.name, size:file.size, contentType:file.mimeType, uploadedAt:serverTimestamp(),
-  });
+  const file=files[kind],body=new FormData();
+  if(Platform.OS==='web'){
+   const blob=await (await fetch(file.uri)).blob();body.append('file',blob,file.name);
+  }else body.append('file',{uri:file.uri,name:file.name,type:file.mimeType});
+  await apiRequest(`documents/${kind}`,body,{multipart:true});
  }
 }

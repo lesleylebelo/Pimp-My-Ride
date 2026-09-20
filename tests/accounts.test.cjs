@@ -4,6 +4,8 @@ const fs=require('fs'),path=require('path'),babel=require('@babel/core');
 function setup(profile,claims={}) {
  const calls=[];const user={uid:'u1',email:'demo@example.com',emailVerified:true};const instance={auth:{currentUser:user},db:{},storage:{}};
  const mocks={
+ 'react-native':{Platform:{OS:'android'}},
+ '../../../shared/services/api':{apiRequest:async(path,data)=>calls.push(['profile',data])},
  './loginCooldown':{guardedLogin:async fn=>fn()},
  '../../../shared/services/network':{requireConnection:async()=>{}},
  'firebase/auth':{
@@ -22,6 +24,6 @@ test('one sign-in works for owner and shop without a role argument',async()=>{fo
 test('invalid stored role is rejected and signs out',async()=>{const s=setup({role:'root'});await assert.rejects(()=>s.login('demo@example.com','password'),/unavailable/);assert.ok(s.calls.some(c=>c[0]==='logout'));});
 test('admin requires both profile role and trusted claim',async()=>{const denied=setup({role:'admin'});await assert.rejects(()=>denied.login('demo@example.com','password','admin'),/administrator access/);assert.ok(denied.calls.some(c=>c[0]==='logout'));const allowed=setup({role:'admin'},{admin:true});assert.equal((await allowed.login('demo@example.com','password','admin')).uid,'u1');});
 test('admin self-registration is rejected before account creation',async()=>{const s=setup(null);await assert.rejects(()=>s.register({},'admin'),/cannot register/);assert.equal(s.calls.length,0);});
-test('new owner profile excludes passwords and records consent timestamps',async()=>{const s=setup(null);await s.register({fullName:' Demo ',phone:'0821234567',email:'demo@example.com',password:'secret'},'owner');const data=s.calls.find(c=>c[0]==='profile')[1];assert.equal(data.fullName,'Demo');assert.equal(data.role,'owner');assert.equal(data.termsAcceptedAt,'SERVER_TIMESTAMP');assert.equal(data.password,undefined);assert.ok(s.calls.some(c=>c[0]==='verify'));});
+test('new owner sends consent without passwords to the profile API',async()=>{const s=setup(null);await s.register({fullName:' Demo ',phone:'0821234567',email:'demo@example.com',password:'secret',agreed:true},'owner');const data=s.calls.find(c=>c[0]==='profile')[1];assert.equal(data.fullName,'Demo');assert.equal(data.role,'owner');assert.equal(data.agreed,true);assert.equal(data.termsVersion,'academic-v2');assert.equal(data.password,undefined);assert.ok(s.calls.some(c=>c[0]==='verify'));});
 test('incomplete accounts can recover their own profile',async()=>{const s=setup(null);assert.equal((await s.login('demo@example.com','password')).uid,'u1');});
 test('invalid document set cannot trigger uploads',async()=>{const s=setup({role:'shop'});await assert.rejects(()=>s.uploadDocuments({}),/Choose a document/);assert.ok(!s.calls.some(c=>c[0]==='upload'));});

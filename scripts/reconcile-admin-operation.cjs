@@ -1,4 +1,3 @@
-// Trusted operator only. Never import this script into the app.
 const {initializeApp,applicationDefault}=require('firebase-admin/app');
 const {getAuth}=require('firebase-admin/auth');
 const {getFirestore,FieldValue}=require('firebase-admin/firestore');

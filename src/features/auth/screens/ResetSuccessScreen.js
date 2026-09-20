@@ -8,7 +8,6 @@ import { spacing } from "../../../shared/theme/typography";
 
 export default function ResetSuccessScreen({ navigation }) {
   const handleBackToSignIn = () => {
-   
     navigation.reset({
       index: 0,
       routes: [

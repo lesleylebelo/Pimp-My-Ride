@@ -1,14 +1,9 @@
-const {initializeApp}=require('firebase-admin/app');
-const {getAuth}=require('firebase-admin/auth');
-const {getFirestore,FieldValue,Timestamp,FieldPath}=require('firebase-admin/firestore');
-const {getStorage}=require('firebase-admin/storage');
-const {onCall,HttpsError}=require('firebase-functions/v2/https');
-const {onDocumentCreatedWithAuthContext,onDocumentWrittenWithAuthContext}=require('firebase-functions/v2/firestore');
-const {createHash}=require('node:crypto');
+const {FieldValue,Timestamp,FieldPath}=require('firebase-admin/firestore');
+const {ApiError}=require('./errors.cjs');
 const D=require('./domain.cjs');
-initializeApp();
-const db=getFirestore(),auth=getAuth();
-const options={region:'us-central1',maxInstances:10,timeoutSeconds:30};
+const {randomUUID}=require('node:crypto');
+const {validateFile}=require('./files.cjs');
+function createServices({db,auth,storage}){
 const stamp=()=>FieldValue.serverTimestamp();
 const audit=(actor,action,target,details={})=>({actor,action,target,details,createdAt:stamp()});
 async function actor(request,admin=false){
@@ -17,7 +12,6 @@ async function actor(request,admin=false){
  const [profile,user]=await Promise.all([db.doc(`users/${uid}`).get(),auth.getUser(uid)]);
  const p=profile.data();
  if(!['owner','shop','admin'].includes(p?.role)||!user.emailVerified||!request.auth.token.email_verified||user.disabled||!D.active(p))D.fail('Account access is unavailable.','permission-denied');
- // Compare whole seconds because Firebase auth_time has second precision.
  if(!Number.isFinite(Number(request.auth.token.auth_time))||Number(request.auth.token.auth_time)<Math.floor(Math.max(Date.parse(user.tokensValidAfterTime)||0,Date.parse(user.metadata.creationTime)||0)/1000))D.fail('Sign in again.','unauthenticated');
  if(admin&&(request.auth.token.admin!==true||user.customClaims?.admin!==true||p.role!=='admin'))D.fail('Administrator access required.','permission-denied');
  return {uid,profile:p};
@@ -28,7 +22,7 @@ function rows(snapshot){return snapshot.docs.map(d=>({id:d.id,...serialize(d.dat
 async function recorded(actorId,action,target,change){
  await db.runTransaction(async tx=>{await change(tx);tx.create(db.collection('auditLogs').doc(),audit(actorId,action,target));});
 }
-exports.adminApi=onCall(options,async request=>{
+async function adminApi(request){
  const a=await actor(request,true),input=request.data||{},op=input.op;
  if(op==='dashboard'){
   const counts=await Promise.all([db.collection('users'),db.collection('users').where('role','==','shop').where('verificationStatus','==','pending'),db.collection('users').where('accountStatus','==','suspended'),db.collection('serviceCategories').where('archived','==',false)].map(q=>q.count().get()));
@@ -73,9 +67,9 @@ exports.adminApi=onCall(options,async request=>{
  const p=before.data();
  if(op==='document'){
   if(!D.kinds.includes(input.kind)||p.role!=='shop')D.fail('Invalid document.');
-  const file=getStorage().bucket().file(`verification/${uid}/${input.kind}`);
-  const [exists]=await file.exists();if(!exists)D.fail('Document has not been uploaded.','not-found');
-  const [url]=await file.getSignedUrl({action:'read',expires:Date.now()+60000,version:'v4'});
+  const record=(await ref.collection('documents').doc(input.kind).get()).data();
+  if(!record||record.provider!=='supabase')D.fail('Please ask the shop to upload this document again.','not-found');
+  const url=await storage.signedUrl(record.path);
   await db.collection('auditLogs').add(audit(a.uid,'document.view',uid,{kind:input.kind}));
   return {url};
  }
@@ -102,9 +96,10 @@ exports.adminApi=onCall(options,async request=>{
    if(input.status==='approved'){
     const u=await auth.getUser(uid);if(!u.emailVerified)D.fail('Shop email must be verified first.');
     for(const kind of D.kinds){
-     const file=getStorage().bucket().file(`verification/${uid}/${kind}`);
-     const [exists]=await file.exists();if(!exists)D.fail(`Missing ${kind}.`);
-     const [metadata]=await file.getMetadata();if(!D.validObject(metadata))D.fail(`Invalid ${kind}.`);
+     const record=(await ref.collection('documents').doc(kind).get()).data();
+     if(!record||record.provider!=='supabase')D.fail(`Missing ${kind}. Upload it again.`);
+     const metadata=await storage.inspect(record.path);
+     if(!D.validObject(metadata)||Number(metadata.size)!==record.size||metadata.contentType!==record.contentType)D.fail(`Invalid ${kind}.`);
     }
    }
    await db.runTransaction(async tx=>{
@@ -125,7 +120,6 @@ exports.adminApi=onCall(options,async request=>{
  if(op==='status'){
   if(!['active','suspended','archived'].includes(input.status))D.fail('Invalid account status.');
   const reason=D.text(input.reason,'Reason',500),operation=db.collection('adminOperations').doc();
-  // A per-account transaction lock prevents overlapping Auth/Firestore changes.
   await db.runTransaction(async tx=>{
    const current=await tx.get(ref);D.protect(a.uid,uid,current.data());
    if(current.data().statusOperation||current.data().reviewOperation)D.fail('An account operation needs completion. Contact the operator.','failed-precondition');
@@ -143,13 +137,13 @@ exports.adminApi=onCall(options,async request=>{
   }catch(e){
    await operation.update({status:'failed',errorCode:String(e.code||'unknown'),completedAt:stamp()});
    await db.collection('auditLogs').add(audit(a.uid,'account.statusFailed',uid,{operation:operation.id}));
-   throw new HttpsError('internal','Account remains restricted. An operator must reconcile the failed operation before retrying.');
+   throw new ApiError('internal','Account remains restricted. An operator must reconcile the failed operation before retrying.');
   }
   return {ok:true};
  }
  D.fail('Unknown operation.');
-});
-exports.sessionEvent=onCall(options,async request=>{
+}
+async function sessionEvent(request){
  const a=await actor(request),input=request.data||{},session=D.id(input.session);
  if(!['heartbeat','offline'].includes(input.state))D.fail('Invalid session event.');
  const ref=db.doc(`presence/${a.uid}`),sessionRef=ref.collection('sessions').doc(session),now=Date.now();
@@ -158,7 +152,6 @@ exports.sessionEvent=onCall(options,async request=>{
   const old=previous.data(),sessions={...(aggregate.data()?.sessions||{})};
   for(const [key,deadline] of Object.entries(sessions))if(deadline<=now)delete sessions[key];
   if(input.state==='heartbeat')sessions[session]=now+90000;else delete sessions[session];
-  // Bound profile size for a user who opens many concurrent clients.
   const live=Object.fromEntries(Object.entries(sessions).sort((a,b)=>b[1]-a[1]).slice(0,20));
   if(input.state==='heartbeat'&&old?.state==='heartbeat'&&now-old.lastSeen.toMillis()<20000)return;
   tx.set(sessionRef,{state:input.state,lastSeen:stamp(),expiresAt:Timestamp.fromMillis(now+86400000)});
@@ -167,12 +160,55 @@ exports.sessionEvent=onCall(options,async request=>{
   const ending=input.state==='offline'&&old?.state==='heartbeat';
   if(beginning||ending)tx.create(db.collection('auditLogs').doc(),audit(a.uid,beginning?'session.active':'session.inactive',a.uid));
  });return {ok:true};
-});
-exports.profileCreated=onDocumentCreatedWithAuthContext({...options,document:'users/{uid}'},async event=>{
- if(!event.data)return;const id=createHash('sha256').update(event.id).digest('hex');
- await db.doc(`auditLogs/${id}`).set({...audit(event.authId||'system','profile.created',event.params.uid,{role:event.data.data().role||'unknown',authType:event.authType||'unknown'}),createdAt:event.data.createTime});
-});
-exports.documentRecorded=onDocumentWrittenWithAuthContext({...options,document:'users/{uid}/documents/{kind}'},async event=>{
- if(!event.data?.after.exists)return;const id=createHash('sha256').update(event.id).digest('hex');
- await db.doc(`auditLogs/${id}`).set({...audit(event.authId||'system','document.recorded',event.params.uid,{kind:event.params.kind}),createdAt:event.data.after.updateTime});
-});
+}
+
+async function completeProfile(request){
+ if(!request.auth)D.fail('Sign in to continue.','unauthenticated');
+ const uid=request.auth.uid,input=request.data||{},u=await auth.getUser(uid);
+ if(u.disabled)D.fail('Account is disabled.','permission-denied');
+ if(!['owner','shop'].includes(input.role))D.fail('This role cannot register.');
+ if(input.agreed!==true||input.termsVersion!=='academic-v2')D.fail('Accept the terms and privacy notice.');
+ const fields={...D.editable(input),email:u.email,role:input.role,createdAt:stamp(),termsVersion:'academic-v2',termsAcceptedAt:stamp()};
+ if(input.role==='shop')Object.assign(fields,{shop:D.shop(input.shop),verificationStatus:'pending'});
+ const ref=db.doc(`users/${uid}`);
+ return db.runTransaction(async tx=>{
+  const existing=await tx.get(ref);
+  if(existing.exists){if(existing.data().role!==input.role)D.fail('An account profile already exists.','already-exists');return {ok:true};}
+  tx.create(ref,fields);tx.create(db.collection('auditLogs').doc(),audit(uid,'profile.created',uid,{role:fields.role}));return {ok:true};
+ });
+}
+async function checkUpload(request){
+ const a=await actor(request);
+ if(a.profile.role!=='shop'||a.profile.verificationStatus!=='pending')D.fail('Only a verified pending shop may upload documents.','permission-denied');
+ if(!D.kinds.includes(request.kind))D.fail('Invalid document kind.');
+ return a;
+}
+async function uploadDocument(request){
+ const a=await checkUpload(request),file=validateFile(request.file),kind=request.kind;
+ const path=`verification/${a.uid}/${kind}/${randomUUID()}`;
+ try{await storage.upload(path,file.buffer,file.contentType);}
+ catch(e){await storage.remove(path).catch(()=>{});throw e;}
+ const ref=db.doc(`users/${a.uid}`),record=ref.collection('documents').doc(kind);
+ let previous;
+ try{
+  await db.runTransaction(async tx=>{
+   const [p,old]=await Promise.all([tx.get(ref),tx.get(record)]);
+   if(!D.active(p.data())||p.data().role!=='shop'||p.data().verificationStatus!=='pending')D.fail('Shop access changed during upload.','permission-denied');
+   previous=old.data();
+   tx.set(record,{provider:'supabase',path,name:file.name,size:file.buffer.length,contentType:file.contentType,uploadedAt:stamp()});
+   tx.create(db.collection('auditLogs').doc(),audit(a.uid,'document.recorded',a.uid,{kind}));
+  });
+ }catch(e){
+  let current;
+  try{current=(await record.get()).data();}
+  catch{throw new ApiError('unavailable','Upload result could not be confirmed. Refresh before retrying.');}
+  if(current?.path!==path){await storage.remove(path).catch(()=>{});throw e;}
+ }
+ if(previous?.provider==='supabase'&&previous.path!==path){
+  try{await storage.remove(previous.path);}catch{await db.collection('storageCleanup').add({path:previous.path,createdAt:stamp()});}
+ }
+ return {ok:true,kind};
+}
+return {adminApi,sessionEvent,completeProfile,checkUpload,uploadDocument};
+}
+module.exports={createServices};

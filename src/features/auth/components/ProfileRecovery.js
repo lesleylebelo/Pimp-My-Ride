@@ -29,7 +29,7 @@ export default function ProfileRecovery() {
  <Text>Finish saving your profile using the account you already created.</Text>
  <RoleToggle role={role} onChange={setRole}/>
  {['fullName','phone',...(role==='shop'?['shopName','regNumber','address','city','province','services']:[])].map(key=><AppTextInput key={key} label={{fullName:'Full name',phone:'Phone number',shopName:'Shop name',regNumber:'Registration number',address:'Address',city:'City',province:'Province',services:'Services offered'}[key]} value={form[key]||''} error={issues[key]} onChangeText={value=>change(key,value)}/>)}
- <Text>This academic demo stores your account and shop details in Firebase for account management and administrator review. Use fictional sample documents. Contact the student project team for correction or deletion. No real transactions are offered.</Text>
+ <Text>This academic demo stores account and shop details in Firebase, verification files in private Supabase Storage, and processes requests through a backend hosted on Render. Use fictional sample documents. Contact the student project team for correction or deletion. No real transactions are offered.</Text>
  <Pressable accessibilityRole="checkbox" accessibilityState={{checked:form.agreed}} onPress={()=>setForm(f=>({...f,agreed:!f.agreed}))}><Text>{form.agreed?'☑':'☐'} I accept these academic demo terms and privacy notice.</Text></Pressable>
  <Text accessibilityRole="alert" style={{color:'#C0392B'}}>{error}</Text>
  <PrimaryButton title="Save profile" loading={busy} disabled={offline} onPress={save}/>

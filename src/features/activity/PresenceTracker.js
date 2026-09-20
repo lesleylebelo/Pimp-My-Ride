@@ -2,7 +2,7 @@ import {useEffect} from 'react';
 import {firebase} from '../../shared/services/firebase';
 import {AppState} from 'react-native';
 import {useAuth} from '../auth/context/AuthContext';
-import {callFunction} from '../admin/services/adminApi';
+import {callBackend} from '../admin/services/adminApi';
 import {setPresenceStop} from './sessionLifecycle';
 export default function PresenceTracker(){
  const {user,profile,offline}=useAuth();
@@ -14,11 +14,11 @@ export default function PresenceTracker(){
   const send=state=>{
    if(state==='heartbeat'&&heartbeatPending)return queue;
    if(state==='heartbeat')heartbeatPending=true;
-  
+
    queue=queue.then(async()=>{
     if(firebase().auth.currentUser?.uid!==user.uid)return;
     if(state==='heartbeat'&&(stopped||AppState.currentState!=='active'))return;
-    await callFunction('sessionEvent',{session,state});
+    await callBackend('sessionEvent',{session,state});
    }).catch(()=>{}).finally(()=>{
     if(state==='heartbeat')heartbeatPending=false;
    });

@@ -1,3 +1,4 @@
+import BackendStatus from '../shared/components/BackendStatus';
 import { View, Text, ActivityIndicator } from 'react-native';
 import { useAuth } from '../features/auth/context/AuthContext';
 import AccountScreen from '../features/auth/screens/AccountScreen';
@@ -53,6 +54,7 @@ export default function AppNavigation() {
         </Stack.Navigator>
       </NavigationContainer>
       {working && <View style={{position:"absolute",top:0,bottom:0,left:0,right:0,backgroundColor:"#ffffffcc",alignItems:"center",justifyContent:"center"}}><ActivityIndicator color="#0E3B2C"/><Text>Please wait…</Text></View>}
+      <BackendStatus/>
     </SafeAreaProvider>
   );
 }

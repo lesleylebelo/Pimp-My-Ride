@@ -1,4 +1,3 @@
-// Run from a trusted local environment only. Never import into the mobile app.
 const {initializeApp,applicationDefault}=require('firebase-admin/app');
 const {getAuth}=require('firebase-admin/auth');
 const {getFirestore,FieldValue}=require('firebase-admin/firestore');

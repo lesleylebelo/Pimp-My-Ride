@@ -64,7 +64,7 @@ export function LandingShell({ title, tabs, feature, showFeature, onClose, child
     setSignOutError('');
     try { await logout(); } catch (error) { setSignOutError(authError(error)); }
   }
-  
+ 
   if (!loaded && !fontError) return <SafeAreaView style={ui.loading}><ActivityIndicator color={colors.primary} accessibilityLabel="Loading page" /></SafeAreaView>;
   return (
     <FontContext.Provider value={loaded}>

@@ -1,5 +1,5 @@
-const {HttpsError}=require('firebase-functions/v2/https');
-const fail=(message,code='invalid-argument')=>{throw new HttpsError(code,message);};
+const {ApiError}=require('./errors.cjs');
+const fail=(message,code='invalid-argument')=>{throw new ApiError(code,message);};
 function text(value,label,max=200){if(typeof value!=='string'||!value.trim()||value.trim().length>max)fail(`${label} is required (maximum ${max} characters).`);return value.trim();}
 function id(value){const v=text(value,'ID',128);if(!/^[a-zA-Z0-9_-]+$/.test(v))fail('Invalid ID.');return v;}
 function active(profile){return !!profile && (!profile.accountStatus||profile.accountStatus==='active');}
