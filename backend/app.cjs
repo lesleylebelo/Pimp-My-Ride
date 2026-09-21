@@ -3,9 +3,18 @@ const helmet=require('helmet');
 const {rateLimit}=require('express-rate-limit');
 const multer=require('multer');
 const {ApiError}=require('./errors.cjs');
+const cors = require('cors');
 const STATUS={'invalid-argument':400,'unauthenticated':401,'permission-denied':403,'not-found':404,'already-exists':409,'failed-precondition':409,'resource-exhausted':429,'unavailable':503,'internal':500};
 function createApp({services,auth,trustProxy=false}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',trustProxy);app.use(helmet());
+ app.use(cors({
+  origin: [
+    'http://localhost:8081',
+    'http://127.0.0.1:8081',
+  ],
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Authorization', 'Content-Type'],
+}));
  app.use((req,res,next)=>{res.set('Cache-Control','no-store');next();});
  app.get('/health',(_,res)=>res.json({ok:true}));
  const limits=rateLimit({windowMs:60000,limit:90,standardHeaders:'draft-8',legacyHeaders:false,message:{error:{code:'resource-exhausted',message:'Too many requests. Wait a minute.'}}});
