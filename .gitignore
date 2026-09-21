@@ -74,3 +74,6 @@ stirge.rules
 .claude/
 
 assets/
+
+!backend/package.json
+!backend/package-lock.json
