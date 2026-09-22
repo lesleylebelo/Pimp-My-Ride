@@ -1,9 +1,12 @@
 const {FieldValue,Timestamp,FieldPath}=require('firebase-admin/firestore');
 const {ApiError}=require('./errors.cjs');
 const D=require('./domain.cjs');
-const {randomUUID}=require('node:crypto');
-const {validateFile}=require('./files.cjs');
+const {createReviews}=require('./reviews.cjs');
+const {mutation}=require('./mutations.cjs');
+const {createDocuments}=require('./documents.cjs');
+const {createPresence}=require('./presence.cjs');
 function createServices({db,auth,storage}){
+const reviews=createReviews({db,auth,storage});
 const stamp=()=>FieldValue.serverTimestamp();
 const audit=(actor,action,target,details={})=>({actor,action,target,details,createdAt:stamp()});
 async function actor(request,admin=false){
@@ -19,9 +22,6 @@ async function actor(request,admin=false){
 function recent(request){if(Date.now()/1000-Number(request.auth.token.auth_time)>900)D.fail('Confirm your password, then retry this action.','failed-precondition');}
 function serialize(value){if(value instanceof Timestamp)return value.toMillis();if(Array.isArray(value))return value.map(serialize);if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,serialize(v)]));return value;}
 function rows(snapshot){return snapshot.docs.map(d=>({id:d.id,...serialize(d.data())}));}
-async function recorded(actorId,action,target,change){
- await db.runTransaction(async tx=>{await change(tx);tx.create(db.collection('auditLogs').doc(),audit(actorId,action,target));});
-}
 async function adminApi(request){
  const a=await actor(request,true),input=request.data||{},op=input.op;
  if(op==='dashboard'){
@@ -52,15 +52,23 @@ async function adminApi(request){
   const items=rows(await db.collection('presence').orderBy('lastSeen','desc').limit(100).get());
   return {items,serverNow:Date.now()};
  }
- if(op==='categories')return {items:rows(await db.collection('serviceCategories').orderBy('name').limit(200).get())};
+ if(op==='categories'){
+  let q=db.collection('serviceCategories').orderBy('name').orderBy(FieldPath.documentId());
+  if(input.cursor){const c=await db.doc('serviceCategories/'+D.id(input.cursor)).get();if(!c.exists)D.fail('Category page changed. Return to the first page.','failed-precondition');q=q.startAfter(c);}
+  const items=rows(await q.limit(31).get());return {items:items.slice(0,30),cursor:items.length>30?items[29].id:null};
+ }
  recent(request);
+ if(op==='reviewRecover')return reviews.recover({actor:a.uid,operationId:input.operationId,reason:input.reason});
+ const receipt=mutation(db,a.uid,op,input);
  if(op==='categorySave'||op==='categoryArchive'){
   const ref=input.id?db.doc(`serviceCategories/${D.id(input.id)}`):db.collection('serviceCategories').doc();
   const changes=op==='categorySave'?D.category(input):{archived:input.archived===true};
-  await recorded(a.uid,op,ref.id,async tx=>{
+  return receipt.atomic(async tx=>{
    const before=await tx.get(ref);if(op==='categoryArchive'&&!before.exists)D.fail('Category not found.','not-found');
    tx.set(ref,{...(!before.exists?{createdAt:stamp(),archived:false}:{}),...changes,updatedAt:stamp()}, {merge:true});
-  });return {id:ref.id};
+   tx.create(db.collection('auditLogs').doc(),audit(a.uid,op,ref.id));
+   return {id:ref.id};
+  });
  }
  const uid=D.id(input.uid),ref=db.doc(`users/${uid}`),before=await ref.get();
  if(!before.exists)D.fail('Account not found.','not-found');
@@ -76,65 +84,39 @@ async function adminApi(request){
  D.protect(a.uid,uid,p);
  if(op==='editAccount'){
   const changes=D.editable(input);if(p.role==='shop')changes.shop=D.shop(input.shop);
-  await db.runTransaction(async tx=>{const current=await tx.get(ref);D.protect(a.uid,uid,current.data());
-   tx.update(ref,{...changes,updatedAt:stamp()});tx.create(db.collection('auditLogs').doc(),audit(a.uid,op,uid,{fields:Object.keys(changes)}));});
-  return {ok:true};
+  return receipt.atomic(async tx=>{const current=await tx.get(ref);D.protect(a.uid,uid,current.data());
+   if(current.data().reviewOperation)D.fail('Wait for the shop review to finish before editing.','failed-precondition');
+   tx.update(ref,{...changes,updatedAt:stamp()});tx.create(db.collection('auditLogs').doc(),audit(a.uid,op,uid,{fields:Object.keys(changes)}));return {ok:true};});
  }
- if(op==='review'){
-  if(p.role!=='shop'||!D.active(p))D.fail('Only active shop accounts can be reviewed.');
-  if(!['pending','approved','rejected'].includes(input.status))D.fail('Invalid review outcome.');
-  const reason=D.text(input.reason,'Review reason',500);
-  const reviewId=db.collection('adminOperations').doc().id;
-  // Freeze uploads while examining Storage so approval cannot race with replacements.
-  await db.runTransaction(async tx=>{
-   const current=await tx.get(ref),value=current.data();
-   if(!D.active(value)||value.role!=='shop'||value.reviewOperation||value.statusOperation)D.fail('Account changed or another operation is in progress. Reload it.');
-   tx.update(ref,{verificationStatus:'reviewing',reviewOperation:reviewId});
-   tx.create(db.collection('auditLogs').doc(),audit(a.uid,'shop.reviewStarted',uid,{reviewId}));
-  });
-  try{
-   if(input.status==='approved'){
-    const u=await auth.getUser(uid);if(!u.emailVerified)D.fail('Shop email must be verified first.');
-    for(const kind of D.kinds){
-     const record=(await ref.collection('documents').doc(kind).get()).data();
-     if(!record||record.provider!=='supabase')D.fail(`Missing ${kind}. Upload it again.`);
-     const metadata=await storage.inspect(record.path);
-     if(!D.validObject(metadata)||Number(metadata.size)!==record.size||metadata.contentType!==record.contentType)D.fail(`Invalid ${kind}.`);
-    }
-   }
-   await db.runTransaction(async tx=>{
-    const current=await tx.get(ref);if(!D.active(current.data())||current.data().reviewOperation!==reviewId)D.fail('Account changed. Reload it.');
-    const docs=await Promise.all(D.kinds.map(k=>tx.get(ref.collection('documents').doc(k))));
-    if(input.status==='approved'&&docs.some(d=>!d.exists||!D.validObject(d.data())))D.fail('All valid document records are required.');
-    tx.update(ref,{verificationStatus:input.status,reviewOperation:FieldValue.delete(),reviewReason:reason,reviewedBy:a.uid,reviewedAt:stamp()});
-    tx.create(db.collection('auditLogs').doc(),audit(a.uid,`shop.${input.status}`,uid,{reason,reviewId}));
-   });
-  }catch(e){
-   await db.runTransaction(async tx=>{const current=await tx.get(ref);if(current.data()?.reviewOperation===reviewId){
-    tx.update(ref,{verificationStatus:p.verificationStatus,reviewOperation:FieldValue.delete()});
-    tx.create(db.collection('auditLogs').doc(),audit(a.uid,'shop.reviewFailed',uid,{reviewId}));
-   }});throw e;
-  }
-  return {ok:true};
- }
+ if(op==='review')return reviews.review({actor:a.uid,uid,status:input.status,reason:input.reason,operationId:receipt.id,payloadFingerprint:receipt.fingerprint});
  if(op==='status'){
   if(!['active','suspended','archived'].includes(input.status))D.fail('Invalid account status.');
-  const reason=D.text(input.reason,'Reason',500),operation=db.collection('adminOperations').doc();
-  await db.runTransaction(async tx=>{
+  const reason=D.text(input.reason,'Reason',500),operation=db.doc(`adminOperations/${receipt.id}`);
+  const prior=await db.runTransaction(async tx=>{
+   const saved=(await tx.get(operation)).data();
+   if(saved){
+    if(saved.actor!==a.uid||saved.payloadFingerprint!==receipt.fingerprint)D.fail('This request key was already used with different data.','already-exists');
+    if(saved.status==='completed')return {ok:true};
+    D.fail('This account operation needs reconciliation. Reload the account.','failed-precondition');
+   }
    const current=await tx.get(ref);D.protect(a.uid,uid,current.data());
    if(current.data().statusOperation||current.data().reviewOperation)D.fail('An account operation needs completion. Contact the operator.','failed-precondition');
    tx.update(ref,{accountStatus:'suspended',statusOperation:operation.id});
-   tx.create(operation,{actor:a.uid,target:uid,status:'pending',requested:input.status,createdAt:stamp()});
+   tx.create(operation,{type:'accountStatus',actor:a.uid,target:uid,status:'pending',requested:input.status,reason,payloadFingerprint:receipt.fingerprint,createdAt:stamp()});
    tx.create(db.collection('auditLogs').doc(),audit(a.uid,'account.statusRequested',uid,{status:input.status,reason,operation:operation.id}));
   });
+  if(prior)return prior;
   try{
    await auth.updateUser(uid,{disabled:input.status!=='active'});await auth.revokeRefreshTokens(uid);
    await db.runTransaction(async tx=>{
+    const current=await tx.get(ref),owned=await tx.get(operation);
+    if(current.data()?.statusOperation!==operation.id||owned.data()?.status!=='pending')D.fail('Account operation changed. Reload it.','failed-precondition');
     tx.update(ref,{accountStatus:input.status,statusReason:reason,statusOperation:FieldValue.delete(),updatedAt:stamp()});
     tx.update(operation,{status:'completed',completedAt:stamp()});
     tx.create(db.collection('auditLogs').doc(),audit(a.uid,`account.${input.status}`,uid,{reason,operation:operation.id}));
    });
   }catch(e){
+   if((await operation.get()).data()?.status==='completed')return {ok:true};
    await operation.update({status:'failed',errorCode:String(e.code||'unknown'),completedAt:stamp()});
    await db.collection('auditLogs').add(audit(a.uid,'account.statusFailed',uid,{operation:operation.id}));
    throw new ApiError('internal','Account remains restricted. An operator must reconcile the failed operation before retrying.');
@@ -143,25 +125,7 @@ async function adminApi(request){
  }
  D.fail('Unknown operation.');
 }
-async function sessionEvent(request){
- const a=await actor(request),input=request.data||{},session=D.id(input.session);
- if(!['heartbeat','offline'].includes(input.state))D.fail('Invalid session event.');
- const ref=db.doc(`presence/${a.uid}`),sessionRef=ref.collection('sessions').doc(session),now=Date.now();
- await db.runTransaction(async tx=>{
-  const previous=await tx.get(sessionRef),aggregate=await tx.get(ref);
-  const old=previous.data(),sessions={...(aggregate.data()?.sessions||{})};
-  for(const [key,deadline] of Object.entries(sessions))if(deadline<=now)delete sessions[key];
-  if(input.state==='heartbeat')sessions[session]=now+90000;else delete sessions[session];
-  const live=Object.fromEntries(Object.entries(sessions).sort((a,b)=>b[1]-a[1]).slice(0,20));
-  if(input.state==='heartbeat'&&old?.state==='heartbeat'&&now-old.lastSeen.toMillis()<20000)return;
-  tx.set(sessionRef,{state:input.state,lastSeen:stamp(),expiresAt:Timestamp.fromMillis(now+86400000)});
-  tx.set(ref,{uid:a.uid,role:a.profile.role,fullName:a.profile.fullName,lastSeen:stamp(),sessions:live});
-  const beginning=input.state==='heartbeat'&&(!old||old.state!=='heartbeat'||now-old.lastSeen.toMillis()>90000);
-  const ending=input.state==='offline'&&old?.state==='heartbeat';
-  if(beginning||ending)tx.create(db.collection('auditLogs').doc(),audit(a.uid,beginning?'session.active':'session.inactive',a.uid));
- });return {ok:true};
-}
-
+const sessionEvent=createPresence({db,actor});
 async function completeProfile(request){
  if(!request.auth)D.fail('Sign in to continue.','unauthenticated');
  const uid=request.auth.uid,input=request.data||{},u=await auth.getUser(uid);
@@ -177,38 +141,7 @@ async function completeProfile(request){
   tx.create(ref,fields);tx.create(db.collection('auditLogs').doc(),audit(uid,'profile.created',uid,{role:fields.role}));return {ok:true};
  });
 }
-async function checkUpload(request){
- const a=await actor(request);
- if(a.profile.role!=='shop'||a.profile.verificationStatus!=='pending')D.fail('Only a verified pending shop may upload documents.','permission-denied');
- if(!D.kinds.includes(request.kind))D.fail('Invalid document kind.');
- return a;
-}
-async function uploadDocument(request){
- const a=await checkUpload(request),file=validateFile(request.file),kind=request.kind;
- const path=`verification/${a.uid}/${kind}/${randomUUID()}`;
- try{await storage.upload(path,file.buffer,file.contentType);}
- catch(e){await storage.remove(path).catch(()=>{});throw e;}
- const ref=db.doc(`users/${a.uid}`),record=ref.collection('documents').doc(kind);
- let previous;
- try{
-  await db.runTransaction(async tx=>{
-   const [p,old]=await Promise.all([tx.get(ref),tx.get(record)]);
-   if(!D.active(p.data())||p.data().role!=='shop'||p.data().verificationStatus!=='pending')D.fail('Shop access changed during upload.','permission-denied');
-   previous=old.data();
-   tx.set(record,{provider:'supabase',path,name:file.name,size:file.buffer.length,contentType:file.contentType,uploadedAt:stamp()});
-   tx.create(db.collection('auditLogs').doc(),audit(a.uid,'document.recorded',a.uid,{kind}));
-  });
- }catch(e){
-  let current;
-  try{current=(await record.get()).data();}
-  catch{throw new ApiError('unavailable','Upload result could not be confirmed. Refresh before retrying.');}
-  if(current?.path!==path){await storage.remove(path).catch(()=>{});throw e;}
- }
- if(previous?.provider==='supabase'&&previous.path!==path){
-  try{await storage.remove(previous.path);}catch{await db.collection('storageCleanup').add({path:previous.path,createdAt:stamp()});}
- }
- return {ok:true,kind};
-}
-return {adminApi,sessionEvent,completeProfile,checkUpload,uploadDocument};
+const {listDocuments,checkUpload,uploadDocument}=createDocuments({db,storage,actor});
+return {adminApi,sessionEvent,completeProfile,listDocuments,checkUpload,uploadDocument};
 }
 module.exports={createServices};

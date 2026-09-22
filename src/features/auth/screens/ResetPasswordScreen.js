@@ -2,7 +2,7 @@ import {requireConnection} from '../../../shared/services/network';
 import { verifyPasswordResetCode, confirmPasswordReset } from 'firebase/auth';
 import { firebase } from '../../../shared/services/firebase';
 import { authError } from '../utils/authErrors';
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import AuthNavHeader from "../components/AuthNavHeader";
 import IconBox from "../../../shared/components/IconBox";
 import AppTextInput from "../../../shared/components/AppTextInput";
 import PrimaryButton from "../../../shared/components/PrimaryButton";
+import OutlineButton from "../../../shared/components/OutlineButton";
 import colors from "../../../shared/theme/colors";
 import { spacing } from "../../../shared/theme/typography";
 import {
@@ -23,18 +24,51 @@ import {
   validateConfirmPasswordField,
 } from "../utils/validators";
 
+const unusableCode = error => ['auth/expired-action-code', 'auth/invalid-action-code', 'auth/user-disabled', 'auth/user-not-found'].includes(error?.code);
+
 export default function ResetPasswordScreen({ navigation, route }) {
   const content={icon:'car-sport-outline',iconSet:'ionicons',placeholder:'example@gmail.com',subtitle:"Choose a new password for your account."};
-  const email = route?.params?.email;
+  const suppliedCode = route?.params?.oobCode;
+  const code = typeof suppliedCode === 'string' && suppliedCode.trim() && suppliedCode.length <= 2048 ? suppliedCode : null;
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const [link, setLink] = useState({status: 'checking'});
+  const [checkAttempt, setCheckAttempt] = useState(0);
+  const generation = useRef(0);
+  const submitting = useRef(false);
 
-  const handleBack = () => navigation.goBack();
+  useEffect(() => {
+    const current = ++generation.current;
+    submitting.current = false;
+    setLoading(false);
+    setPassword('');
+    setConfirmPassword('');
+    setErrors({});
+    if (!code) {
+      setLink({status: 'invalid', error: 'Open the reset link in your email, or request a new link.'});
+      return () => { ++generation.current; };
+    }
+    setLink({status: 'checking'});
+    (async () => {
+      try {
+        await requireConnection();
+        const email = await verifyPasswordResetCode(firebase().auth, code);
+        if (generation.current === current) setLink({status: 'ready', code, email});
+      } catch (error) {
+        if (generation.current === current) setLink({status: unusableCode(error) ? 'invalid' : 'retry', error: authError(error)});
+      }
+    })();
+    return () => { ++generation.current; };
+  }, [code, checkAttempt]);
+
+  const handleBack = () => {
+    if (!submitting.current) navigation.replace('ForgotPassword');
+  };
 
   const handleResetPassword = async () => {
-    if (loading) return;
+    if (submitting.current || link.status !== 'ready' || link.code !== code) return;
     const passwordError = validatePasswordField(password);
     const confirmError = validateConfirmPasswordField(password, confirmPassword);
     if (passwordError || confirmError) {
@@ -42,16 +76,28 @@ export default function ResetPasswordScreen({ navigation, route }) {
       return;
     }
     setErrors({});
+    submitting.current = true;
     setLoading(true);
+    const current = generation.current;
     try {
-      const code = route?.params?.oobCode;
-      if (!code) throw new Error('Open the reset link in your email to reset your password.');
       await requireConnection();
-      await verifyPasswordResetCode(firebase().auth,code);
       await confirmPasswordReset(firebase().auth,code,password);
-      navigation.replace('ResetSuccess');
-    } catch(e) {setErrors({password:authError(e)});}
-    finally {setLoading(false);}
+      if (generation.current === current) {
+        setPassword('');
+        setConfirmPassword('');
+        navigation.replace('ResetSuccess');
+      }
+    } catch(error) {
+      if (generation.current === current) {
+        if (unusableCode(error)) {
+          setPassword('');
+          setConfirmPassword('');
+          setLink({status: 'invalid', error: authError(error)});
+        } else setErrors({form: authError(error)});
+      }
+    } finally {
+      if (generation.current === current) {submitting.current = false;setLoading(false);}
+    }
 
   };
 
@@ -76,15 +122,21 @@ export default function ResetPasswordScreen({ navigation, route }) {
             <Text style={styles.title}>Reset Your Password</Text>
             <Text style={styles.subtitle}>
               {content.subtitle}
-              {email ? ` (${email})` : ""}
+              {link.status === 'ready' && link.email ? ` (${link.email})` : ""}
             </Text>
           </View>
 
+          {link.status === 'checking' && <Text accessibilityLiveRegion="polite" style={styles.subtitle}>Checking your reset link...</Text>}
+          {link.error && <Text accessibilityLiveRegion="polite" style={styles.error}>{link.error}</Text>}
+          {link.status === 'retry' && <PrimaryButton title="Try Link Again" onPress={() => setCheckAttempt(value => value + 1)} />}
+          {link.status === 'ready' && <>
+          {errors.form && <Text accessibilityLiveRegion="polite" style={styles.error}>{errors.form}</Text>}
           <AppTextInput
             label="New Password"
             icon="lock-closed-outline"
             placeholder="Enter new password"
             value={password}
+            editable={!loading}
             onChangeText={(text) => {
               setPassword(text);
               setErrors(e=>({...e,password:validatePasswordField(text),confirmPassword:confirmPassword ? validateConfirmPasswordField(text,confirmPassword) : null}));
@@ -101,6 +153,7 @@ export default function ResetPasswordScreen({ navigation, route }) {
             icon="lock-closed-outline"
             placeholder="Confirm new password"
             value={confirmPassword}
+            editable={!loading}
             onChangeText={(text) => {
               setConfirmPassword(text);
               setErrors(e=>({...e,confirmPassword:validateConfirmPasswordField(password,text)}));
@@ -117,6 +170,8 @@ export default function ResetPasswordScreen({ navigation, route }) {
             loading={loading}
             style={styles.resetButton}
           />
+          </>}
+          {link.status !== 'checking' && <OutlineButton title="Request a New Link" onPress={handleBack} disabled={loading} style={styles.resetButton} />}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -158,5 +213,9 @@ const styles = StyleSheet.create({
   },
   resetButton: {
     marginTop: spacing.sm,
+  },
+  error: {
+    color: colors.error,
+    marginBottom: spacing.md,
   },
 });

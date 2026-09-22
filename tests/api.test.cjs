@@ -19,3 +19,17 @@ test('failed mutations are not retried automatically',async()=>{
  const s=setup(async url=>({ok:url.endsWith('/health'),json:async()=>url.endsWith('/health')?{ok:true}:{error:{code:'permission-denied',message:'Denied'}}}));
  await assert.rejects(()=>s.apiRequest('admin',{op:'status'}),{code:'api/permission-denied'});assert.equal(s.calls.length,2);
 });
+
+test('an upload prepared for another account is rejected before network requests',async()=>{
+ const s=setup(async()=>assert.fail('No request may use the new account.'));
+ await assert.rejects(()=>s.apiRequest('documents/ownerId',{}, {multipart:true,expectedUid:'previous-account'}),/account changed/);
+ assert.equal(s.calls.length,0);
+});
+
+test('account change during token refresh prevents sending the previous token',async()=>{
+ const s=setup(async()=>({ok:true,json:async()=>({ok:true})}));
+ s.auth.currentUser.getIdToken=async()=>{s.auth.currentUser={uid:'other'};return 'old-token';};
+ await assert.rejects(()=>s.apiRequest('documents/ownerId',{}, {multipart:true,expectedUid:'u'}),/account changed/);
+ assert.equal(s.calls.length,1);
+ assert.ok(s.calls[0].url.endsWith('/health'));
+});
