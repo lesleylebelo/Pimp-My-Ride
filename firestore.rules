@@ -2,20 +2,19 @@ rules_version = '2';
 service cloud.firestore {
  match /databases/{database}/documents {
   function own(uid) {return request.auth != null && request.auth.uid == uid;}
-  function verifiedActive() {
-   return request.auth != null && request.auth.token.email_verified == true
-    && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('accountStatus','active') == 'active';
-  }
+  // Own onboarding profile remains readable while unverified/restricted so the
+  // app can show status and recover setup. It grants no privileged operations.
+  // All sensitive metadata/catalogue reads go through revoked-token-aware API.
   match /users/{uid} {
    allow get: if own(uid);
    allow list, create, update, delete: if false;
    match /documents/{kind} {
-    allow read: if own(uid) && verifiedActive();
+    allow read: if false;
     allow write: if false;
    }
   }
   match /serviceCategories/{id} {
-   allow read: if verifiedActive();
+   allow read: if false;
    allow write: if false;
   }
  }

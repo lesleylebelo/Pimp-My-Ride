@@ -33,7 +33,6 @@ yarn-error.*
 # local env files
 .env*.local
 .env
-.env.example
 .env*
 !.env.example
 
@@ -57,23 +56,8 @@ functions/node_modules/
 # Backend credentials and dependencies
 backend/node_modules/
 backend/.env
-backend/.env.example
 *admin-credentials*.json
 
-App.json
-babel.config.js
-eas.json
-firebase.json
-firestore.indexes.json
-firestore.rules
-package-lock.json
-package.json
-render.yaml
-stirge.rules
-
 .claude/
-
-assets/
-
-!backend/package.json
-!backend/package-lock.json
+.emulators/
+.local-checks/

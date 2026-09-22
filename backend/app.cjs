@@ -4,21 +4,19 @@ const {rateLimit}=require('express-rate-limit');
 const multer=require('multer');
 const {ApiError}=require('./errors.cjs');
 const cors = require('cors');
+const {corsOrigins}=require('./config.cjs');
 const STATUS={'invalid-argument':400,'unauthenticated':401,'permission-denied':403,'not-found':404,'already-exists':409,'failed-precondition':409,'resource-exhausted':429,'unavailable':503,'internal':500};
-function createApp({services,auth,trustProxy=false}){
+function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',trustProxy);app.use(helmet());
  app.use(cors({
-  origin: [
-    'http://localhost:8081',
-    'http://127.0.0.1:8081',
-  ],
+  origin: allowedOrigins,
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Authorization', 'Content-Type'],
 }));
  app.use((req,res,next)=>{res.set('Cache-Control','no-store');next();});
  app.get('/health',(_,res)=>res.json({ok:true}));
  const limits=rateLimit({windowMs:60000,limit:90,standardHeaders:'draft-8',legacyHeaders:false,message:{error:{code:'resource-exhausted',message:'Too many requests. Wait a minute.'}}});
- app.use('/api',limits,async(req,res,next)=>{
+ app.use('/api',(req,res,next)=>req.path==='/session'?next():limits(req,res,next),async(req,res,next)=>{
   try{
    const match=/^Bearer (\S+)$/.exec(req.headers.authorization||'');
    if(!match)throw new ApiError('unauthenticated','Sign in to continue.');
@@ -26,11 +24,15 @@ function createApp({services,auth,trustProxy=false}){
    req.identity={uid:token.uid,token};next();
   }catch{next(new ApiError('unauthenticated','Your session expired. Sign in again.'));}
  });
+ const perUser=rateLimit({windowMs:60000,limit:60,keyGenerator:req=>req.identity.uid,standardHeaders:'draft-8',legacyHeaders:false});
+ const heartbeats=rateLimit({windowMs:60000,limit:12,keyGenerator:req=>req.identity.uid,standardHeaders:'draft-8',legacyHeaders:false});
+ app.use('/api',(req,res,next)=>req.path==='/session'?heartbeats(req,res,next):perUser(req,res,next));
  app.use('/api',express.json({limit:'32kb'}));
  const action=(fn)=>async(req,res,next)=>{try{if(!req.body||Array.isArray(req.body)||typeof req.body!=='object')throw new ApiError('invalid-argument','Expected a JSON object.');res.json({data:await fn({auth:req.identity,data:req.body})});}catch(e){next(e);}};
  app.post('/api/admin',action(services.adminApi));
  app.post('/api/session',action(services.sessionEvent));
  app.post('/api/profile',action(services.completeProfile));
+ app.post('/api/documents/list',action(services.listDocuments));
  let uploading=0;
  const uploadSlot=(req,res,next)=>{if(uploading>=2)return next(new ApiError('resource-exhausted','The upload service is busy. Please try again shortly.'));uploading++;let released=false;const release=()=>{if(!released){released=true;uploading--;}};res.once('finish',release);res.once('close',release);next();};
  const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:5242880,files:1,fields:0,parts:1}}).single('file');

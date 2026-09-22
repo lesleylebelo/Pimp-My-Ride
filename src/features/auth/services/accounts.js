@@ -45,20 +45,39 @@ export async function completeProfile(form, role) {
  await apiRequest('profile',data);
  try { await sendEmailVerification(user); } catch (_) {  }
 }
-export async function uploadDocuments(files) {
+export async function listDocuments(expectedUid) {
+ const user = firebase().auth.currentUser;
+ if (!user) throw new Error('Please sign in again.');
+ const result = await apiRequest('documents/list', {}, {expectedUid:expectedUid || user.uid});
+ if (!Array.isArray(result?.items)) throw new Error('Unable to read document status. Please refresh and try again.');
+ return result.items.filter(item => DOCUMENT_KEYS.includes(item.id)).map(({id,name,size,contentType,uploadedAt}) => ({id,name,size,contentType,uploadedAt}));
+}
+export async function uploadDocument(kind, file, expectedUid) {
  await requireConnection();
  const { auth } = firebase();
  const user = auth.currentUser;
  if (!user) throw new Error('Please sign in again.');
+ if (expectedUid && user.uid !== expectedUid) throw new Error('Your account changed. Please choose the document again.');
  if (!user.emailVerified) throw new Error('Verify your email before uploading shop documents.');
- for (const kind of DOCUMENT_KEYS) {
-  const error = fileError(files[kind]); if (error) throw new Error(error);
+ if (!DOCUMENT_KEYS.includes(kind)) throw new Error('Choose a supported verification document.');
+ const error = fileError(file);
+ if (error) throw new Error(error);
+ const body = new FormData();
+ if (Platform.OS === 'web') {
+  const response = await fetch(file.uri);
+  if (!response.ok) throw new Error('Unable to read the selected file. Please choose it again.');
+  body.append('file', await response.blob(), file.name);
+ } else {
+  body.append('file', {uri:file.uri,name:file.name,type:file.mimeType});
  }
+ if (auth.currentUser?.uid !== user.uid) throw new Error('Your account changed. Please choose the document again.');
+ return apiRequest(`documents/${kind}`, body, {multipart:true,expectedUid:user.uid});
+}
+// Retained for existing callers; the account screen uploads each document separately.
+export async function uploadDocuments(files) {
  for (const kind of DOCUMENT_KEYS) {
-  const file=files[kind],body=new FormData();
-  if(Platform.OS==='web'){
-   const blob=await (await fetch(file.uri)).blob();body.append('file',blob,file.name);
-  }else body.append('file',{uri:file.uri,name:file.name,type:file.mimeType});
-  await apiRequest(`documents/${kind}`,body,{multipart:true});
+  const error = fileError(files[kind]);
+  if (error) throw new Error(error);
  }
+ for (const kind of DOCUMENT_KEYS) await uploadDocument(kind, files[kind]);
 }

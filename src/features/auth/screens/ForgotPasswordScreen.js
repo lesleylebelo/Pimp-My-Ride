@@ -2,7 +2,7 @@ import {requireConnection} from '../../../shared/services/network';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { firebase } from '../../../shared/services/firebase';
 import { authError } from '../utils/authErrors';
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   View,
   Text,
@@ -22,25 +22,27 @@ import colors from "../../../shared/theme/colors";
 import { spacing } from "../../../shared/theme/typography";
 import { validateEmailField } from "../utils/validators";
 
-export default function ForgotPasswordScreen({ navigation, route }) {
+export default function ForgotPasswordScreen({ navigation }) {
   const content={icon:'car-sport-outline',iconSet:'ionicons',placeholder:'example@gmail.com',subtitle:"Enter your email address to request a password reset link."};
   const [sent,setSent] = useState(false);
   const [email, setEmail] = useState("");
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
 
   const handleBack = () => navigation.navigate("SignIn");
 
   const handleSendResetLink = async () => {
-    if (loading) return;
+    if (submitting.current || sent) return;
     const emailError = validateEmailField(email);
     setError(emailError);
     if (emailError) return;
 
+    submitting.current = true;
     setLoading(true);
     try { await requireConnection();await sendPasswordResetEmail(firebase().auth,email.trim());setSent(true); }
     catch(e) { if(e.code === 'auth/user-not-found') setSent(true);else setError(authError(e)); }
-    finally {setLoading(false);}
+    finally {submitting.current=false;setLoading(false);}
 
   };
 
@@ -71,6 +73,7 @@ export default function ForgotPasswordScreen({ navigation, route }) {
             icon="mail-outline"
             placeholder={content.placeholder}
             value={email}
+            editable={!loading}
             onChangeText={(text) => {
               setEmail(text);setSent(false);
               setError(validateEmailField(text));
