@@ -40,6 +40,20 @@ test('document status uses authenticated JSON route before the dynamic upload ro
  const result=await request(app).post('/api/documents/list').set('Authorization','Bearer good').send({}).expect(200);
  assert.equal(result.body.data.uid,'shop');assert.equal(result.body.data.items[0].id,'ownerId');assert.equal(uploads,0);
 });
+
+test('photo routes validate identity and query fields before accepting a bounded file-only upload',async()=>{
+ const checked=[],uploaded=[];const base=setup();
+ const app=createApp({auth:{verifyIdToken:async()=>({uid:'owner'})},services:{...base.services,photosApi:async r=>({uid:r.auth.uid,items:[]}),checkPhotoUpload:async r=>checked.push(r),uploadPhoto:async r=>{uploaded.push(r);return {ok:true};}}});
+ const endpoint='/api/photos/vehicles/car/1?version=0&requestId=photo-retry';
+ await request(app).post('/api/photos').send({op:'list',target:'vehicle',id:'car'}).expect(401);
+ const list=await request(app).post('/api/photos').set('Authorization','Bearer good').send({op:'list',target:'vehicle',id:'car'}).expect(200);assert.equal(list.body.data.uid,'owner');
+ await request(app).post(endpoint).set('Authorization','Bearer good').attach('file',Buffer.from('synthetic photo'),'image.jpg').expect(200);
+ assert.equal(checked[0].version,0);assert.equal(uploaded[0].auth.uid,'owner');assert.equal(uploaded[0].vehicleId,'car');assert.equal(uploaded[0].requestId,'photo-retry');
+ for(const query of ['version=-1&requestId=x','version=1.5&requestId=x','version=0&requestId=x&path=forged'])await request(app).post('/api/photos/vehicles/car/1?'+query).set('Authorization','Bearer good').attach('file',Buffer.from('x'),'x.jpg').expect(400);
+ await request(app).post(endpoint).set('Authorization','Bearer good').field('ownerId','forged').attach('file',Buffer.from('x'),'x.jpg').expect(400);
+ const denied=createApp({auth:{verifyIdToken:async()=>({uid:'shop'})},services:{...base.services,checkPhotoUpload:async()=>{throw new ApiError('permission-denied','Owner access required.');}}});
+ await request(denied).post(endpoint).set('Authorization','Bearer good').attach('file',Buffer.alloc(5242881),'oversized.jpg').expect(403);
+});
 test('shared-network heartbeats have independent per-account limits and preserve the normal API budget',async()=>{
  const s=setup(),app=createApp({auth:{verifyIdToken:async uid=>({uid})},services:s.services});
  for(let i=0;i<100;i++)await request(app).post('/api/session').set('Authorization',`Bearer user${i}`).send({state:'heartbeat'}).expect(200);

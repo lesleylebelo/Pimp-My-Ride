@@ -1,6 +1,6 @@
 const {createHash}=require('node:crypto');
 const {FieldPath,FieldValue,Timestamp}=require('firebase-admin/firestore');
-const D=require('./domain.cjs'),M=require('./marketplace-domain.cjs');
+const D=require('./domain.cjs'),M=require('./marketplace-domain.cjs'),B=require('./booking-domain.cjs');
 const {mutation}=require('./mutations.cjs');
 const PAGE_SIZE=20;
 const stamp=()=>FieldValue.serverTimestamp();
@@ -11,11 +11,12 @@ const allowed={
  vehicles:['cursor','archived'],vehicleSave:['id','version','make','model','year','colour','registration'],vehicleArchive:['id','version','archived'],
  categories:['cursor'],shops:['cursor'],requestCreate:['vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId'],
  requests:['feed','cursor'],request:['id','quotesCursor'],requestClose:['id'],quoteSubmit:['serviceRequestId','scope','items','completionDays','warranty','validForDays'],quotes:['cursor'],quoteWithdraw:['id'],
+ quoteAccept:['id'],bookings:['cursor'],booking:['id'],bookingConfirm:['id','appointmentDate','appointmentTime'],bookingCancel:['id','reason'],
 };
-const mutations=new Set(['vehicleSave','vehicleArchive','requestCreate','requestClose','quoteSubmit','quoteWithdraw']);
+const mutations=new Set(['vehicleSave','vehicleArchive','requestCreate','requestClose','quoteSubmit','quoteWithdraw','quoteAccept','bookingConfirm','bookingCancel']);
 function eligible(profile,role){return profile?.role===role&&D.active(profile)&&!profile.statusOperation&&!profile.provisioningOperation&&(role!=='shop'||(profile.verificationStatus==='approved'&&!profile.reviewOperation));}
 function requireRole(profile,role){if(!eligible(profile,role))D.fail(role==='shop'?'An active, approved shop account is required.':'An active vehicle owner account is required.','permission-denied');}
-function requestFor(value,role){const result={...value};if(role==='shop'){delete result.ownerId;delete result.vehicleId;}return result;}
+function requestFor(value,role){const result={...value};if(role==='shop'){delete result.ownerId;delete result.vehicleId;delete result.acceptedQuoteId;delete result.bookingId;}return result;}
 function createMarketplace({db,auth,actor}){
  const audit=(tx,uid,action,target,details={})=>tx.create(db.collection('auditLogs').doc(),{actor:uid,action:`marketplace.${action}`,target,details,createdAt:stamp()});
  async function current(tx,uid,role){const profile=(await tx.get(db.doc(`users/${uid}`))).data();requireRole(profile,role);return profile;}
@@ -23,6 +24,7 @@ function createMarketplace({db,auth,actor}){
  async function assertAuth(uid){if(!await authEligible(uid))D.fail('The related account is no longer available.','failed-precondition');}
  function ownVehicle(snapshot,uid){if(!snapshot.exists||snapshot.data().ownerId!==uid)D.fail('Vehicle not found.','not-found');return snapshot.data();}
  function ownRequest(snapshot,uid){if(!snapshot.exists||snapshot.data().ownerId!==uid)D.fail('Service request not found.','not-found');return snapshot.data();}
+ function ownBooking(snapshot,a){const value=snapshot.data();if(!value||value[a.profile.role==='owner'?'ownerId':'shopId']!==a.uid)D.fail('Booking not found.','not-found');return value;}
  function version(value,input){if(M.integer(input.version,'Vehicle version',1,Number.MAX_SAFE_INTEGER)!==value.version)D.fail('This vehicle changed. Refresh it before saving.','failed-precondition');}
  async function page(query,cursor){
   query=query.orderBy(FieldPath.documentId());if(cursor)query=query.startAfter(D.id(cursor));
@@ -46,8 +48,8 @@ function createMarketplace({db,auth,actor}){
   M.fields(input,['op',...allowed[op],...(mutations.has(op)?['requestId']:[])]);
   if(a.profile.role==='owner')requireRole(a.profile,'owner');else requireRole(a.profile,'shop');
   const role=a.profile.role;
-  if(['vehicles','vehicleSave','vehicleArchive','requestCreate','requestClose','shops','categories'].includes(op))requireRole(a.profile,'owner');
-  if(['quoteSubmit','quotes','quoteWithdraw'].includes(op))requireRole(a.profile,'shop');
+  if(['vehicles','vehicleSave','vehicleArchive','requestCreate','requestClose','shops','categories','quoteAccept'].includes(op))requireRole(a.profile,'owner');
+  if(['quoteSubmit','quotes','quoteWithdraw','bookingConfirm'].includes(op))requireRole(a.profile,'shop');
   if(op==='vehicles'){
    const archived=input.archived===undefined?false:M.bool(input.archived,'Archived');
    const result=await page(db.collection('vehicles').where('ownerId','==',a.uid).where('archived','==',archived),input.cursor);
@@ -87,6 +89,14 @@ function createMarketplace({db,auth,actor}){
    const result=await page(db.collection('quotations').where('shopId','==',a.uid),input.cursor);
    return {items:result.docs.map(row),cursor:result.cursor};
   }
+  if(op==='bookings'){
+   const result=await page(db.collection('bookings').where(role==='owner'?'ownerId':'shopId','==',a.uid),input.cursor);
+   return {items:result.docs.map(doc=>requestFor(row(doc),role)),cursor:result.cursor};
+  }
+  if(op==='booking'){
+   const id=D.id(input.id),value=ownBooking(await db.doc(`bookings/${id}`).get(),a);
+   return {booking:requestFor({id,...serialize(value)},role)};
+  }
   // Unlike the legacy admin endpoint, every marketplace mutation must carry a
   // stable retry key. Missing keys never create a receipt or perform a write.
   D.id(input.requestId);const receipt=mutation(db,a.uid,`marketplace:${op}`,input);
@@ -120,7 +130,7 @@ function createMarketplace({db,auth,actor}){
   if(op==='requestClose'){
    const ref=db.doc(`serviceRequests/${D.id(input.id)}`);
    return receipt.atomic(async tx=>{await current(tx,a.uid,'owner');const value=ownRequest(await tx.get(ref),a.uid);
-    if(value.status!=='open')D.fail('This service request is already closed.','failed-precondition');
+    if(value.status!=='open')D.fail('Only an open service request can be closed.','failed-precondition');
     tx.update(ref,{status:'closed',closedAt:stamp(),updatedAt:stamp()});audit(tx,a.uid,op,ref.id);return {id:ref.id};});
   }
   if(op==='quoteSubmit'){
@@ -143,8 +153,67 @@ function createMarketplace({db,auth,actor}){
    const ref=db.doc(`quotations/${D.id(input.id)}`);
    return receipt.atomic(async tx=>{await current(tx,a.uid,'shop');const doc=await tx.get(ref),value=doc.data();
     if(!doc.exists||value.shopId!==a.uid)D.fail('Quotation not found.','not-found');
-    if(value.status!=='submitted')D.fail('This quotation is already withdrawn.','failed-precondition');
-    tx.update(ref,{status:'withdrawn',withdrawnAt:stamp(),updatedAt:stamp()});audit(tx,a.uid,op,ref.id,{serviceRequestId:value.serviceRequestId});return {id:ref.id};});
+    if(value.status!=='submitted')D.fail('Only a submitted quotation can be withdrawn.','failed-precondition');
+   tx.update(ref,{status:'withdrawn',withdrawnAt:stamp(),updatedAt:stamp()});audit(tx,a.uid,op,ref.id,{serviceRequestId:value.serviceRequestId});return {id:ref.id};});
+  }
+  if(op==='quoteAccept'){
+   const quoteRef=db.doc(`quotations/${D.id(input.id)}`);
+   return receipt.atomic(async tx=>{
+    await current(tx,a.uid,'owner');const quoteDoc=await tx.get(quoteRef),quote=quoteDoc.data();
+    if(!quote)D.fail('Quotation not found.','not-found');
+    const requestRef=db.doc(`serviceRequests/${D.id(quote.serviceRequestId)}`),bookingRef=db.doc(`bookings/${requestRef.id}`);
+    const [requestDoc,bookingDoc]=await Promise.all([tx.get(requestRef),tx.get(bookingRef)]),value=ownRequest(requestDoc,a.uid);
+    // A new retry key may still refer to the already selected offer. Return its
+    // existing booking, including cancellation history, without another write.
+    if(bookingDoc.exists){
+     const saved=bookingDoc.data();
+     if(value.status==='booked'&&value.bookingId===bookingRef.id&&value.acceptedQuoteId===quoteRef.id&&quote.status==='accepted'&&quote.bookingId===bookingRef.id&&saved.ownerId===a.uid&&saved.shopId===quote.shopId&&saved.quoteId===quoteRef.id&&saved.serviceRequestId===requestRef.id)return {id:bookingRef.id};
+     D.fail('A quotation has already been selected for this request.','failed-precondition');
+    }
+    if(value.status!=='open')D.fail('Only an open service request can accept a quotation.','failed-precondition');
+    if(quote.status!=='submitted')D.fail('This quotation is no longer available for acceptance.','failed-precondition');
+    if(!(quote.validUntil instanceof Timestamp)||quote.validUntil.toMillis()<=Date.now())D.fail('This quotation has expired.','failed-precondition');
+    if(value.visibility!=='open'&&!(value.visibility==='direct'&&value.shopId===quote.shopId))D.fail('This quotation is not available for this request.','failed-precondition');
+    const [shopDoc,vehicleDoc,categoryDoc]=await Promise.all([tx.get(db.doc(`users/${D.id(quote.shopId)}`)),tx.get(db.doc(`vehicles/${D.id(value.vehicleId)}`)),tx.get(db.doc(`serviceCategories/${D.id(value.categoryId)}`))]);
+    if(!eligible(shopDoc.data(),'shop'))D.fail('This shop is no longer available.','failed-precondition');
+    await Promise.all([assertAuth(a.uid),assertAuth(quote.shopId)]);
+    const vehicle=vehicleDoc.data();if(!vehicle||vehicle.ownerId!==a.uid||vehicle.archived)D.fail('This vehicle is no longer available.','failed-precondition');
+    if(!categoryDoc.exists||categoryDoc.data().archived!==false)D.fail('This service category is no longer available.','failed-precondition');
+    const terms=Object.fromEntries(['scope','items','totalCents','currency','completionDays','warranty'].map(key=>[key,quote[key]]));
+    // External Auth reads can take time; check the offer deadline again just
+    // before queuing the atomic writes, on every transaction attempt.
+    if(quote.validUntil.toMillis()<=Date.now())D.fail('This quotation has expired.','failed-precondition');
+    tx.create(bookingRef,{...terms,ownerId:a.uid,shopId:quote.shopId,serviceRequestId:requestRef.id,quoteId:quoteRef.id,vehicleId:value.vehicleId,vehicle:M.vehicleSnapshot(value.vehicle),shopName:quote.shopName,requestTitle:value.title,categoryName:value.categoryName,city:value.city,status:'pending_confirmation',createdAt:stamp(),updatedAt:stamp()});
+    tx.update(requestRef,{status:'booked',bookingId:bookingRef.id,acceptedQuoteId:quoteRef.id,bookedAt:stamp(),updatedAt:stamp()});
+    tx.update(quoteRef,{status:'accepted',bookingId:bookingRef.id,acceptedAt:stamp(),updatedAt:stamp()});
+    audit(tx,a.uid,op,bookingRef.id,{serviceRequestId:requestRef.id,quoteId:quoteRef.id});return {id:bookingRef.id};
+   });
+  }
+  if(op==='bookingConfirm'){
+   const ref=db.doc(`bookings/${D.id(input.id)}`),appointment=B.appointment(input);
+   return receipt.atomic(async tx=>{
+    await current(tx,a.uid,'shop');const value=ownBooking(await tx.get(ref),a);
+    if(value.status!=='pending_confirmation')D.fail('Only a booking awaiting confirmation can be confirmed.','failed-precondition');
+    B.requireFutureAppointment(appointment);
+    const owner=(await tx.get(db.doc(`users/${D.id(value.ownerId)}`))).data();
+    if(!eligible(owner,'owner'))D.fail('This customer is no longer available.','failed-precondition');
+    await Promise.all([assertAuth(a.uid),assertAuth(value.ownerId)]);
+    // Existing booking terms survive later vehicle/category archival or edits.
+    B.requireFutureAppointment(appointment);
+    tx.update(ref,{status:'confirmed',appointmentDate:appointment.appointmentDate,appointmentTime:appointment.appointmentTime,appointmentAt:Timestamp.fromMillis(appointment.appointmentMillis),confirmedAt:stamp(),updatedAt:stamp()});
+    audit(tx,a.uid,op,ref.id,{appointmentDate:appointment.appointmentDate,appointmentTime:appointment.appointmentTime});return {id:ref.id};
+   });
+  }
+  if(op==='bookingCancel'){
+   const ref=db.doc(`bookings/${D.id(input.id)}`),reason=D.text(input.reason,'Cancellation reason',500);
+   return receipt.atomic(async tx=>{
+    await current(tx,a.uid,role);const value=ownBooking(await tx.get(ref),a);
+    if(!['pending_confirmation','confirmed'].includes(value.status))D.fail('This booking is already cancelled.','failed-precondition');
+    await assertAuth(a.uid);
+    // The current participant may cancel even if the other account is blocked.
+    tx.update(ref,{status:'cancelled',cancellationReason:reason,cancelledByRole:role,cancelledAt:stamp(),updatedAt:stamp()});
+    audit(tx,a.uid,op,ref.id,{cancelledByRole:role});return {id:ref.id};
+   });
   }
   D.fail('Unknown marketplace operation.');
  };

@@ -108,6 +108,10 @@ the owner-authorized `categories` operation on `/api/marketplace`; clients still
 cannot read categories directly. For the new marketplace release, publish its
 vehicle/request indexes first and wait for readiness, then backend and client.
 See MARKETPLACE_MILESTONE.md for the complete scope and prerequisite test data.
+The booking extension in BOOKING_MILESTONE.md needs its backend operations before
+the corresponding client release. Bookings retain deny-by-default direct access
+and use standard participant-field indexes; no new secret, composite index,
+migration or production seeding is required by that extension.
 
 ## Supabase and document handling
 

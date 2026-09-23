@@ -6,7 +6,8 @@ const {mutation}=require('./mutations.cjs');
 const {createDocuments}=require('./documents.cjs');
 const {createPresence}=require('./presence.cjs');
 const {createMarketplace}=require('./marketplace.cjs');
-function createServices({db,auth,storage}){
+const {createPhotos}=require('./photos.cjs');
+function createServices({db,auth,storage,photoStorage}){
 const reviews=createReviews({db,auth,storage});
 const stamp=()=>FieldValue.serverTimestamp();
 const audit=(actor,action,target,details={})=>({actor,action,target,details,createdAt:stamp()});
@@ -151,6 +152,7 @@ async function completeProfile(request){
 }
 const {listDocuments,checkUpload,uploadDocument}=createDocuments({db,storage,actor});
 const marketplace=createMarketplace({db,auth,actor});
-return {adminApi,sessionEvent,completeProfile,listDocuments,checkUpload,uploadDocument,marketplace};
+const {photosApi,checkPhotoUpload,uploadPhoto}=createPhotos({db,auth,storage:photoStorage,actor});
+return {adminApi,sessionEvent,completeProfile,listDocuments,checkUpload,uploadDocument,marketplace,photosApi,checkPhotoUpload,uploadPhoto};
 }
 module.exports={createServices};

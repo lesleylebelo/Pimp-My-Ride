@@ -2,7 +2,7 @@
 
 A mobile marketplace connecting vehicle owners with **verified vehicle customization shops**.
 
-Customers can manage multiple vehicles, post open or direct service requests, and read private quotations from approved shops. Shops can browse eligible requests, send line-item quotations, and withdraw their offers. Quotation acceptance and bookings are planned.
+Customers can manage multiple vehicles, post open or direct service requests, compare private quotations and accept an offer to create a booking. Approved shops can quote, confirm booking appointments and withdraw unaccepted offers. Both participants can view bookings and cancel with a reason.
 
 The code also implements authentication, trusted role routing, business onboarding, private verification documents, and administration. Owner showcase discovery remains a prototype; the garage, requests, and shop quotation pages use the backend.
 
@@ -28,13 +28,15 @@ See [the marketplace milestone](docs/MARKETPLACE_MILESTONE.md) for implemented
 behavior, limits, isolated tests and release prerequisites. No deployment is
 implied by repository implementation.
 
+See [the booking milestone](docs/BOOKING_MILESTONE.md) for quote acceptance,
+appointment confirmation, cancellation, transaction safeguards and current limits.
+
 ## Remaining planned features
 
 * Vehicle/request photos
 * Richer marketplace discovery
 * Shop services and portfolios
-* Quotation selection/acceptance
-* Workshop bookings
+* Job progress and completion
 * Ratings and reviews
 * Location and map functionality
 

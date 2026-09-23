@@ -4,6 +4,10 @@ The user approved this milestone after stabilization. It is implemented locally;
 there has been no deployment, production test write, commit or push by Codex.
 Work resumed on the user's `a4bed3a` commit and preserves earlier changes.
 
+This document records the first marketplace slice. Its statements that acceptance
+and bookings are future work are superseded by [BOOKING_MILESTONE.md](BOOKING_MILESTONE.md),
+which documents the subsequently approved and implemented booking extension.
+
 ## What works
 
 | Role | Implemented workflow |
@@ -151,6 +155,5 @@ created automatically. Revalidate on Node 22 and smoke-test actual web/native
 interactions before a release.
 
 Suggested commit message: `feat: connect vehicle requests to private shop quotations`.
-Proposed next slice, requiring approval: quote comparison/selection and booking
-with conflict-safe transitions. Request photos and richer discovery can be planned
-separately. No further marketplace slice was started here.
+The subsequent approved comparison/selection and booking slice is documented in
+BOOKING_MILESTONE.md. Request photos and richer discovery remain future work.

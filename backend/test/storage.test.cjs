@@ -15,3 +15,15 @@ test('content sniffing rejects disguised files and unknown MIME types',()=>{
  const f={buffer:Buffer.from('%PDF-1.7'),mimetype:'application/pdf',originalname:'test.pdf'};assert.equal(validateFile(f).contentType,'application/pdf');
  assert.throws(()=>validateFile({...f,mimetype:'image/jpeg'}));assert.throws(()=>validateFile({...f,buffer:Buffer.from('<script>')}));
 });
+
+test('photo storage is a separate private scope and never accepts document or traversal paths',async()=>{
+ const calls=[],photo='photos/owner/vehicle/12345678-1234-4123-8123-123456789abc';
+ const client={storage:{getBucket:async bucket=>{calls.push(['bucket',bucket]);return {data:{public:false}};},from:bucket=>({upload:async(p,b,options)=>{calls.push(['upload',bucket,p,options]);return {};},createSignedUrl:async(p,seconds)=>{calls.push(['sign',bucket,p,seconds]);return {data:{signedUrl:'https://example.invalid/photo'}};}})}};
+ const s=createStorage({client,scope:'photos',bucket:'marketplace-photos'});
+ await s.upload(photo,Buffer.from('synthetic image'),'image/jpeg');assert.equal(calls.find(c=>c[0]==='upload')[3].upsert,false);assert.equal(calls[0][1],'marketplace-photos');
+ assert.equal(await s.signedUrl(photo),'https://example.invalid/photo');assert.equal(calls.find(c=>c[0]==='sign')[3],60);
+ for(const bad of [path,'photos/owner/../x','photos/owner/vehicle/not-a-uuid'])await assert.rejects(()=>s.signedUrl(bad));
+ await assert.rejects(()=>createStorage({client}).signedUrl(photo));
+ let used=false;const publicClient={storage:{getBucket:async()=>({data:{public:true}}),from:()=>{used=true;}}};
+ await assert.rejects(()=>createStorage({client:publicClient,scope:'photos'}).upload(photo,Buffer.from('x'),'image/jpeg'));assert.equal(used,false);
+});

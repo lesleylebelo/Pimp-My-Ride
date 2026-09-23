@@ -32,6 +32,19 @@ test('a response for a previous account cannot be delivered after switching iden
  const s=serviceSetup();s.respond(async()=>{s.auth.currentUser={uid:'other'};return {id:'private'};});await assert.rejects(()=>s.marketApi('vehicles',{}),/account changed/);
  s.auth.currentUser=null;const before=s.calls.length;await assert.rejects(()=>s.marketApi('vehicles',{}),/Sign in/);assert.equal(s.calls.length,before);
 });
+
+test('acceptance and booking transitions preserve retry identity after a lost acknowledgement',async()=>{
+ for(const [op,input] of [['quoteAccept',{id:'quote'}],['bookingConfirm',{id:'booking',appointmentDate:'2030-01-15',appointmentTime:'10:00'}],['bookingCancel',{id:'booking',reason:'Plans changed'}]]){
+  const s=serviceSetup();await assert.rejects(()=>s.marketApi(op,input));const retry=s.calls.at(-1).data.requestId;assert.ok(retry);
+  s.respond(async()=>({id:'booking'}));assert.deepEqual(await s.marketApi(op,input),{id:'booking'});
+  assert.equal(s.calls.at(-1).data.requestId,retry);assert.equal(s.calls.length,2);
+  await s.marketApi(op,input);assert.notEqual(s.calls.at(-1).data.requestId,retry);
+ }
+ const s=serviceSetup();await assert.rejects(()=>s.marketApi('quoteAccept',{id:'first'}));const first=s.calls.at(-1).data.requestId;
+ await assert.rejects(()=>s.marketApi('quoteAccept',{id:'second'}));assert.notEqual(s.calls.at(-1).data.requestId,first);
+ s.respond(async()=>({items:[],cursor:null}));await s.marketApi('bookings',{cursor:null});assert.equal(s.calls.at(-1).data.requestId,undefined);
+ await s.marketApi('booking',{id:'booking'});assert.equal(s.calls.at(-1).data.requestId,undefined);
+});
 function hookSetup(){
  const state={auth:{user:{uid:'owner'},offline:false},focused:true,calls:[],pending:[]};let current;
  const {useMarketData}=loadUI('src/features/marketplace/hooks/useMarketData.js',{'../../auth/context/AuthContext':{useAuth:()=>state.auth},'@react-navigation/native':{useIsFocused:()=>state.focused},'../services/marketApi':{marketApi:(op,input)=>{state.calls.push({op,input});return new Promise((resolve,reject)=>state.pending.push({resolve,reject}));}}});
