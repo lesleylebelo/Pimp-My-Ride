@@ -8,7 +8,7 @@ export const shopRoutes={'Find Jobs':'ShopJobs',Requests:'ShopRequests',Quotes:'
 export function Page({title,navigation,children}){
  const {profile}=useAuth(),shop=profile?.role==='shop',routes=shop?shopRoutes:ownerRoutes,feedback=useLandingFeedback();
  const state=navigation?.getState?.(),route=state?.routes?.[state.index]?.name;
- const activeTab=Object.keys(routes).find(k=>routes[k]===route)||(shop?'Find Jobs':'Garage');
+ const activeTab=Object.keys(routes).find(k=>routes[k]===route)||(shop?(route==='QuoteForm'?'Quotes':'Find Jobs'):['RequestForm','OwnerRequest'].includes(route)?'My Requests':'Garage');
  return <LandingShell title={title} tabs={shop?shopTabs:ownerTabs} activeTab={activeTab} {...feedback} onTabPress={label=>routes[label]?navigation?.navigate(routes[label]):feedback.showFeature(label)}>
   {navigation?.canGoBack?.()&&<LandingButton title="Back" outline onPress={()=>navigation.goBack()}/>}
   {children}

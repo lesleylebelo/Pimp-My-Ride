@@ -43,7 +43,8 @@ small account-scoped landing cache and the local login cooldown.
 | `App.js`, `src/navigation/` | Providers, presence tracker and role-based navigation |
 | `src/features/auth/` | Shared sign-in, registration, verification, hosted password recovery, document/account UI |
 | `src/features/admin/` | Dashboard, accounts/reviews, categories, audit, presence and reauthentication |
-| `src/features/customer/`, `src/features/shop/` | Prototype landing pages |
+| `src/features/customer/`, `src/features/shop/` | Owner showcase prototype and compatibility entry for live shop jobs |
+| `src/features/marketplace/` | Garage/requests, shop feeds/private quotes, role navigation and shared marketplace API/UI |
 | `src/features/activity/` | Session lifecycle and heartbeat client |
 | `src/shared/` | UI, validation-related components, Firebase/API/network, secure persistence and offline cache |
 | `backend/` | HTTP security, domain validation, reviews, uploads, receipts, presence and read-only cleanup logic |
@@ -51,12 +52,13 @@ small account-scoped landing cache and the local login cooldown.
 | `tests/`, `backend/test/` | Component/unit, HTTP mock, security-rule and emulator integration tests |
 | `docs/`, `assets/`, `vendor/` | Handover/design scope, bundled assets and existing dependency patch |
 
-Endpoints: `GET /health`; authenticated `POST /api/profile`, `/api/session`,
+Endpoints: `GET /health`; authenticated `POST /api/profile`, `/api/session`, `/api/marketplace`,
 `/api/documents/list`, `/api/documents/:kind`, `/api/admin`. Admin operations:
 dashboard, accounts/account, audit, presence, categories, categorySave,
 categoryArchive, editAccount, document, review, reviewRecover and status.
 The backend validates current Auth/profile permissions; client routes are not
-the security boundary. There are no marketplace endpoints yet.
+the security boundary. Marketplace operations implement vehicles, category/shop
+selection, open/direct requests and private quotations; see MARKETPLACE_MILESTONE.md.
 
 ## Feature status
 
@@ -75,7 +77,9 @@ certification. Static Figma screens do not establish implementation.
 | Admin | Categories, audit logs, presence | Implemented; cursor pages, page-local search and activity tests; presence is approximate and capped |
 | Operator | Admin provisioning and account-operation reconciliation | Implemented CLI; injected mock tests only, no live execution |
 | Owner/shop | Offline landing preview | Limited implementation; 24-hour non-sensitive cache tested, admin never restored offline |
-| Owner/shop | Garage, requests, quotations, bookings, portfolio, maps and reviews | Planned; current landing content is a prototype |
+| Owner | Multiple vehicles, versioned edits, archive/restore, open/direct requests and private quote reading | Implemented locally; component, backend and emulator HTTP workflow tests |
+| Approved shop | Open/direct request feeds, line-item quotes, own quote history and withdrawal | Implemented locally; audience isolation, duplicate prevention and state-transition tests |
+| Owner/shop | Photo uploads, quote acceptance, bookings, portfolio, maps and reviews | Planned; owner showcase discovery remains a prototype |
 | All | Chat and advanced notifications | Optional scope, not implemented |
 
 All mutations, document access, fresh profiles, admin actions and verification
@@ -137,22 +141,25 @@ rotated; uncertainty about its status is not evidence that it is safe.
 
 ## Tests actually run
 
-Final verification on 23 September:
+Current milestone verification on 23 September (supersedes stabilization totals):
 
 | Check | Result |
 | --- | --- |
-| `npm.cmd test` | 82 passed, 0 failed |
-| `npm.cmd run test:backend` | 59 passed, 0 failed |
-| `npm.cmd run test:security` | 5 rules + 17 integration tests passed; emulator runner exited 0 |
-| JavaScript/CJS parsing | 97 files parsed; 141 relative source imports resolved |
+| `npm.cmd test` | 102 passed, 0 failed |
+| `npm.cmd run test:backend` | 75 passed, 0 failed |
+| `npm.cmd run test:security` | 6 rules + 17 foundation + 6 marketplace integration tests passed; emulator runner exited 0 |
+| JavaScript/CJS parsing | 112 files parsed; 168 relative source imports resolved |
 | App/backend manifest and lockfile declarations | Matched; no dependency upgrade or audit fix |
-| Expo web export | Passed, 655 modules; ignored output `.local-checks/web` |
+| Expo web export | Passed; ignored output `.local-checks/web` |
 | `git diff --check` | Passed |
 
 The emulator run used only `demo-pmr-security`, loopback Auth/Firestore and mocked
-Supabase. Concurrent transaction contention retried successfully. The later
-terminal-review response/retry refinement passed dedicated HTTP/service/client
-regressions and both full local suites; it did not change the emulator rules.
+Supabase. Concurrent transaction contention retried successfully. Marketplace
+coverage includes actual HTTP calls with emulator-issued owner/shop tokens,
+private audiences, cents calculation, stale versions, duplicate submissions,
+archived resources, closing and withdrawal. Rules deny direct marketplace reads
+and writes for owners, shops and admins. Component tests use native mocks rather
+than a running browser/device.
 The web export disabled dotenv loading and used synthetic Firebase settings and
 an `.invalid` API URL; the app was not connected to production for this check.
 No production test records or real identity-document fixtures were used.
@@ -168,6 +175,12 @@ Firebase settings, deployed rules/indexes, Supabase policies or Render revision
 were verified through authenticated dashboards.
 
 ## Run, review and next task
+
+The user approved the vehicle → service request → private shop quotation milestone.
+It is now implemented locally; [MARKETPLACE_MILESTONE.md](MARKETPLACE_MILESTONE.md)
+records its screens, API/schema, behavior, limitations and release order. The
+latest continuation resumed on the user's `a4bed3a` commit; subsequent fixes and
+docs remain local. There was no commit or deployment by Codex.
 
 See [OPERATIONS.md](OPERATIONS.md) for setup, environment variable names, safe
 tests and manual Console/deployment checks; [AUTH_FLOW_DECISION.md](AUTH_FLOW_DECISION.md)
@@ -185,11 +198,11 @@ scripts; [RETENTION_PROPOSAL.md](RETENTION_PROPOSAL.md) for proposed retention.
    by Codex. Backend document-list support must precede its client release.
 4. Decide the proposed document/ledger/audit retention policy before implementing
    deletion. Current report-only reconciliation preserves all files.
-5. After these checks, proposed first marketplace milestone: a verified customer
-   registers and edits multiple vehicles, creates an open or directed request
-   for a selected vehicle, and an approved active shop submits a private quote
-   that the customer can view. Include backend ownership/role validation, request
-   and quote state transitions, pagination and isolated end-to-end tests.
-   Comparison/selection/booking and progress/reviews follow separately. No
-   payments, AI, AR or wider UI redesign. This milestone is proposed only and
-   awaits user approval before implementation.
+5. Review/release the implemented marketplace milestone only when separately
+   instructed: deploy its Firestore indexes first, wait for readiness, then
+   backend and client. Active categories and approved shops are required in the
+   selected test environment; no production seed data is created by setup.
+6. Proposed next milestone, awaiting approval: quote selection and booking with
+   conflict-safe transitions. Request photos and richer discovery can be planned
+   separately. No acceptance/booking implementation, payments, AI, AR or wider
+   redesign has been started.

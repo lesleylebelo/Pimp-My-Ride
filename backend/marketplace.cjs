@@ -33,8 +33,11 @@ function createMarketplace({db,auth,actor}){
   if(!snapshot.exists)D.fail('Service request not found.','not-found');const value=snapshot.data();
   if(a.profile.role==='owner'){ownRequest(snapshot,a.uid);return value;}
   if(value.visibility!=='open'&&!(value.visibility==='direct'&&value.shopId===a.uid))D.fail('Service request not found.','not-found');
-  const owner=(await db.doc(`users/${value.ownerId}`).get()).data();
-  if(!eligible(owner,'owner')||!await authEligible(value.ownerId))D.fail('Service request is unavailable.','not-found');
+  const [ownerDoc,vehicleDoc,categoryDoc]=await Promise.all([
+   db.doc(`users/${value.ownerId}`).get(),db.doc(`vehicles/${value.vehicleId}`).get(),db.doc(`serviceCategories/${value.categoryId}`).get(),
+  ]);
+  const owner=ownerDoc.data(),vehicle=vehicleDoc.data();
+  if(!eligible(owner,'owner')||!vehicle||vehicle.ownerId!==value.ownerId||vehicle.archived||!categoryDoc.exists||categoryDoc.data().archived!==false||!await authEligible(value.ownerId))D.fail('Service request is unavailable.','not-found');
   return value;
  }
  return async function marketplace(request){
@@ -105,6 +108,7 @@ function createMarketplace({db,auth,actor}){
   if(op==='requestCreate'){
    const changes=M.serviceRequest(input),vehicleRef=db.doc(`vehicles/${D.id(input.vehicleId)}`),categoryRef=db.doc(`serviceCategories/${changes.categoryId}`),ref=db.collection('serviceRequests').doc();
    return receipt.atomic(async tx=>{
+    M.requireFutureDate(changes.preferredDate);
     await current(tx,a.uid,'owner');const [vehicleDoc,categoryDoc]=await Promise.all([tx.get(vehicleRef),tx.get(categoryRef)]),vehicle=ownVehicle(vehicleDoc,a.uid),category=categoryDoc.data();
     if(vehicle.archived)D.fail('Choose an active vehicle.','failed-precondition');
     if(!category||category.archived!==false)D.fail('Choose an active service category.','failed-precondition');

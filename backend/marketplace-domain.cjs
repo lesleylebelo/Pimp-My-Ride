@@ -17,11 +17,10 @@ function vehicle(input){
 function date(value){
  if(value===undefined||value==='')return '';
  if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value)||Number.isNaN(Date.parse(`${value}T00:00:00Z`))||new Date(`${value}T00:00:00Z`).toISOString().slice(0,10)!==value)D.fail('Choose a valid preferred date (YYYY-MM-DD).');
- // A calendar date is compared in the marketplace's South African timezone.
- const today=new Date(Date.now()+2*60*60*1000).toISOString().slice(0,10);
- if(value<today)D.fail('Choose today or a future preferred date.');
  return value;
 }
+// Apply the South African date boundary only when creating, after receipt lookup.
+function requireFutureDate(value){const today=new Date(Date.now()+2*60*60*1000).toISOString().slice(0,10);if(value&&value<today)D.fail('Choose today or a future preferred date.');}
 function serviceRequest(input){
  const min=integer(input.budgetMinCents,'Minimum budget',0,MAX_CENTS),max=integer(input.budgetMaxCents,'Maximum budget',1,MAX_CENTS);
  if(max<min)D.fail('Maximum budget must be at least the minimum budget.');
@@ -30,11 +29,11 @@ function serviceRequest(input){
  return {title:D.text(input.title,'Title',100),description:D.text(input.description,'Description',300),categoryId:D.id(input.categoryId),city:D.text(input.city,'City',100),budgetMinCents:min,budgetMaxCents:max,preferredDate:date(input.preferredDate),visibility:input.visibility,shopId:input.visibility==='direct'?D.id(input.shopId):null};
 }
 function quotation(input){
- if(!Array.isArray(input.items)||!input.items.length||input.items.length>20)D.fail('Add between 1 and 20 quotation line items.');
+ if(!Array.isArray(input.items)||!input.items.length||input.items.length>10)D.fail('Add between 1 and 10 quotation line items.');
  const items=input.items.map(item=>{fields(item,['description','amountCents']);return {description:D.text(item.description,'Item description',200),amountCents:integer(item.amountCents,'Item amount',1,MAX_CENTS)};});
  const totalCents=items.reduce((total,item)=>total+item.amountCents,0);
  integer(totalCents,'Quotation total',1,MAX_CENTS);
  return {scope:D.text(input.scope,'Scope of work',2000),items,totalCents,currency:'ZAR',completionDays:integer(input.completionDays,'Completion days',1,365),warranty:optional(input.warranty,'Warranty',500),validForDays:integer(input.validForDays,'Validity days',1,90)};
 }
 const vehicleSnapshot=value=>Object.fromEntries(['make','model','year','colour'].map(key=>[key,value[key]]));
-module.exports={fields,integer,optional,bool,vehicle,serviceRequest,quotation,vehicleSnapshot};
+module.exports={fields,integer,optional,bool,vehicle,serviceRequest,quotation,vehicleSnapshot,requireFutureDate};

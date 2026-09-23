@@ -49,6 +49,14 @@ test('vehicle form validates live, keeps a failed draft, submits once and includ
   assert.equal(field(tree,'Colour').props.value,'Blue');assert.ok(says(tree,'A newer vehicle version exists.'));assert.deepEqual(context.moves,[]);
   fail=false;await press(tree,'Save vehicle');assert.deepEqual(context.moves,[['back']]);await unmount(tree);
 });
+test('switching vehicle or account resets a draft instead of saving old fields to another vehicle',async()=>{
+ const context=setup(),tree=await mount(context,'VehicleFormScreen',{vehicle});await change(tree,'Colour','Unsaved green');
+ await act(async()=>tree.update(React.createElement(context.screens.VehicleFormScreen,{route:{params:{vehicle:secondVehicle}},navigation:context.navigation})));
+ assert.equal(field(tree,'Make').props.value,'Ford');assert.equal(field(tree,'Colour').props.value,'White');
+ await change(tree,'Colour','Unsaved orange');context.auth.user={uid:'another-owner'};
+ await act(async()=>tree.update(React.createElement(context.screens.VehicleFormScreen,{route:{params:{vehicle:secondVehicle}},navigation:context.navigation})));
+ assert.equal(field(tree,'Colour').props.value,'White');assert.equal(context.calls.length,0);await unmount(tree);
+});
 
 test('offline owner forms block actions and an unmounted request does not navigate another session',async()=>{
   let release;

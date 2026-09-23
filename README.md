@@ -2,9 +2,9 @@
 
 A mobile marketplace connecting vehicle owners with **verified vehicle customization shops**.
 
-The intended marketplace lets customers manage multiple vehicles, post service requests, compare quotations from verified shops, and book appointments. That marketplace workflow is planned, not yet implemented.
+Customers can manage multiple vehicles, post open or direct service requests, and read private quotations from approved shops. Shops can browse eligible requests, send line-item quotations, and withdraw their offers. Quotation acceptance and bookings are planned.
 
-The current code implements authentication, role routing, business onboarding, private verification documents, and administration. Owner and shop landing content is primarily a prototype.
+The code also implements authentication, trusted role routing, business onboarding, private verification documents, and administration. Owner showcase discovery remains a prototype; the garage, requests, and shop quotation pages use the backend.
 
 ## Project Status
 
@@ -24,16 +24,16 @@ Read [docs/PROJECT_HANDOVER.md](docs/PROJECT_HANDOVER.md) for implemented featur
 stabilization results, test limits and the next proposed milestone. The
 [baseline audit](docs/PROJECT_AUDIT.md) is preserved separately.
 
-## Planned Core Features
+See [the marketplace milestone](docs/MARKETPLACE_MILESTONE.md) for implemented
+behavior, limits, isolated tests and release prerequisites. No deployment is
+implied by repository implementation.
 
-* Customer accounts and profiles
-* Multiple vehicles per customer account
-* Vehicle Garage
-* Service requests with vehicle images
-* Marketplace feed
-* Verified customization shops
+## Remaining planned features
+
+* Vehicle/request photos
+* Richer marketplace discovery
 * Shop services and portfolios
-* Quotation submission and comparison
+* Quotation selection/acceptance
 * Workshop bookings
 * Ratings and reviews
 * Location and map functionality

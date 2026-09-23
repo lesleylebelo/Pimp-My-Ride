@@ -140,3 +140,26 @@ test('suspended or unverified customer requests are hidden from shop discovery a
   const f=fixture(),id=await created(f);alter(f);assert.equal((await f.read('shop','requests',{feed:'open'})).items.length,0);await assert.rejects(()=>f.read('shop','request',{id}),{code:'not-found'});
  }
 });
+test('an acknowledged request retry remains idempotent after its preferred date passes',async()=>{
+ const original=Date.now,f=fixture();
+ try{
+  Date.now=()=>Date.parse('2030-01-01T10:00:00Z');
+  const input={...requestData,preferredDate:'2030-01-01'},first=await f.write('owner','requestCreate',input,'date-retry');
+  Date.now=()=>Date.parse('2030-01-02T10:00:00Z');
+  assert.deepEqual(await f.write('owner','requestCreate',input,'date-retry'),first);
+  await assert.rejects(()=>f.write('owner','requestCreate',input,'different-request'),{code:'invalid-argument'});
+ }finally{Date.now=original;}
+});
+test('quotation line count matches the ten-item form limit',()=>{
+ assert.throws(()=>M.quotation({...quoteData,items:Array.from({length:11},()=>({description:'Synthetic item',amountCents:1}))}),{code:'invalid-argument'});
+});
+test('archived vehicles or categories hide unquotable requests but preserve owner and quote history',async()=>{
+ for(const path of ['vehicles/car','serviceCategories/paint']){
+  const f=fixture(),id=await created(f);await f.write('shop','quoteSubmit',{...quoteData,serviceRequestId:id});
+  f.db.rows.get(path).archived=true;
+  assert.equal((await f.read('shop','requests',{feed:'open'})).items.length,0);
+  await assert.rejects(()=>f.read('shop','request',{id}),{code:'not-found'});
+  assert.equal((await f.read('owner','request',{id})).request.id,id);
+  assert.equal((await f.read('shop','quotes')).items.length,1);
+ }
+});

@@ -9,7 +9,9 @@ const vehicle={make:'Test make',model:'Test model',year:2020,colour:'Blue',regis
 const details={title:'Body kit installation',description:'Supply and fit a synthetic example body kit.',categoryId:'body',city:'Johannesburg',budgetMinCents:100000,budgetMaxCents:300000,preferredDate:'',visibility:'open'};
 const quote={scope:'Fit and inspect the example kit.',items:[{description:'Fitment',amountCents:125000},{description:'Paint',amountCents:50000}],completionDays:5,warranty:'12 months workmanship',validForDays:14};
 const identity=uid=>({uid,token:{email_verified:true,auth_time:Math.floor(Date.now()/1000)+1}});
-const call=(uid,op,data={})=>services.marketplace({auth:identity(uid),data:{op,requestId:`emulator-${++sequence}`,...data}});
+const writes=new Set(['vehicleSave','vehicleArchive','requestCreate','requestClose','quoteSubmit','quoteWithdraw']);
+const body=(op,data={})=>({op,...(writes.has(op)?{requestId:`emulator-${++sequence}`} : {}),...data});
+const call=(uid,op,data={})=>services.marketplace({auth:identity(uid),data:body(op,data)});
 async function seed(uid,role,extra={}){
  await auth.createUser({uid,email:`${uid}@example.invalid`,emailVerified:true,password:'SyntheticPassword1234'});
  await db.doc(`users/${uid}`).set({role,accountStatus:'active',fullName:'Fictional test user',email:`${uid}@example.invalid`,phone:'0821234567',...(role==='shop'?{verificationStatus:'approved',shop:{shopName:`Workshop ${uid}`,city:'Johannesburg',province:'Gauteng',services:'Body kits'}}:{}),...extra});
@@ -28,7 +30,7 @@ async function signIn(uid){
 }
 test('real authenticated HTTP workflow registers a vehicle, publishes a request, and returns the private quote to its owner',async()=>{
  const owner=await signIn('alice'),shop=await signIn('shop-one');
- const api=async(token,op,data={})=>(await http(app).post('/api/marketplace').set('Authorization',`Bearer ${token}`).send({op,requestId:`http-${++sequence}`,...data}).expect(200)).body.data;
+ const api=async(token,op,data={})=>(await http(app).post('/api/marketplace').set('Authorization',`Bearer ${token}`).send(body(op,data)).expect(200)).body.data;
  await http(app).post('/api/marketplace').send({op:'vehicles'}).expect(401);
  const v=await api(owner,'vehicleSave',vehicle),r=await api(owner,'requestCreate',{...details,vehicleId:v.id});
  const jobs=await api(shop,'requests',{feed:'open'});assert.equal(jobs.items[0].id,r.id);assert.equal(jobs.items[0].vehicle.registration,undefined);assert.equal(jobs.items[0].ownerId,undefined);
