@@ -13,7 +13,7 @@ function setup(){
 }
 const tick=()=>new Promise(r=>setImmediate(r));
 test('approval records its operation and audits completion',async()=>{const s=setup(),r=await s.call();assert.equal(s.profile().verificationStatus,'approved');assert.equal(s.db.rows.get(`adminOperations/${r.operationId}`).status,'completed');assert.equal(s.profile().reviewOperation,undefined);});
-test('previous state is captured inside transaction; failed review restores rejected state',async()=>{const s=setup();s.db.before=async n=>{if(n===1)s.profile().verificationStatus='rejected';};s.storage.inspect=async()=>{throw Error('missing');};await assert.rejects(s.call,/missing/);assert.equal(s.profile().verificationStatus,'rejected');assert.equal([...s.db.rows.values()].find(v=>v.type==='shopReview').previousStatus,'rejected');});
+test('previous state is captured inside transaction; failed review restores rejected state',async()=>{const s=setup();s.db.before=async n=>{if(n===1)s.profile().verificationStatus='rejected';};s.storage.inspect=async()=>{throw Error('missing');};await assert.rejects(s.call,{code:'unavailable',retryWithNewRequest:true});assert.equal(s.profile().verificationStatus,'rejected');assert.equal([...s.db.rows.values()].find(v=>v.type==='shopReview').previousStatus,'rejected');});
 test('rollback failure is recoverable and repeated recovery is idempotent',async()=>{const s=setup();s.storage.inspect=async()=>{throw Error('storage down');};s.db.before=async n=>{if(n===2)throw Error('database down');};await assert.rejects(s.call,/interrupted/);const id=s.profile().reviewOperation;s.db.before=null;await assert.rejects(()=>s.api.recover({actor:'admin',operationId:id,reason:'Operator recovery'}),/two minutes/);s.advance();const first=await s.api.recover({actor:'admin',operationId:id,reason:'Operator recovery'});const count=s.db.rows.size;assert.equal(s.profile().verificationStatus,'pending');assert.deepEqual(await s.api.recover({actor:'admin',operationId:id,reason:'Retry'}),first);assert.equal(s.db.rows.size,count);});
 test('interrupted worker cannot complete after recovery and cannot overwrite suspension',async()=>{const s=setup();let release;s.storage.inspect=()=>new Promise(r=>{release=()=>r({size:8,contentType:'application/pdf'});});const running=s.call();await tick();const id=s.profile().reviewOperation;s.profile().accountStatus='suspended';s.advance();await s.api.recover({actor:'admin',operationId:id,reason:'Interrupted worker'});s.storage.inspect=async()=>({size:8,contentType:'application/pdf'});release();await assert.rejects(()=>running,/Account changed/);assert.equal(s.profile().accountStatus,'suspended');assert.equal(s.profile().verificationStatus,'pending');});
 test('changed document metadata invalidates approval',async()=>{const s=setup();let changed=false;s.storage.inspect=async()=>{if(!changed){changed=true;s.db.rows.get('users/shop/documents/ownerId').path='changed';}return {size:8,contentType:'application/pdf'};};await assert.rejects(s.call,/Documents changed/);assert.equal(s.profile().verificationStatus,'pending');});
@@ -46,4 +46,16 @@ test('a completed review retry returns the same result without inspecting storag
  assert.equal(inspections,3);assert.equal(s.db.rows.size,rows);
  await assert.rejects(()=>s.api.review({...input,payloadFingerprint:'different-payload'}),{code:'already-exists'});
  await assert.rejects(()=>s.api.review({...input,actor:'another-admin'}),{code:'already-exists'});
+});
+test('a definitively failed review retires its key, whereas an interrupted pending review keeps it',async()=>{
+ const s=setup(),input={actor:'admin',uid:'shop',status:'approved',reason:'Inspected files',operationId:'failed-review',payloadFingerprint:'payload'};
+ s.storage.inspect=async()=>{throw Error('Synthetic provider failure');};
+ await assert.rejects(()=>s.api.review(input),e=>e.retryWithNewRequest===true);
+ assert.equal(s.db.rows.get('adminOperations/failed-review').status,'failed');
+ await assert.rejects(()=>s.api.review(input),e=>e.retryWithNewRequest===true);
+ s.storage.inspect=async()=>({size:8,contentType:'application/pdf'});
+ assert.equal((await s.api.review({...input,operationId:'new-review'})).ok,true);
+ const pending=setup();pending.storage.inspect=async()=>{throw Error('Synthetic provider failure');};pending.db.before=async n=>{if(n===2)throw Error('Rollback unavailable');};
+ await assert.rejects(()=>pending.api.review(input),e=>e.code==='unavailable'&&e.retryWithNewRequest!==true);
+ await assert.rejects(()=>pending.api.review(input),e=>e.code==='failed-precondition'&&e.retryWithNewRequest!==true);
 });

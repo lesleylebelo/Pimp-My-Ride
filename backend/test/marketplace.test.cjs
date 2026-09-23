@@ -1,0 +1,142 @@
+const {test}=require('node:test'),assert=require('node:assert/strict');
+const {memoryDb}=require('./helpers/memory-db.cjs');
+const {createMarketplace,quoteId}=require('../marketplace.cjs');
+const M=require('../marketplace-domain.cjs');
+const seed={
+ 'users/owner':{role:'owner',fullName:'Private customer name',phone:'private phone'},
+ 'users/other':{role:'owner'},
+ 'users/shop':{role:'shop',verificationStatus:'approved',shop:{shopName:'Trusted Motors',city:'Johannesburg',province:'Gauteng',services:'Paint',address:'private address',regNumber:'private registration'}},
+ 'users/competitor':{role:'shop',verificationStatus:'approved',shop:{shopName:'Other Shop'}},
+ 'users/admin':{role:'admin'},
+ 'vehicles/car':{ownerId:'owner',make:'Toyota',model:'Corolla',year:2020,colour:'Blue',registration:'PRIVATE-REG',version:1,archived:false},
+ 'serviceCategories/paint':{name:'Paint',description:'Painting services',archived:false},
+};
+function queryable(db){
+ const original=db.collection;db.queries=[];
+ db.collection=function collection(path){
+  const base=original(path);
+  function query(filters=[],cursor='',maximum=Infinity){return {
+   ...base,where:(key,operator,value)=>{assert.equal(operator,'==');return query([...filters,[key,value]],cursor,maximum);},orderBy:()=>query(filters,cursor,maximum),startAfter:id=>query(filters,id,maximum),limit:n=>query(filters,cursor,n),
+   get:async()=>{db.queries.push({path,filters,cursor,maximum});const docs=[...db.rows.entries()].filter(([p,value])=>p.startsWith(path+'/')&&p.slice(path.length+1).indexOf('/')===-1&&p.split('/').pop()>cursor&&filters.every(([key,expected])=>value[key]===expected)).sort(([a],[b])=>a<b?-1:a>b?1:0).slice(0,maximum).map(([p])=>({id:p.split('/').pop(),exists:true,data:()=>db.rows.get(p)}));return {docs};},
+  };}
+  return query();
+ };
+ return db;
+}
+function fixture(extra={}){
+ const db=queryable(memoryDb(structuredClone({...seed,...extra}))),users=new Map();let sequence=0;
+ const auth={getUser:async uid=>users.get(uid)||{emailVerified:true,disabled:false}};
+ const actor=async req=>({uid:req.auth.uid,profile:(await db.doc('users/'+req.auth.uid).get()).data()});
+ const api=createMarketplace({db,auth,actor});
+ const read=(uid,op,data={})=>api({auth:{uid},data:{op,...data}});
+ const write=(uid,op,data={},key=`retry-${++sequence}`)=>read(uid,op,{requestId:key,...data});
+ return {db,auth,users,api,read,write};
+}
+const vehicle={make:'Ford',model:'Fiesta',year:2022,colour:'Silver',registration:'abc 123 gp'};
+const requestData={vehicleId:'car',title:'Respray doors',description:'Repair and repaint both doors.',categoryId:'paint',city:'Johannesburg',budgetMinCents:10000,budgetMaxCents:200000,preferredDate:'',visibility:'open'};
+const quoteData={scope:'Prepare and respray both doors',items:[{description:'Preparation',amountCents:10000},{description:'Paint and labour',amountCents:90000}],completionDays:3,warranty:'Six months',validForDays:14};
+async function created(f,details={}){return (await f.write('owner','requestCreate',{...requestData,...details})).id;}
+const audits=f=>[...f.db.rows.entries()].filter(([path])=>path.startsWith('auditLogs/'));
+test('vehicle creation and request creation are transactional, audited and safe on retry after a lost acknowledgement',async()=>{
+ const f=fixture();let once=true;f.db.after=async()=>{if(once){once=false;throw Error('Synthetic lost response');}};
+ await assert.rejects(()=>f.write('owner','vehicleSave',vehicle,'new-vehicle'),/lost response/);
+ const first=await f.write('owner','vehicleSave',vehicle,'new-vehicle'),second=await f.write('owner','vehicleSave',vehicle,'new-vehicle');
+ assert.deepEqual(first,second);assert.equal(f.db.rows.get('vehicles/'+first.id).registration,'ABC 123 GP');
+ assert.equal([...f.db.rows.keys()].filter(p=>p.startsWith('vehicles/')).length,2);assert.equal(audits(f).length,1);
+ const request=await f.write('owner','requestCreate',requestData,'new-request');assert.deepEqual(await f.write('owner','requestCreate',requestData,'new-request'),request);
+ assert.equal([...f.db.rows.keys()].filter(p=>p.startsWith('serviceRequests/')).length,1);assert.equal(audits(f).length,2);
+ await assert.rejects(()=>f.write('owner','requestCreate',{...requestData,title:'Altered title'},'new-request'),{code:'already-exists'});
+});
+test('vehicle mutations enforce ownership, stale versions, archive rules and required retry keys',async()=>{
+ const f=fixture();await assert.rejects(()=>f.read('owner','vehicleSave',vehicle),{code:'invalid-argument'});
+ await assert.rejects(()=>f.write('other','vehicleSave',{...vehicle,id:'car',version:1}),{code:'not-found'});
+ await f.write('owner','vehicleSave',{...vehicle,id:'car',version:1});assert.equal(f.db.rows.get('vehicles/car').version,2);
+ await assert.rejects(()=>f.write('owner','vehicleSave',{...vehicle,id:'car',version:1}),{code:'failed-precondition'});
+ await f.write('owner','vehicleArchive',{id:'car',version:2,archived:true});
+ await assert.rejects(()=>f.write('owner','vehicleSave',{...vehicle,id:'car',version:3}),{code:'failed-precondition'});
+ await assert.rejects(()=>created(f),{code:'failed-precondition'});
+ await f.write('owner','vehicleArchive',{id:'car',version:3,archived:false});assert.equal(f.db.rows.get('vehicles/car').version,4);
+});
+test('roles, approval and restrictions are checked before reads and again inside mutations',async()=>{
+ for(const uid of ['shop','admin'])await assert.rejects(()=>fixture().write(uid,'vehicleSave',vehicle),{code:'permission-denied'});
+ for(const profile of [{role:'shop',verificationStatus:'pending'},{role:'shop',verificationStatus:'rejected'},{role:'shop',verificationStatus:'approved',accountStatus:'suspended'},{role:'shop',verificationStatus:'approved',accountStatus:'archived'},{role:'shop',verificationStatus:'approved',reviewOperation:'running'}]){
+  const f=fixture({'users/shop':profile});await assert.rejects(()=>f.read('shop','requests',{feed:'open'}),{code:'permission-denied'});
+ }
+ const f=fixture();f.db.before=async()=>{f.db.rows.get('users/owner').accountStatus='suspended';};
+ await assert.rejects(()=>f.write('owner','vehicleSave',vehicle),{code:'permission-denied'});assert.equal(audits(f).length,0);
+});
+test('unknown fields and malformed money, dates, vehicles and quotation items are rejected',async()=>{
+ const f=fixture();await assert.rejects(()=>f.write('owner','vehicleSave',{...vehicle,ownerId:'other'}),{code:'invalid-argument'});
+ for(const data of [{budgetMinCents:-1},{budgetMinCents:1.5},{budgetMaxCents:100000001},{budgetMinCents:200001},{preferredDate:'2027-02-30'},{preferredDate:'2000-01-01'},{visibility:'open',shopId:'shop'},{description:'x'.repeat(301)}])await assert.rejects(()=>created(f,data),{code:'invalid-argument'});
+ for(const data of [{year:'2020'},{year:1885},{registration:'../../path'},{colour:''}])await assert.rejects(()=>f.write('owner','vehicleSave',{...vehicle,...data}),{code:'invalid-argument'});
+ for(const data of [{items:[]},{items:[{description:'Paint',amountCents:0}]},{items:[{description:'Paint',amountCents:1.2}]},{items:[{description:'Paint',amountCents:100000000},{description:'Labour',amountCents:1}]},{items:[{description:'Paint',amountCents:1,totalCents:0}]},{validForDays:91},{completionDays:0}])assert.throws(()=>M.quotation({...quoteData,...data}),{code:'invalid-argument'});
+ assert.equal(audits(f).length,0);
+});
+test('direct requests require an approved, active and verified target shop',async()=>{
+ for(const profile of [{role:'owner'},{role:'shop',verificationStatus:'pending'},{role:'shop',verificationStatus:'approved',accountStatus:'suspended'}]){
+  const f=fixture({'users/shop':profile});await assert.rejects(()=>created(f,{visibility:'direct',shopId:'shop'}),{code:'failed-precondition'});
+ }
+ for(const user of [{emailVerified:false,disabled:false},{emailVerified:true,disabled:true}]){const f=fixture();f.users.set('shop',user);await assert.rejects(()=>created(f,{visibility:'direct',shopId:'shop'}),{code:'failed-precondition'});}
+ const f=fixture();f.db.rows.get('serviceCategories/paint').archived=true;await assert.rejects(()=>created(f),{code:'failed-precondition'});
+});
+test('request snapshots omit registration and customer details, and shop detail never exposes competitor quotations',async()=>{
+ const f=fixture(),id=await created(f);await f.write('shop','quoteSubmit',{serviceRequestId:id,...quoteData});await f.write('competitor','quoteSubmit',{serviceRequestId:id,...quoteData});
+ const owner=await f.read('owner','request',{id}),shop=await f.read('shop','request',{id});
+ assert.equal(owner.quotes.length,2);assert.equal(shop.quotes.length,1);assert.equal(shop.quotes[0].shopId,'shop');
+ assert.equal(shop.request.ownerId,undefined);assert.equal(shop.request.vehicleId,undefined);assert.deepEqual(shop.request.vehicle,{make:'Toyota',model:'Corolla',year:2020,colour:'Blue'});
+ assert.ok(!JSON.stringify(shop).includes('PRIVATE-REG'));assert.ok(!JSON.stringify(shop).includes('Private customer name'));assert.equal(shop.quotes[0].totalCents,100000);assert.equal(shop.quotes[0].currency,'ZAR');
+ await assert.rejects(()=>f.read('other','request',{id}),{code:'not-found'});
+});
+test('direct request privacy is enforced for detail, feeds and quotation submission',async()=>{
+ const f=fixture(),id=await created(f,{visibility:'direct',shopId:'shop'});
+ await assert.rejects(()=>f.read('competitor','request',{id}),{code:'not-found'});
+ await assert.rejects(()=>f.write('competitor','quoteSubmit',{serviceRequestId:id,...quoteData}),{code:'not-found'});
+ assert.equal((await f.read('competitor','requests',{feed:'direct'})).items.length,0);
+ assert.equal((await f.read('shop','requests',{feed:'direct'})).items[0].id,id);
+ assert.equal((await f.read('shop','requests',{feed:'open'})).items.length,0);
+ await assert.rejects(()=>f.read('shop','requests',{feed:'mine'}),{code:'permission-denied'});
+});
+test('quotation retries return one quote; distinct keys cannot create duplicates or revive a withdrawal',async()=>{
+ const f=fixture(),serviceRequestId=await created(f),data={serviceRequestId,...quoteData};
+ const first=await f.write('shop','quoteSubmit',data,'quote-once');assert.equal(first.id,quoteId(serviceRequestId,'shop'));
+ assert.deepEqual(await f.write('shop','quoteSubmit',data,'quote-once'),first);
+ await assert.rejects(()=>f.write('shop','quoteSubmit',data,'another-key'),{code:'already-exists'});
+ await assert.rejects(()=>f.write('competitor','quoteWithdraw',{id:first.id}),{code:'not-found'});
+ await f.write('shop','quoteWithdraw',{id:first.id},'withdraw-once');await f.write('shop','quoteWithdraw',{id:first.id},'withdraw-once');
+ assert.equal(f.db.rows.get('quotations/'+first.id).status,'withdrawn');
+ await assert.rejects(()=>f.write('shop','quoteSubmit',data,'new-after-withdraw'),{code:'already-exists'});
+ assert.equal(audits(f).filter(([,v])=>v.action==='marketplace.quoteSubmit').length,1);
+});
+test('closing a request denies new quotations and cannot be performed by another customer',async()=>{
+ const f=fixture(),id=await created(f);await assert.rejects(()=>f.write('other','requestClose',{id}),{code:'not-found'});
+ await f.write('owner','requestClose',{id},'close-once');await f.write('owner','requestClose',{id},'close-once');
+ await assert.rejects(()=>f.write('shop','quoteSubmit',{serviceRequestId:id,...quoteData}),{code:'failed-precondition'});
+ assert.equal((await f.read('shop','requests',{feed:'open'})).items.length,0);
+ assert.equal((await f.read('owner','requests',{feed:'mine'})).items[0].status,'closed');
+});
+test('quote submission rechecks customer, vehicle, category and current shop approval inside its transaction',async()=>{
+ for(const alter of [f=>{f.db.rows.get('users/owner').accountStatus='suspended';},f=>{f.users.set('owner',{emailVerified:false,disabled:false});},f=>{f.db.rows.get('vehicles/car').archived=true;},f=>{f.db.rows.get('serviceCategories/paint').archived=true;}]){
+  const f=fixture(),serviceRequestId=await created(f);alter(f);await assert.rejects(()=>f.write('shop','quoteSubmit',{serviceRequestId,...quoteData}),{code:'failed-precondition'});
+ }
+ const f=fixture(),serviceRequestId=await created(f);f.db.before=async()=>{f.db.rows.get('users/shop').verificationStatus='pending';};
+ await assert.rejects(()=>f.write('shop','quoteSubmit',{serviceRequestId,...quoteData}),{code:'permission-denied'});
+});
+test('bounded shop discovery returns only redacted approved, active, verified enabled accounts',async()=>{
+ const f=fixture({'users/suspended':{role:'shop',verificationStatus:'approved',accountStatus:'suspended'},'users/pending':{role:'shop',verificationStatus:'pending'},'users/unverified':{role:'shop',verificationStatus:'approved'},'users/disabled':{role:'shop',verificationStatus:'approved'}});
+ f.users.set('unverified',{emailVerified:false,disabled:false});f.users.set('disabled',{emailVerified:true,disabled:true});
+ const result=await f.read('owner','shops');assert.deepEqual(result.items.map(v=>v.id),['competitor','shop']);
+ assert.deepEqual(Object.keys(result.items[1]).sort(),['city','id','province','services','shopName'].sort());
+ assert.ok(f.db.queries.every(query=>query.maximum===21));
+});
+test('vehicle and owner quotation pages have stable document cursors with no truncation',async()=>{
+ const f=fixture(),id=await created(f);
+ for(let n=0;n<25;n++){const suffix=String(n).padStart(2,'0');f.db.rows.set('vehicles/v'+suffix,{...seed['vehicles/car'],ownerId:'owner'});f.db.rows.set('quotations/q'+suffix,{serviceRequestId:id,shopId:'s'+suffix,totalCents:n+1});}
+ const first=await f.read('owner','vehicles'),second=await f.read('owner','vehicles',{cursor:first.cursor});assert.equal(first.items.length,20);assert.equal(second.items.length,6);assert.equal(second.cursor,null);
+ const q1=await f.read('owner','request',{id}),q2=await f.read('owner','request',{id,quotesCursor:q1.quotesCursor});assert.equal(q1.quotes.length,20);assert.equal(q2.quotes.length,5);assert.equal(q2.quotesCursor,null);
+ assert.equal(new Set([...q1.quotes,...q2.quotes].map(v=>v.id)).size,25);
+});
+test('suspended or unverified customer requests are hidden from shop discovery and detail',async()=>{
+ for(const alter of [f=>{f.db.rows.get('users/owner').accountStatus='suspended';},f=>{f.users.set('owner',{emailVerified:false,disabled:false});}]){
+  const f=fixture(),id=await created(f);alter(f);assert.equal((await f.read('shop','requests',{feed:'open'})).items.length,0);await assert.rejects(()=>f.read('shop','request',{id}),{code:'not-found'});
+ }
+});

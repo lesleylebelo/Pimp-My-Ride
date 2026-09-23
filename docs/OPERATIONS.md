@@ -156,6 +156,9 @@ unresolved request identities in memory, preserving them through password
 confirmation. Restart, account change or eviction loses that client identity;
 refresh and inspect the outcome before repeating an uncertain mutation. Receipt
 retention has not been enabled.
+For reviews, an explicit server-confirmed terminal failure/recovery releases the
+key for a later manual confirmation. Pending or uncertain operations retain it;
+the client never automatically retries a mutation.
 
 `firebase.json` deploys neither Functions nor Firebase Storage. No active client
 uses those SDKs for operations. `storage.rules` is retained and labelled as a

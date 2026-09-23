@@ -1,6 +1,12 @@
 const {FieldValue,Timestamp}=require('firebase-admin/firestore');
 const {createHash}=require('node:crypto');
 const D=require('./domain.cjs');
+const {ApiError}=require('./errors.cjs');
+function finishedReviewError(error){
+ const result=error instanceof ApiError?error:new ApiError('unavailable','Review could not complete. Refresh the account before starting a new review.');
+ result.retryWithNewRequest=true;
+ return result;
+}
 
 // Firestore map key order is not part of a document's identity. Preserve timestamp
 // nanoseconds while normalizing nested maps so equivalent reads compare equally.
@@ -46,7 +52,9 @@ function createReviews({db,auth,storage,now=Date.now}) {
    if(saved){
     if(saved.actor!==actor||saved.payloadFingerprint!==payloadFingerprint)D.fail('This request key was already used with different data.','already-exists');
     if(saved.status==='completed')return {ok:true,operationId:operation.id};
-    D.fail('This review already has an outcome or needs recovery. Reload before starting a new review.','failed-precondition');
+    const error=new ApiError('failed-precondition','This review already has an outcome or needs recovery. Reload before starting a new review.');
+    if(['failed','recovered','superseded'].includes(saved.status))throw finishedReviewError(error);
+    throw error;
    }
    const profile=(await tx.get(ref)).data();
    if(!D.active(profile)||profile.role!=='shop'||profile.reviewOperation||profile.statusOperation)D.fail('Account changed or another operation is in progress. Reload it.','failed-precondition');
@@ -88,6 +96,7 @@ function createReviews({db,auth,storage,now=Date.now}) {
    try {outcome=await rollback(operation.id,actor);}
    catch {D.fail('Review interrupted. Reload the account and recover the review after two minutes.','unavailable');}
    if(outcome.status==='completed')return {ok:true,operationId:operation.id};
+   if(['failed','recovered','superseded'].includes(outcome.status))throw finishedReviewError(error);
    throw error;
   }
  }

@@ -54,7 +54,7 @@ export const shopTabs = [
   { label: 'My Shop', icon: 'profile' },
 ];
 
-export function LandingShell({ title, tabs, feature, showFeature, onClose, children, admin = false }) {
+export function LandingShell({ title, tabs, feature, showFeature, onClose, children, admin = false, activeTab, onTabPress }) {
   const [loaded, fontError] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold });
   const { logout, working, offline, cachedAt } = useAuth();
   const [signOutError, setSignOutError] = useState('');
@@ -84,10 +84,10 @@ export function LandingShell({ title, tabs, feature, showFeature, onClose, child
           </ScrollView>
           {tabs && <View accessibilityRole="tablist" style={[ui.navigation, { paddingBottom: Math.max(insets.bottom, 12) }]}>
             {tabs.map((tab, index) => <Pressable key={tab.label} accessibilityRole="tab" accessibilityLabel={tab.label}
-              accessibilityState={{ selected: index === 0 }} accessibilityHint={index ? 'Coming soon' : 'Current page'}
-              onPress={() => index > 0 && showFeature(tab.label)} style={ui.tab}>
+              accessibilityState={{ selected: activeTab ? tab.label===activeTab : index===0 }} accessibilityHint={onTabPress ? undefined : index ? 'Coming soon' : 'Current page'}
+              onPress={() => onTabPress ? onTabPress(tab.label) : index > 0 && showFeature?.(tab.label)} style={ui.tab}>
               <Image source={icons[tab.icon]} style={ui.navIcon} accessible={false} />
-              <LandingText weight="medium" style={[ui.navLabel, index === 0 && ui.green]}>{tab.label}</LandingText>
+              <LandingText weight="medium" style={[ui.navLabel, (activeTab ? tab.label===activeTab : index===0) && ui.green]}>{tab.label}</LandingText>
             </Pressable>)}
           </View>}
         </View>

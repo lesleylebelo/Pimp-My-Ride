@@ -19,6 +19,10 @@ test('failed mutations are not retried automatically',async()=>{
  const s=setup(async url=>({ok:url.endsWith('/health'),json:async()=>url.endsWith('/health')?{ok:true}:{error:{code:'permission-denied',message:'Denied'}}}));
  await assert.rejects(()=>s.apiRequest('admin',{op:'status'}),{code:'api/permission-denied'});assert.equal(s.calls.length,2);
 });
+test('a terminal review response exposes the explicit retry decision without automatically sending another request',async()=>{
+ const s=setup(async url=>({ok:url.endsWith('/health'),json:async()=>url.endsWith('/health')?{ok:true}:{error:{code:'failed-precondition',message:'Review finished',retryWithNewRequest:true}}}));
+ await assert.rejects(()=>s.apiRequest('admin',{op:'review'}),{code:'api/failed-precondition',retryWithNewRequest:true});assert.equal(s.calls.length,2);
+});
 
 test('an upload prepared for another account is rejected before network requests',async()=>{
  const s=setup(async()=>assert.fail('No request may use the new account.'));

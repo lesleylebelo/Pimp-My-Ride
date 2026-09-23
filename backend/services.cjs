@@ -5,6 +5,7 @@ const {createReviews}=require('./reviews.cjs');
 const {mutation}=require('./mutations.cjs');
 const {createDocuments}=require('./documents.cjs');
 const {createPresence}=require('./presence.cjs');
+const {createMarketplace}=require('./marketplace.cjs');
 function createServices({db,auth,storage}){
 const reviews=createReviews({db,auth,storage});
 const stamp=()=>FieldValue.serverTimestamp();
@@ -149,6 +150,7 @@ async function completeProfile(request){
  });
 }
 const {listDocuments,checkUpload,uploadDocument}=createDocuments({db,storage,actor});
-return {adminApi,sessionEvent,completeProfile,listDocuments,checkUpload,uploadDocument};
+const marketplace=createMarketplace({db,auth,actor});
+return {adminApi,sessionEvent,completeProfile,listDocuments,checkUpload,uploadDocument,marketplace};
 }
 module.exports={createServices};

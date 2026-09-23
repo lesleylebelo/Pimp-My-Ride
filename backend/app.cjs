@@ -34,6 +34,7 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
  app.use('/api',express.json({limit:'32kb'}));
  const action=(fn)=>async(req,res,next)=>{try{if(!req.body||Array.isArray(req.body)||typeof req.body!=='object')throw new ApiError('invalid-argument','Expected a JSON object.');res.json({data:await fn({auth:req.identity,data:req.body})});}catch(e){next(e);}};
  app.post('/api/admin',action(services.adminApi));
+ app.post('/api/marketplace',action(services.marketplace));
  app.post('/api/session',action(services.sessionEvent));
  app.post('/api/profile',action(services.completeProfile));
  app.post('/api/documents/list',action(services.listDocuments));
@@ -51,7 +52,7 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
   if(e.type==='entity.parse.failed'){code='invalid-argument';message='Invalid JSON request.';}
   if(e.type==='entity.too.large'){code='invalid-argument';message='Request is too large.';}
   if(code==='internal')console.error('API operation failed:',String(e.code||e.name||'unknown')); // Never log tokens, bodies or signed URLs.
-  res.status(STATUS[code]||500).json({error:{code,message}});
+  res.status(STATUS[code]||500).json({error:{code,message,...(e instanceof ApiError&&e.retryWithNewRequest===true?{retryWithNewRequest:true}:{})}});
  });
  return app;
 }
