@@ -17,6 +17,15 @@ test('malformed JSON and unexpected errors do not expose credentials',async()=>{
  s.services.adminApi=async()=>{throw Error('private secret');};const other=createApp({auth:{verifyIdToken:async()=>({uid:'u'})},services:s.services});
  const result=await request(other).post('/api/admin').set('Authorization','Bearer good').send({}).expect(500);assert.ok(!result.text.includes('private secret'));
 });
+test('only a trusted API error can mark a definitively finished review for a new explicit request',async()=>{
+ const s=setup();const error=Object.assign(new ApiError('failed-precondition','Review finished.'),{retryWithNewRequest:true});
+ const app=createApp({auth:{verifyIdToken:async()=>({uid:'u'})},services:{...s.services,adminApi:async()=>{throw error;}}});
+ const result=await request(app).post('/api/admin').set('Authorization','Bearer good').send({op:'review'}).expect(409);
+ assert.equal(result.body.error.retryWithNewRequest,true);
+ const unexpected=createApp({auth:{verifyIdToken:async()=>({uid:'u'})},services:{...s.services,adminApi:async()=>{throw Object.assign(Error('private provider details'),{retryWithNewRequest:true});}}});
+ const hidden=await request(unexpected).post('/api/admin').set('Authorization','Bearer good').send({op:'review'}).expect(500);
+ assert.equal(hidden.body.error.retryWithNewRequest,undefined);assert.ok(!hidden.text.includes('private provider details'));
+});
 test('multipart upload accepts one file; authorization happens before file parsing',async()=>{
  const s=setup();await request(s.app).post('/api/documents/ownerId').set('Authorization','Bearer good').attach('file',Buffer.from('%PDF-1.7'),'sample.pdf').expect(200);
  assert.equal(s.calls.find(c=>c[0]==='upload')[1].file.buffer.length,8);

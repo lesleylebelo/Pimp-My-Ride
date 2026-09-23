@@ -1,12 +1,14 @@
 import React from 'react';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 import colors from '../../../shared/theme/colors';
+import {ownerRoutes} from '../../marketplace/components/MarketplaceUI';
 import { LandingButton, LandingShell, LandingText, ownerTabs, ui, useLandingFeedback } from '../../../shared/components/landing/LandingUI';
 
-export default function OwnerHomeScreen() {
+export default function OwnerHomeScreen({navigation}) {
   const feedback = useLandingFeedback();
   const soon = feedback.showFeature;
-  return <LandingShell title="Discover" tabs={ownerTabs} {...feedback}>
+  return <LandingShell title="Discover" tabs={ownerTabs} activeTab="Discover" {...feedback} onTabPress={label=>ownerRoutes[label]?navigation.navigate(ownerRoutes[label]):soon(label)}>
+    <LandingButton title="Create service request" onPress={()=>navigation.navigate('RequestForm')}/>
     <View style={styles.locationRow}>
       <Pressable accessibilityRole="button" accessibilityLabel="Choose location" onPress={() => soon('Choose location')} style={styles.location}>
         <LandingText weight="semibold" style={ui.green}>Johannesburg⌄</LandingText>

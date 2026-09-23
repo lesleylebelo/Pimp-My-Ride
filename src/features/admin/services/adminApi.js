@@ -24,9 +24,16 @@ export async function adminApi(op,data={}) {
   const result=await apiRequest('admin',{...data,op,requestId},{expectedUid:uid});
   if(retryKeys.get(key)===requestId)retryKeys.delete(key);
   return result;
+ } catch(error) {
+  // Only the server can establish that this review's operation is terminal.
+  // A later explicit confirmation may then start a new operation; never retry
+  // automatically or infer a terminal result from a timeout/recency failure.
+  if(op==='review'&&error.retryWithNewRequest===true&&retryKeys.get(key)===requestId)retryKeys.delete(key);
+  throw error;
  } finally {
   // Any error can follow an earlier committed response that was lost. Retain the
-  // key across reauthentication and retry; release it only on confirmed success.
+  // key across reauthentication and retry unless success or a terminal review
+  // outcome is explicitly confirmed by the server.
   observeAccount();
  }
 }

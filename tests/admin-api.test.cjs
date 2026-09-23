@@ -13,6 +13,14 @@ function setup(){
 }
 const category={name:'Paint',description:'Paint services'};
 const recencyError=()=>Object.assign(Error('Confirm your password, then retry this action.'),{code:'api/failed-precondition'});
+test('a server-confirmed terminal review permits a fresh explicit review while ambiguous failures retain identity',async()=>{
+ const s=setup(),data={uid:'shop',status:'approved',reason:'Inspected files'};
+ await assert.rejects(()=>s.adminApi('review',data));const first=s.last().data.requestId;
+ s.respond(async()=>{throw Object.assign(recencyError(),{retryWithNewRequest:true});});
+ await assert.rejects(()=>s.adminApi('review',data));assert.equal(s.last().data.requestId,first);
+ s.respond(async()=>({ok:true}));await s.adminApi('review',data);assert.notEqual(s.last().data.requestId,first);
+ assert.equal(s.calls.length,3);
+});
 
 test('a transport failure followed by reauthentication preserves the original mutation identity',async()=>{
  const s=setup();

@@ -89,13 +89,14 @@ direct-read exception documented in OPERATIONS.md.
 
 Local work for all four phases is implemented. External configuration checks,
 real browser/device testing, an approved release and retention approval remain.
-Earlier local work is present in the user's current `bc1c5bf` HEAD; subsequent
-changes remain in the working tree. Codex did not make that commit or any other
-commit. The baseline audit remains unchanged in PROJECT_AUDIT.md.
+The latest continuation resumed on `b180472`, which includes earlier local work
+committed outside Codex's actions. Final review fixes and documentation updates
+remain in the working tree. Codex made no commits. The baseline audit remains
+unchanged in PROJECT_AUDIT.md.
 
 | Phase | What changed and key files | Verification | Remaining/deployment | Suggested commit message |
 | --- | --- | --- | --- | --- |
-| 1 | `ConfirmationButton.js`, `DocumentPickerField.js`, `AdminScreens.js`, `backend/reviews.cjs`: cross-platform confirm/cancel/errors, synchronous submit locks, dirty forms, persisted owned review operations and fail-closed recovery | Four confirmation tests exercise UI-to-request callbacks; eleven review tests cover rollback, interruption, metadata changes, repeat recovery and lost acknowledgement | Browser/native interaction smoke tests; release backend and client together | `fix: make admin confirmations and shop reviews recoverable` |
+| 1 | `ConfirmationButton.js`, `DocumentPickerField.js`, `AdminScreens.js`, `backend/reviews.cjs`: cross-platform confirm/cancel/errors, synchronous submit locks, dirty forms, persisted owned review operations and fail-closed recovery | Four confirmation tests exercise UI-to-request callbacks; twelve review tests cover rollback, interruption, metadata changes, repeat recovery, terminal failures and lost acknowledgement | Browser/native interaction smoke tests; release backend and client together | `fix: make admin confirmations and shop reviews recoverable` |
 | 2 | `.gitignore`, manifests, `render.yaml`, `backend/config.cjs`, `app.cjs`, emulator guards and security tests: canonical repo, tracked deployment files, configured CORS and independent 899/901-second recency cases | HTTP/CORS/native/preflight/role tests; isolated Auth/Firestore rules and integration suite | Node 22 target not installed locally; Console rules/policies/revision checks; no deployment performed | `chore: make security checks and deployment setup reproducible` |
 | 3 | `VerificationDocuments.js`, `accounts.js`, `backend/documents.cjs`, `mutations.cjs`, `cleanup.cjs`, `presence.cjs`, `adminApi.js`: per-file status, immutable upload attempts, retained uncertain files, dry-run reconciliation, scoped receipts and bounded presence | Eight upload UI/service tests, six upload-failure tests, ten cleanup tests, client/backend retry tests; emulator concurrent category retry and 205-category pagination | Deletion deliberately unimplemented pending retention decision; receipts grow; client retry IDs are memory-only; rate counters reset per process | `fix: harden uploads and admin mutation retries` |
 | 4 | Navigation/recovery UI, admin validation/pagination, rules, `scripts/trusted-admin-operations.cjs`, runbooks: hosted reset chosen after user confirmation, explicit direct-read exception, audited provisioning/recovery | Hosted recovery, eight admin validation tests, ten operator tests and rules tests | Delivered email behavior and password policy unverified; historical deployed Storage/Functions usage needs Console review | `refactor: complete hosted recovery and administrative safeguards` |
@@ -106,6 +107,10 @@ failure never authorizes deletion when its metadata outcome is uncertain. Status
 operations restrict the profile before crossing services; operator reconciliation
 requires stopping the original worker because Firestore cannot fence an external
 Firebase Auth write. See OPERATOR_RECOVERY.md for exact recovery preconditions.
+An explicit server-confirmed failed/recovered review retires its client request
+key so a later confirmation can start a fresh review. Timeouts, pending operations
+and password-confirmation errors retain the key; there is no automatic mutation
+retry. This fixes the otherwise stuck same-input review after recovery.
 
 ## Audit disposition
 
@@ -132,11 +137,25 @@ rotated; uncertainty about its status is not evidence that it is safe.
 
 ## Tests actually run
 
-Final regression totals and static build results are recorded here after the last
-local verification pass. The completed emulator run on 23 September passed all
-5 rules tests and 17 integration tests using only `demo-pmr-security`, loopback
-Auth/Firestore and mocked Supabase. Concurrent transaction contention retried
-successfully. No production test records or real identity-document fixtures.
+Final verification on 23 September:
+
+| Check | Result |
+| --- | --- |
+| `npm.cmd test` | 82 passed, 0 failed |
+| `npm.cmd run test:backend` | 59 passed, 0 failed |
+| `npm.cmd run test:security` | 5 rules + 17 integration tests passed; emulator runner exited 0 |
+| JavaScript/CJS parsing | 97 files parsed; 141 relative source imports resolved |
+| App/backend manifest and lockfile declarations | Matched; no dependency upgrade or audit fix |
+| Expo web export | Passed, 655 modules; ignored output `.local-checks/web` |
+| `git diff --check` | Passed |
+
+The emulator run used only `demo-pmr-security`, loopback Auth/Firestore and mocked
+Supabase. Concurrent transaction contention retried successfully. The later
+terminal-review response/retry refinement passed dedicated HTTP/service/client
+regressions and both full local suites; it did not change the emulator rules.
+The web export disabled dotenv loading and used synthetic Firebase settings and
+an `.invalid` API URL; the app was not connected to production for this check.
+No production test records or real identity-document fixtures were used.
 
 Node available locally: 24.14.0; Java: 25. Backend production target remains 22.x,
 which was unavailable locally. React test renderer and transitive emulator
