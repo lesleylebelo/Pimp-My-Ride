@@ -1,14 +1,15 @@
 const {initializeApp,applicationDefault}=require('firebase-admin/app');
 const {getAuth}=require('firebase-admin/auth');
-const {getFirestore,FieldValue}=require('firebase-admin/firestore');
+const {getFirestore}=require('firebase-admin/firestore');
+const {createTrustedAdminOperations}=require('./trusted-admin-operations.cjs');
 async function main(){
- const [projectId,uid]=process.argv.slice(2);
- if(!projectId||!uid) throw new Error('Usage: node scripts/provision-admin.cjs PROJECT_ID EXISTING_AUTH_UID');
+ const [projectId,uid,operationId,operator,reason,...extra]=process.argv.slice(2);
+ if(!projectId||!uid||!operationId||!operator||!reason||extra.length){
+  console.error('Usage: node scripts/provision-admin.cjs PROJECT_ID EXISTING_AUTH_UID OPERATION_ID OPERATOR_LABEL "REASON"');
+  process.exitCode=1;return;
+ }
  initializeApp({credential:applicationDefault(),projectId});
- const auth=getAuth(),user=await auth.getUser(uid);
- if(!user.emailVerified)throw new Error('Verify this account email before provisioning administrator access.');
- await auth.setCustomUserClaims(uid,{...user.customClaims,admin:true});
- await getFirestore().collection('users').doc(uid).set({fullName:user.displayName || 'Project administrator',email:user.email,phone:user.phoneNumber || '',role:'admin',createdAt:FieldValue.serverTimestamp()},{merge:true});
- console.log('Administrator provisioned. Refresh the ID token or sign in again.');
+ await createTrustedAdminOperations({auth:getAuth(),db:getFirestore()}).provisionAdmin({uid,operationId,operator,reason});
+ console.log('Administrator provisioned and audited. Sign in again to obtain a fresh authenticated session.');
 }
-main().catch(error=>{console.error(error.message);process.exitCode=1;});
+main().catch(()=>{console.error('Provisioning could not be confirmed. Inspect adminOperations; retry using the same operation ID, operator label and reason. No credentials or provider error details are printed.');process.exitCode=1;});

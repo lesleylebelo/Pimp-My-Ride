@@ -24,3 +24,19 @@ test('multipart upload accepts one file; authorization happens before file parsi
  const denied=createApp({auth:{verifyIdToken:async()=>({uid:'u'})},services:{...s.services,checkUpload:async()=>{throw new ApiError('permission-denied','Denied');}}});
  await request(denied).post('/api/documents/ownerId').set('Authorization','Bearer good').attach('file',Buffer.from('small'),'x.pdf').expect(403);
 });
+test('document status uses authenticated JSON route before the dynamic upload route',async()=>{
+ const s=setup();let uploads=0;
+ const app=createApp({auth:{verifyIdToken:async()=>({uid:'shop'})},services:{...s.services,listDocuments:async r=>({items:[{id:'ownerId',name:'sample.pdf'}],uid:r.auth.uid}),checkUpload:async()=>{uploads++;}}});
+ await request(app).post('/api/documents/list').send({}).expect(401);
+ const result=await request(app).post('/api/documents/list').set('Authorization','Bearer good').send({}).expect(200);
+ assert.equal(result.body.data.uid,'shop');assert.equal(result.body.data.items[0].id,'ownerId');assert.equal(uploads,0);
+});
+test('shared-network heartbeats have independent per-account limits and preserve the normal API budget',async()=>{
+ const s=setup(),app=createApp({auth:{verifyIdToken:async uid=>({uid})},services:s.services});
+ for(let i=0;i<100;i++)await request(app).post('/api/session').set('Authorization',`Bearer user${i}`).send({state:'heartbeat'}).expect(200);
+ for(let i=0;i<11;i++)await request(app).post('/api/session').set('Authorization','Bearer user0').send({state:'heartbeat'}).expect(200);
+ const limited=await request(app).post('/api/session').set('Authorization','Bearer user0').send({state:'heartbeat'}).expect(429);
+ assert.equal(limited.body.error.code,'resource-exhausted');
+ await request(app).post('/api/session').set('Authorization','Bearer user101').send({state:'heartbeat'}).expect(200);
+ await request(app).post('/api/admin').set('Authorization','Bearer user0').send({op:'dashboard'}).expect(200);
+});

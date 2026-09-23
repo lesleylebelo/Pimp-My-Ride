@@ -2,6 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {memoryDb}=require('./helpers/memory-db.cjs');
 const {createReviews}=require('../reviews.cjs');
+const {Timestamp}=require('firebase-admin/firestore');
 function setup(){
  let time=Date.now();const db=memoryDb({'users/shop':{role:'shop',verificationStatus:'pending'}});
  for(const kind of ['cipcCert','proofOfAddress','ownerId'])db.rows.set(`users/shop/documents/${kind}`,{provider:'supabase',path:`verification/shop/${kind}/abc`,size:8,contentType:'application/pdf'});
@@ -19,3 +20,30 @@ test('changed document metadata invalidates approval',async()=>{const s=setup();
 test('another operation owns the profile: rollback does not overwrite it',async()=>{const s=setup();s.storage.inspect=async()=>{s.profile().reviewOperation='newer';s.profile().verificationStatus='rejected';throw Error('interrupted');};await assert.rejects(s.call);assert.equal(s.profile().reviewOperation,'newer');assert.equal(s.profile().verificationStatus,'rejected');});
 test('lost completion acknowledgement returns recorded success',async()=>{const s=setup();s.db.after=async n=>{if(n===2)throw Error('ack lost');};const r=await s.call();assert.equal(r.ok,true);assert.equal(s.profile().verificationStatus,'approved');});
 test('concurrent reviews are refused and disabled Auth user cannot be approved',async()=>{const s=setup();s.profile().reviewOperation='other';await assert.rejects(s.call,/in progress/);delete s.profile().reviewOperation;s.auth.getUser=async()=>({emailVerified:true,disabled:true});await assert.rejects(s.call,/active, verified/);assert.equal(s.profile().verificationStatus,'pending');});
+test('equivalent document maps compare equally after Firestore key reordering',async()=>{
+ const s=setup(),path='users/shop/documents/ownerId',date=new Timestamp(1700000000,123456789);
+ s.db.rows.get(path).uploadedAt=date;
+ s.db.rows.get(path).details={first:'one',nested:{a:1,b:2}};
+ let changed=false;
+ s.storage.inspect=async()=>{
+  if(!changed){changed=true;const original=s.db.rows.get(path);s.db.rows.set(path,{details:{nested:{b:2,a:1},first:'one'},uploadedAt:new Timestamp(date.seconds,date.nanoseconds),...Object.fromEntries(Object.entries(original).filter(([key])=>!['details','uploadedAt'].includes(key)).reverse())});}
+  return {size:8,contentType:'application/pdf'};
+ };
+ assert.equal((await s.call()).ok,true);
+ assert.equal(s.profile().verificationStatus,'approved');
+});
+test('document timestamp changes below millisecond precision invalidate approval',async()=>{
+ const s=setup(),record=s.db.rows.get('users/shop/documents/ownerId');record.uploadedAt=new Timestamp(1700000000,1);
+ let changed=false;s.storage.inspect=async()=>{if(!changed){changed=true;record.uploadedAt=new Timestamp(1700000000,2);}return {size:8,contentType:'application/pdf'};};
+ await assert.rejects(s.call,/Documents changed/);
+ assert.equal(s.profile().verificationStatus,'pending');
+});
+test('a completed review retry returns the same result without inspecting storage again',async()=>{
+ const s=setup(),input={actor:'admin',uid:'shop',status:'approved',reason:'Reviewed records',operationId:'stable-review',payloadFingerprint:'approved-payload'};
+ let inspections=0;s.storage.inspect=async()=>{inspections++;return {size:8,contentType:'application/pdf'};};
+ const first=await s.api.review(input),rows=s.db.rows.size;
+ assert.deepEqual(await s.api.review(input),first);
+ assert.equal(inspections,3);assert.equal(s.db.rows.size,rows);
+ await assert.rejects(()=>s.api.review({...input,payloadFingerprint:'different-payload'}),{code:'already-exists'});
+ await assert.rejects(()=>s.api.review({...input,actor:'another-admin'}),{code:'already-exists'});
+});

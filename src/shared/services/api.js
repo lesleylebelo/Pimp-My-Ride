@@ -5,7 +5,7 @@ const listeners=new Set();
 export const onBackendWaiting=fn=>{listeners.add(fn);return()=>listeners.delete(fn);};
 function baseURL(){
  const url=(process.env.EXPO_PUBLIC_API_URL||'').replace(/\/$/,'');
- if(!url)throw new Error('Backend setup is missing. Set EXPO_PUBLIC_API_URL using RENDER_SETUP.md and restart Expo.');
+ if(!url)throw new Error('Backend setup is missing. Set EXPO_PUBLIC_API_URL using docs/OPERATIONS.md and restart Expo.');
  if(!url.startsWith('https://')&&!(__DEV__&&url.startsWith('http://')))throw new Error('The backend address must use HTTPS.');
  return url;
 }
