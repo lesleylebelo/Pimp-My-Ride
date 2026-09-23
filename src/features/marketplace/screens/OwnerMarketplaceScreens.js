@@ -55,7 +55,7 @@ export function GarageScreen({navigation}) {
       <Text>{vehicle.colour} · {vehicle.registration}</Text>
       {!archived && <><Button title={`Edit ${vehicle.make} ${vehicle.model}`} outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm', {vehicle});}}/>
         <Button title={`Request service for ${vehicle.make} ${vehicle.model}`} disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('RequestForm', {vehicleId: vehicle.id, vehicle});}}/></>}
-      <ConfirmationButton title={archived ? `Restore ${vehicle.make} ${vehicle.model}` : `Archive ${vehicle.make} ${vehicle.model}`} message={archived ? 'Restore this vehicle to your active garage.' : 'Hide this vehicle from your active garage. Existing service requests keep their vehicle details.'} disabled={disabled} onConfirm={() => archive(vehicle)}/>
+      <ConfirmationButton title={archived ? `Restore ${vehicle.make} ${vehicle.model}` : `Archive ${vehicle.make} ${vehicle.model}`} message={archived ? 'Restore this vehicle to your active garage. Its open requests can become visible to shops again.' : 'Hide this vehicle from your active garage and stop new quotations on its requests until restored. Existing requests and quotations remain in your history.'} disabled={disabled} onConfirm={() => archive(vehicle)}/>
     </Card>)}
     {data && !busy && !data.items.length && <Text>{archived ? 'No archived vehicles.' : 'Your garage is empty. Add your first vehicle to get started.'}</Text>}
     <Button title="Refresh vehicles" outline disabled={disabled} onPress={() => {if (!disabled) void refresh().catch(() => {});}}/>
@@ -63,7 +63,8 @@ export function GarageScreen({navigation}) {
   </Page>;
 }
 
-export function VehicleFormScreen({route, navigation}) {
+export function VehicleFormScreen(props){const {user}=useAuth();return <VehicleDraft key={`${user?.uid}:${props.route.params?.vehicle?.id||'new'}`} {...props}/>;}
+function VehicleDraft({route, navigation}) {
   const vehicle = route.params?.vehicle;
   const [form, setForm] = useState(() => ({make: vehicle?.make || '', model: vehicle?.model || '', year: vehicle?.year ? String(vehicle.year) : '', colour: vehicle?.colour || '', registration: vehicle?.registration || ''}));
   const [touched, setTouched] = useState({}), [submitted, setSubmitted] = useState(false);
@@ -115,7 +116,8 @@ function SelectionList({title, state, pages, selected, onSelect, label, disabled
   </Card>;
 }
 
-export function RequestFormScreen({route, navigation}) {
+export function RequestFormScreen(props){const {user}=useAuth();return <RequestDraft key={`${user?.uid}:${props.route.params?.vehicleId||'choose'}`} {...props}/>;}
+function RequestDraft({route, navigation}) {
   const vehiclePages = usePages(), categoryPages = usePages(), shopPages = usePages();
   const vehicles = useMarketData('vehicles', {cursor: vehiclePages.cursor, archived: false});
   const categories = useMarketData('categories', {cursor: categoryPages.cursor});
@@ -148,7 +150,7 @@ export function RequestFormScreen({route, navigation}) {
     <Card>
       <Field label="Request title" value={form.title} onChangeText={value => edit('title', value)} onBlur={() => setTouched(previous => ({...previous, title: true}))} maxLength={100} editable={!disabled} error={fieldError('title')}/>
       <Field label="Description" value={form.description} onChangeText={value => edit('description', value)} onBlur={() => setTouched(previous => ({...previous, description: true}))} maxLength={300} multiline editable={!disabled} error={fieldError('description')} helperText={`${form.description.length}/300 characters`}/>
-      <Field label="City" value={form.city} onChangeText={value => edit('city', value)} onBlur={() => setTouched(previous => ({...previous, city: true}))} maxLength={80} editable={!disabled} error={fieldError('city')}/>
+      <Field label="City" value={form.city} onChangeText={value => edit('city', value)} onBlur={() => setTouched(previous => ({...previous, city: true}))} maxLength={100} editable={!disabled} error={fieldError('city')}/>
       <Field label="Minimum budget (ZAR)" value={form.budgetMin} onChangeText={value => edit('budgetMin', value)} onBlur={() => setTouched(previous => ({...previous, budgetMin: true}))} keyboardType="decimal-pad" maxLength={12} editable={!disabled} error={fieldError('budgetMin')}/>
       <Field label="Maximum budget (ZAR)" value={form.budgetMax} onChangeText={value => edit('budgetMax', value)} onBlur={() => setTouched(previous => ({...previous, budgetMax: true}))} keyboardType="decimal-pad" maxLength={12} editable={!disabled} error={fieldError('budgetMax')}/>
       <Field label="Preferred date (optional, YYYY-MM-DD)" value={form.preferredDate} onChangeText={value => edit('preferredDate', value)} onBlur={() => setTouched(previous => ({...previous, preferredDate: true}))} autoCapitalize="none" maxLength={10} editable={!disabled} error={fieldError('preferredDate')}/>

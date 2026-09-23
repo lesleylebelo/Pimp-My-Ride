@@ -98,8 +98,8 @@ test('hosted recovery returns to a clean shared sign-in stack',async()=>{
 test('guest navigation exposes email recovery without custom password-reset routes',async()=>{
  const placeholder=()=>null;
  const screenMocks=Object.fromEntries([
-  '../features/auth/screens/AccountScreen','../features/customer/screens/OwnerHomeScreen',
-  '../features/shop/screens/ShopHomeScreen','../features/admin/AdminNavigator',
+  '../features/auth/screens/AccountScreen','../features/marketplace/OwnerNavigator',
+  '../features/marketplace/ShopNavigator','../features/admin/AdminNavigator',
   '../features/auth/screens/LegalScreen','../features/auth/screens/SplashScreen',
   '../features/auth/screens/SignInScreen','../features/auth/screens/SignUpScreen',
   '../features/auth/screens/ForgotPasswordScreen','../shared/components/BackendStatus',

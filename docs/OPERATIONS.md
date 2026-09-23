@@ -103,8 +103,11 @@ No cached role authorizes a backend request.
 Release the new backend document-list endpoint before the client that consumes
 it. Review the client/backend together, then publish rules/indexes through a
 separately approved release. Historical clients that read metadata/categories
-directly will be denied by the new rules. Marketplace catalogue access still
-needs a dedicated authorized API in its future milestone.
+directly will be denied by the new rules. Marketplace catalogue access now uses
+the owner-authorized `categories` operation on `/api/marketplace`; clients still
+cannot read categories directly. For the new marketplace release, publish its
+vehicle/request indexes first and wait for readiness, then backend and client.
+See MARKETPLACE_MILESTONE.md for the complete scope and prerequisite test data.
 
 ## Supabase and document handling
 

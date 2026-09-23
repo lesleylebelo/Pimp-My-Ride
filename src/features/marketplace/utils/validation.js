@@ -11,14 +11,14 @@ const clean=errors=>Object.fromEntries(Object.entries(errors).filter(([,v])=>v))
 export function vehicleErrors(form){return clean({
  make:required(form.make,'Make',80),model:required(form.model,'Model',80),colour:required(form.colour,'Colour',80),
  year:integer(form.year,1886,new Date().getFullYear()+1)?null:'Enter a valid vehicle year.',
- registration:required(form.registration,'Registration',20)||(!/^[A-Za-z0-9 -]+$/.test(form.registration||'')?'Use letters, numbers, spaces or hyphens.':null),
+ registration:required(form.registration,'Registration',20)||(!/^[A-Za-z0-9][A-Za-z0-9 -]*$/.test(form.registration?.trim()||'')?'Start with a letter or number; use letters, numbers, spaces or hyphens.':null),
 });}
 export function requestErrors(form){
  const min=parseMoney(form.budgetMin),max=parseMoney(form.budgetMax);
  return clean({vehicleId:required(form.vehicleId,'Vehicle',128),categoryId:required(form.categoryId,'Service category',128),title:required(form.title,'Title',100),description:required(form.description,'Description',300),city:required(form.city,'City',100),
   budgetMin:min===null?'Enter an amount up to R1,000,000 with at most two decimal places.':null,
   budgetMax:max===null?'Enter an amount up to R1,000,000 with at most two decimal places.':max<=0?'Maximum budget must be greater than zero.':min!==null&&max<min?'Maximum budget must be at least the minimum.':null,
-  preferredDate:form.preferredDate&&!validDate(form.preferredDate)?'Use a valid date in YYYY-MM-DD format.':null,
+  preferredDate:form.preferredDate&&(!validDate(form.preferredDate)||form.preferredDate<new Date(Date.now()+7200000).toISOString().slice(0,10))?'Use today or a future date in YYYY-MM-DD format.':null,
   visibility:['open','direct'].includes(form.visibility)?null:'Choose an open or direct request.',
   shopId:form.visibility==='direct'?required(form.shopId,'Verified shop',128):null,
  });
