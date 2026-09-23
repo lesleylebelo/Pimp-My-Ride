@@ -46,7 +46,12 @@ function createDocuments({db,storage,actor}) {
    });
   }catch(error){
    let referenced;
-   try{referenced=await settleFailure();}catch{D.fail('Upload result could not be confirmed. Refresh before retrying.','unavailable');}
+   try{referenced=await settleFailure();}catch{
+    // Even the settlement acknowledgement can be lost. A read may confirm the
+    // referenced file, but failure to read never authorizes deletion.
+    try{referenced=(await record.get()).data()?.path===path;}catch{}
+    if(!referenced)D.fail('Upload result could not be confirmed. Refresh before retrying.','unavailable');
+   }
    if(!referenced)throw error;
   }
   return {ok:true,kind};

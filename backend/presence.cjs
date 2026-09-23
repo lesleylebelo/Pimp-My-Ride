@@ -11,7 +11,9 @@ function createPresence({db,actor,now=Date.now}) {
    for(const [key,deadline] of Object.entries(sessions))if(deadline<=at)delete sessions[key];
    if(input.state==='heartbeat'&&previous>at+70000)return;
    if(input.state==='heartbeat')sessions[session]=at+90000;else delete sessions[session];
-   const live=Object.fromEntries(Object.entries(sessions).sort((a,b)=>b[1]-a[1]).slice(0,20));
+   // Keep this heartbeat when several tabs share the same clock tick; otherwise
+   // the newest tab can be dropped and log a new session on every retry.
+   const live=Object.fromEntries(Object.entries(sessions).sort((a,b)=>b[1]-a[1]||(a[0]===session?-1:b[0]===session?1:0)).slice(0,20));
    tx.set(ref,{uid:a.uid,role:a.profile.role,fullName:a.profile.fullName,lastSeen:FieldValue.serverTimestamp(),sessions:live});
    const beginning=input.state==='heartbeat'&&(!previous||previous<=at);
    const ending=input.state==='offline'&&previous>at;

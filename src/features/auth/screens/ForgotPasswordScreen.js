@@ -30,7 +30,7 @@ export default function ForgotPasswordScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const submitting = useRef(false);
 
-  const handleBack = () => navigation.navigate("SignIn");
+  const handleBack = () => navigation.reset({index:0,routes:[{name:'SignIn'}]});
 
   const handleSendResetLink = async () => {
     if (submitting.current || sent) return;
@@ -41,7 +41,7 @@ export default function ForgotPasswordScreen({ navigation }) {
     submitting.current = true;
     setLoading(true);
     try { await requireConnection();await sendPasswordResetEmail(firebase().auth,email.trim());setSent(true); }
-    catch(e) { if(e.code === 'auth/user-not-found') setSent(true);else setError(authError(e)); }
+    catch(e) { if(['auth/user-not-found','auth/user-disabled'].includes(e.code)) setSent(true);else setError(authError(e)); }
     finally {submitting.current=false;setLoading(false);}
 
   };
@@ -91,7 +91,7 @@ export default function ForgotPasswordScreen({ navigation }) {
             style={styles.sendButton}
           />
 
-          {sent && <Text style={{color:colors.primary,marginTop:16}}>If an account exists for this email, you will receive a reset link. Open it to choose a new password, then return here to sign in. Check your spam folder too.</Text>}
+          {sent && <Text accessibilityLiveRegion="polite" style={{color:colors.primary,marginTop:16}}>If an account exists for this email, you will receive a reset link. Open the link in your browser to choose a new password, then return to this app and sign in. Check your spam folder too.</Text>}
           <OrDivider />
 
           <OutlineButton

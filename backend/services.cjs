@@ -116,9 +116,16 @@ async function adminApi(request){
     tx.create(db.collection('auditLogs').doc(),audit(a.uid,`account.${input.status}`,uid,{reason,operation:operation.id}));
    });
   }catch(e){
-   if((await operation.get()).data()?.status==='completed')return {ok:true};
-   await operation.update({status:'failed',errorCode:String(e.code||'unknown'),completedAt:stamp()});
-   await db.collection('auditLogs').add(audit(a.uid,'account.statusFailed',uid,{operation:operation.id}));
+   const state=await db.runTransaction(async tx=>{
+    const [o,p]=await Promise.all([tx.get(operation),tx.get(ref)]);
+    if(o.data()?.status==='completed')return 'completed';
+    if(o.data()?.status==='pending'&&p.data()?.statusOperation===operation.id){
+     tx.update(operation,{status:'failed',errorCode:String(e.code||'unknown'),completedAt:stamp()});
+     tx.create(db.collection('auditLogs').doc(),audit(a.uid,'account.statusFailed',uid,{operation:operation.id}));
+    }
+    return 'restricted';
+   });
+   if(state==='completed')return {ok:true};
    throw new ApiError('internal','Account remains restricted. An operator must reconcile the failed operation before retrying.');
   }
   return {ok:true};

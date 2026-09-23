@@ -19,5 +19,13 @@
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [{
+    "collectionGroup": "documents",
+    "fieldPath": "path",
+    "indexes": [
+      {"order": "ASCENDING", "queryScope": "COLLECTION"},
+      {"order": "DESCENDING", "queryScope": "COLLECTION"},
+      {"order": "ASCENDING", "queryScope": "COLLECTION_GROUP"}
+    ]
+  }]
 }

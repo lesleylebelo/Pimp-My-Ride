@@ -2,7 +2,10 @@ const {FieldValue,Timestamp}=require('firebase-admin/firestore');
 const {createHash}=require('node:crypto');
 const D=require('./domain.cjs');
 
-const fingerprint=docs=>createHash('sha256').update(JSON.stringify(docs.map(s=>s.exists?s.data():null))).digest('hex');
+// Firestore map key order is not part of a document's identity. Preserve timestamp
+// nanoseconds while normalizing nested maps so equivalent reads compare equally.
+const canonical=value=>value instanceof Timestamp?{seconds:value.seconds,nanoseconds:value.nanoseconds}:Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
+const fingerprint=docs=>createHash('sha256').update(JSON.stringify(docs.map(s=>s.exists?canonical(s.data()):null))).digest('hex');
 function createReviews({db,auth,storage,now=Date.now}) {
  const stamp=()=>FieldValue.serverTimestamp();
  const log=(tx,actor,action,target,details)=>tx.create(db.collection('auditLogs').doc(),{actor,action,target,details,createdAt:stamp()});

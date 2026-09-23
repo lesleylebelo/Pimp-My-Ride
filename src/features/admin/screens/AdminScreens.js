@@ -16,7 +16,7 @@ function ValidatedField({error,...props}){return <View><Field {...props}/><Notic
 function usePages(){
  const [history,setHistory]=useState([null]);
  return {cursor:history[history.length-1],number:history.length,
-  next:cursor=>setHistory(h=>[...h,cursor]),previous:()=>setHistory(h=>h.length>1?h.slice(0,-1):h),first:()=>setHistory([null])};
+  next:cursor=>setHistory(h=>cursor&&cursor!==h[h.length-1]?[...h,cursor]:h),previous:()=>setHistory(h=>h.length>1?h.slice(0,-1):h),first:()=>setHistory([null])};
 }
 function PageControls({pages,nextCursor,busy}){return <View style={styles.row}>
  <Button title="First page" disabled={busy||pages.number===1} onPress={()=>{if(!busy)pages.first();}}/>
@@ -47,7 +47,7 @@ export function AccountDetailScreen({route,navigation}){
  const fieldError=key=>(touched[key]||submitted)?errors[key]:null;
  function saveProfile(){setSubmitted(true);if(busy||saving||hasErrors(errors))return;void action('editAccount',form).catch(()=>{});}
  async function action(op,extra){if(actionLock.current)return;actionLock.current=true;setSaving(true);setMessage('');try{await adminApi(op,{uid,...extra});if(op==='editAccount')dirty.current=false;setMessage('Saved.');await refresh();}catch(e){setMessage(adminError(e));throw e;}finally{actionLock.current=false;setSaving(false);}}
- async function viewDocument(kind){if(saving)return;setSaving(true);setMessage('');try{const {url}=await adminApi('document',{uid,kind});await Linking.openURL(url);}catch(e){setMessage(adminError(e));}finally{setSaving(false);}}
+ async function viewDocument(kind){if(busy||actionLock.current)return;actionLock.current=true;setSaving(true);setMessage('');try{const {url}=await adminApi('document',{uid,kind});await Linking.openURL(url);}catch(e){setMessage(adminError(e));}finally{actionLock.current=false;setSaving(false);}}
  const disabled=busy||saving;
  return <Page title={data?.fullName||'Account details'}><Notice busy={disabled} error={error||message}/><Button title="Confirm identity" disabled={saving} onPress={()=>navigation.navigate('AdminConfirm')}/>
  {data&&<><Card><Text>{data.email}</Text><Text selectable>UID: {uid}</Text><Text>{data.role} · {data.accountStatus||'active'} · {data.emailVerified?'Email verified':'Email not verified'}</Text><Text>Last sign-in: {when(data.lastSignIn)}</Text>{data.statusReason&&<Text>Access note: {data.statusReason}</Text>}{data.statusOperation&&<Text>A server operation needs reconciliation. Contact the project operator.</Text>}</Card>
@@ -96,7 +96,7 @@ export function PresenceScreen({navigation}){
  {data&&!data.items.length&&<Text>No observed sessions yet.</Text>}<Button title="Refresh status" disabled={busy} onPress={refresh}/></Page>;
 }
 export function ConfirmIdentityScreen({navigation}){
- const [password,setPassword]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');const cooldown=useLoginCooldown();
- async function confirm(){if(busy||cooldown.seconds!==0)return;setBusy(true);setError('');try{const u=firebase().auth.currentUser;await guardedLogin(()=>reauthenticateWithCredential(u,EmailAuthProvider.credential(u.email,password)));await getIdToken(u,true);setPassword('');navigation.goBack();}catch(e){setPassword('');setError(authError(e));}finally{setBusy(false);}}
+ const [password,setPassword]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');const cooldown=useLoginCooldown(),confirmationLock=useRef(false);
+ async function confirm(){if(confirmationLock.current||!password||cooldown.seconds!==0)return;confirmationLock.current=true;setBusy(true);setError('');try{const u=firebase().auth.currentUser;await guardedLogin(()=>reauthenticateWithCredential(u,EmailAuthProvider.credential(u.email,password)));await getIdToken(u,true);setPassword('');navigation.goBack();}catch(e){setPassword('');setError(authError(e));}finally{confirmationLock.current=false;setBusy(false);}}
  return <Page title="Confirm it’s you"><Text>Sensitive admin actions require a sign-in or password confirmation within the last 15 minutes. Your password is never stored in the audit log.</Text><Field label="Password" value={password} onChangeText={setPassword} secureTextEntry autoCapitalize="none" autoCorrect={false}/><Notice busy={busy} error={error||cooldown.error}/><Button title={cooldown.seconds>0?`Try again in ${cooldown.seconds}s`:'Confirm password'} disabled={busy||!password||cooldown.seconds!==0} onPress={confirm}/></Page>;
 }

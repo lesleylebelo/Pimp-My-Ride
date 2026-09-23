@@ -11,7 +11,8 @@
     "test": "node --test tests/*.test.cjs",
     "test:rules": "firebase emulators:exec --only firestore --project demo-pmr-security \"node --test tests/rules/*.test.cjs\"",
     "test:security": "firebase emulators:exec --only auth,firestore --project demo-pmr-security \"node scripts/test-emulators.cjs\"",
-    "test:backend": "npm test --prefix backend"
+    "test:backend": "npm test --prefix backend",
+    "cleanup:report": "node scripts/cleanup-storage.cjs"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",

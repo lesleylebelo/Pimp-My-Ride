@@ -16,7 +16,10 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
  app.use((req,res,next)=>{res.set('Cache-Control','no-store');next();});
  app.get('/health',(_,res)=>res.json({ok:true}));
  const limits=rateLimit({windowMs:60000,limit:90,standardHeaders:'draft-8',legacyHeaders:false,message:{error:{code:'resource-exhausted',message:'Too many requests. Wait a minute.'}}});
- app.use('/api',(req,res,next)=>req.path==='/session'?next():limits(req,res,next),async(req,res,next)=>{
+ // Separate generous pre-authentication IP budget for heartbeats; ordinary
+ // shared-network presence does not consume the administrative/API IP budget.
+ const sessionIps=rateLimit({windowMs:60000,limit:600,standardHeaders:'draft-8',legacyHeaders:false,message:{error:{code:'resource-exhausted',message:'Too many session requests. Wait a minute.'}}});
+ app.use('/api',(req,res,next)=>req.path==='/session'?sessionIps(req,res,next):limits(req,res,next),async(req,res,next)=>{
   try{
    const match=/^Bearer (\S+)$/.exec(req.headers.authorization||'');
    if(!match)throw new ApiError('unauthenticated','Sign in to continue.');
@@ -24,8 +27,9 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
    req.identity={uid:token.uid,token};next();
   }catch{next(new ApiError('unauthenticated','Your session expired. Sign in again.'));}
  });
- const perUser=rateLimit({windowMs:60000,limit:60,keyGenerator:req=>req.identity.uid,standardHeaders:'draft-8',legacyHeaders:false});
- const heartbeats=rateLimit({windowMs:60000,limit:12,keyGenerator:req=>req.identity.uid,standardHeaders:'draft-8',legacyHeaders:false});
+ const limitMessage={error:{code:'resource-exhausted',message:'Too many requests. Wait a minute.'}};
+ const perUser=rateLimit({windowMs:60000,limit:60,keyGenerator:req=>req.identity.uid,standardHeaders:'draft-8',legacyHeaders:false,message:limitMessage});
+ const heartbeats=rateLimit({windowMs:60000,limit:12,keyGenerator:req=>req.identity.uid,standardHeaders:'draft-8',legacyHeaders:false,message:limitMessage});
  app.use('/api',(req,res,next)=>req.path==='/session'?heartbeats(req,res,next):perUser(req,res,next));
  app.use('/api',express.json({limit:'32kb'}));
  const action=(fn)=>async(req,res,next)=>{try{if(!req.body||Array.isArray(req.body)||typeof req.body!=='object')throw new ApiError('invalid-argument','Expected a JSON object.');res.json({data:await fn({auth:req.identity,data:req.body})});}catch(e){next(e);}};

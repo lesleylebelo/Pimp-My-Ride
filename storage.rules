@@ -1,4 +1,7 @@
 rules_version = '2';
+// Historical Firebase Storage rules, not deployed by firebase.json. Current
+// uploads use the Express API and private Supabase Storage. Check live legacy
+// usage before retiring any old bucket/rules; do not deploy this file as setup.
 service firebase.storage {
  match /b/{bucket}/o {
   function own(uid) {return request.auth != null && request.auth.uid == uid;}
