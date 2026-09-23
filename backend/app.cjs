@@ -35,15 +35,25 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
  const action=(fn)=>async(req,res,next)=>{try{if(!req.body||Array.isArray(req.body)||typeof req.body!=='object')throw new ApiError('invalid-argument','Expected a JSON object.');res.json({data:await fn({auth:req.identity,data:req.body})});}catch(e){next(e);}};
  app.post('/api/admin',action(services.adminApi));
  app.post('/api/marketplace',action(services.marketplace));
+ app.post('/api/photos',action(services.photosApi));
  app.post('/api/session',action(services.sessionEvent));
  app.post('/api/profile',action(services.completeProfile));
  app.post('/api/documents/list',action(services.listDocuments));
  let uploading=0;
  const uploadSlot=(req,res,next)=>{if(uploading>=2)return next(new ApiError('resource-exhausted','The upload service is busy. Please try again shortly.'));uploading++;let released=false;const release=()=>{if(!released){released=true;uploading--;}};res.once('finish',release);res.once('close',release);next();};
  const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:5242880,files:1,fields:0,parts:1}}).single('file');
- const uploadLimit=rateLimit({windowMs:60000,limit:6,keyGenerator:req=>req.identity.uid,standardHeaders:'draft-8',legacyHeaders:false,message:{error:{code:'resource-exhausted',message:'Please wait a minute before uploading more documents.'}}});
+ const uploadLimit=rateLimit({windowMs:60000,limit:6,keyGenerator:req=>req.identity.uid,standardHeaders:'draft-8',legacyHeaders:false,message:{error:{code:'resource-exhausted',message:'Please wait a minute before uploading more files.'}}});
  app.post('/api/documents/:kind',uploadLimit,async(req,res,next)=>{try{await services.checkUpload({auth:req.identity,kind:req.params.kind});next();}catch(e){next(e);}},uploadSlot,upload,async(req,res,next)=>{
   try{res.json({data:await services.uploadDocument({auth:req.identity,kind:req.params.kind,file:req.file})});}catch(e){next(e);}
+ });
+ app.post('/api/photos/vehicles/:vehicleId/:slot',uploadLimit,async(req,res,next)=>{
+  try{
+   if(Object.keys(req.query).some(key=>!['version','requestId'].includes(key))||typeof req.query.version!=='string'||!/^(0|[1-9]\d{0,15})$/.test(req.query.version)||typeof req.query.requestId!=='string')throw new ApiError('invalid-argument','Include a valid photo version and retry identifier.');
+   req.photoRequest={auth:req.identity,vehicleId:req.params.vehicleId,slot:req.params.slot,version:Number(req.query.version),requestId:req.query.requestId};
+   await services.checkPhotoUpload(req.photoRequest);next();
+  }catch(e){next(e);}
+ },uploadSlot,upload,async(req,res,next)=>{
+  try{res.json({data:await services.uploadPhoto({...req.photoRequest,file:req.file})});}catch(e){next(e);}
  });
  app.use((req,res)=>res.status(404).json({error:{code:'not-found',message:'Endpoint not found.'}}));
  app.use((e,req,res,next)=>{

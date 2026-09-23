@@ -180,7 +180,7 @@ function QuotesList({navigation}) {
     finally { lock.current = false; if (active.current) setSaving(false); }
   }
   return <Page title="My quotations" navigation={navigation}>
-    <Text style={styles.muted}>Your submitted and withdrawn quotations. Withdrawing prevents a customer from using the offer; the record remains in quotation history.</Text>
+    <Text style={styles.muted}>Your submitted, accepted and withdrawn quotations. Accepted offers link to their booking. Withdrawing an unaccepted offer keeps its history.</Text>
     <Notice busy={busy || saving} error={offline ? offlineMessage : error}/>
     {!!message && <Text accessibilityLiveRegion="polite">{message}</Text>}
     {(data?.items || []).map(original => {
@@ -189,6 +189,7 @@ function QuotesList({navigation}) {
         <Text style={styles.heading}>{quote.requestTitle || 'Service request'}</Text>
         {!!quote.vehicle && <Text>{[quote.vehicle.year, quote.vehicle.make, quote.vehicle.model].filter(Boolean).join(' ')}</Text>}
         <QuoteCard quote={quote}/>
+        {!!quote.bookingId && <Button title="View booking" disabled={disabled} onPress={() => { if (!disabled) navigation.navigate('BookingDetail', {id: quote.bookingId}); }}/>}
         <Button title="View request" disabled={disabled} onPress={() => { if (!disabled) navigation.navigate('ShopRequest', {id: quote.serviceRequestId}); }}/>
         {quote.status === 'submitted' && <ConfirmationButton title="Withdraw quotation" message="This withdraws your offer and keeps its history. A replacement quotation cannot be submitted for this request." disabled={disabled} danger onConfirm={() => withdraw(quote.id)}/>}
       </View>;

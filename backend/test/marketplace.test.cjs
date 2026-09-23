@@ -2,6 +2,8 @@ const {test}=require('node:test'),assert=require('node:assert/strict');
 const {memoryDb}=require('./helpers/memory-db.cjs');
 const {createMarketplace,quoteId}=require('../marketplace.cjs');
 const M=require('../marketplace-domain.cjs');
+const {Timestamp}=require('firebase-admin/firestore');
+const B=require('../booking-domain.cjs');
 const seed={
  'users/owner':{role:'owner',fullName:'Private customer name',phone:'private phone'},
  'users/other':{role:'owner'},
@@ -162,4 +164,163 @@ test('archived vehicles or categories hide unquotable requests but preserve owne
   assert.equal((await f.read('owner','request',{id})).request.id,id);
   assert.equal((await f.read('shop','quotes')).items.length,1);
  }
+});
+
+async function offered(f,{visibility='open',shopId}={}){
+ const serviceRequestId=await created(f,{visibility,...(shopId?{shopId}:{})});
+ const result=await f.write('shop','quoteSubmit',{serviceRequestId,...quoteData});
+ return {serviceRequestId,id:result.id};
+}
+async function booked(f){const offer=await offered(f),booking=await f.write('owner','quoteAccept',{id:offer.id});return {...offer,bookingId:booking.id};}
+const appointment={appointmentDate:'2099-12-01',appointmentTime:'09:30'};
+const bookingAudits=f=>audits(f).filter(([,v])=>['marketplace.quoteAccept','marketplace.bookingConfirm','marketplace.bookingCancel'].includes(v.action));
+
+test('acceptance atomically selects one quote and creates private immutable booking terms',async()=>{
+ const f=fixture(),offer=await offered(f),result=await f.write('owner','quoteAccept',{id:offer.id});
+ assert.equal(result.id,offer.serviceRequestId);
+ const request=f.db.rows.get('serviceRequests/'+offer.serviceRequestId),quote=f.db.rows.get('quotations/'+offer.id),saved=f.db.rows.get('bookings/'+result.id);
+ assert.equal(request.status,'booked');assert.equal(request.acceptedQuoteId,offer.id);assert.equal(request.bookingId,result.id);
+ assert.equal(quote.status,'accepted');assert.equal(quote.bookingId,result.id);assert.equal(saved.status,'pending_confirmation');
+ assert.deepEqual(saved.items,quoteData.items);assert.equal(saved.totalCents,100000);assert.equal(saved.scope,quoteData.scope);assert.equal(saved.shopName,'Trusted Motors');assert.equal(saved.city,'Johannesburg');assert.equal(saved.categoryName,'Paint');
+ assert.deepEqual(saved.vehicle,{make:'Toyota',model:'Corolla',year:2020,colour:'Blue'});
+ quote.items[0].amountCents=1;request.title='Changed later';f.db.rows.get('vehicles/car').colour='Red';
+ const owner=(await f.read('owner','booking',{id:result.id})).booking,shop=(await f.read('shop','booking',{id:result.id})).booking;
+ assert.equal(owner.items[0].amountCents,10000);assert.equal(owner.requestTitle,requestData.title);assert.equal(owner.vehicle.colour,'Blue');
+ assert.equal(shop.ownerId,undefined);assert.equal(shop.vehicleId,undefined);assert.ok(!JSON.stringify(shop).includes('PRIVATE-REG'));assert.ok(!JSON.stringify(shop).includes('private phone'));
+ assert.equal(bookingAudits(f).length,1);
+});
+
+test('acceptance retries survive a lost response, changed availability and cancellation without creating another booking',async()=>{
+ const f=fixture(),offer=await offered(f);let once=true;
+ f.db.after=async()=>{if(once){once=false;throw Error('Synthetic lost acceptance response');}};
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id},'accept-once'),/lost acceptance response/);
+ const result=await f.write('owner','quoteAccept',{id:offer.id},'accept-once');
+ assert.deepEqual(await f.write('owner','quoteAccept',{id:offer.id},'accept-again-new-key'),result);
+ f.db.rows.get('vehicles/car').archived=true;f.db.rows.get('serviceCategories/paint').archived=true;f.db.rows.get('users/shop').accountStatus='suspended';
+ assert.deepEqual(await f.write('owner','quoteAccept',{id:offer.id},'lookup-existing'),result);
+ await f.write('owner','bookingCancel',{id:result.id,reason:'Shop is unavailable'},'cancel-once');
+ assert.deepEqual(await f.write('owner','quoteAccept',{id:offer.id},'after-cancellation'),result);
+ assert.equal(f.db.rows.get('bookings/'+result.id).status,'cancelled');assert.equal(f.db.rows.get('serviceRequests/'+offer.serviceRequestId).status,'booked');assert.equal(f.db.rows.get('quotations/'+offer.id).status,'accepted');
+ assert.equal([...f.db.rows.keys()].filter(k=>k.startsWith('bookings/')).length,1);assert.equal(bookingAudits(f).filter(([,v])=>v.action==='marketplace.quoteAccept').length,1);
+});
+
+test('expired, withdrawn and closed offers cannot be accepted and failures leave no partial booking',async()=>{
+ for(const change of [
+  (f,o)=>{f.db.rows.get('quotations/'+o.id).validUntil=Timestamp.fromMillis(Date.now()-1);},
+  (f,o)=>{f.db.rows.get('quotations/'+o.id).validUntil='2099-01-01';},
+  (f,o)=>{f.db.rows.get('quotations/'+o.id).status='withdrawn';},
+  (f,o)=>{f.db.rows.get('serviceRequests/'+o.serviceRequestId).status='closed';},
+ ]){
+  const f=fixture(),offer=await offered(f);change(f,offer);
+  await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id}),{code:'failed-precondition'});
+  assert.equal([...f.db.rows.keys()].filter(k=>k.startsWith('bookings/')).length,0);assert.equal(bookingAudits(f).length,0);
+ }
+});
+
+test('acceptance rechecks selected shop, owner Auth, vehicle and category availability inside its transaction',async()=>{
+ const changes=[
+  f=>{f.db.rows.get('users/shop').verificationStatus='pending';},
+  f=>{f.db.rows.get('users/shop').accountStatus='suspended';},
+  f=>{f.db.rows.get('users/shop').reviewOperation='review';},
+  f=>{f.users.set('shop',{emailVerified:false,disabled:false});},
+  f=>{f.users.set('shop',{emailVerified:true,disabled:true});},
+  f=>{f.users.set('owner',{emailVerified:false,disabled:false});},
+  f=>{f.db.rows.get('vehicles/car').archived=true;},
+  f=>{f.db.rows.get('vehicles/car').ownerId='other';},
+  f=>{f.db.rows.get('serviceCategories/paint').archived=true;},
+ ];
+ for(const change of changes){const f=fixture(),offer=await offered(f);f.db.before=()=>change(f);await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id}),{code:'failed-precondition'});assert.equal(f.db.rows.get('serviceRequests/'+offer.serviceRequestId).status,'open');assert.equal(f.db.rows.get('quotations/'+offer.id).status,'submitted');assert.equal(bookingAudits(f).length,0);}
+ const f=fixture(),offer=await offered(f);f.db.before=()=>{f.db.rows.get('users/owner').accountStatus='archived';};await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id}),{code:'permission-denied'});
+});
+
+test('acceptance enforces request ownership, direct audience and field allowlists',async()=>{
+ const f=fixture(),offer=await offered(f,{visibility:'direct',shopId:'shop'});
+ await assert.rejects(()=>f.write('other','quoteAccept',{id:offer.id}),{code:'not-found'});
+ for(const uid of ['shop','competitor','admin'])await assert.rejects(()=>f.write(uid,'quoteAccept',{id:offer.id}),{code:'permission-denied'});
+ await assert.rejects(()=>f.read('owner','quoteAccept',{id:offer.id}),{code:'invalid-argument'});
+ for(const data of [{status:'confirmed'},{shopId:'competitor'},{totalCents:1},{ownerId:'other'}])await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id,...data}),{code:'invalid-argument'});
+ f.db.rows.get('serviceRequests/'+offer.serviceRequestId).shopId='competitor';await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id}),{code:'failed-precondition'});assert.equal(bookingAudits(f).length,0);
+});
+
+test('a selected quote blocks another selection, request closure and accepted-quote withdrawal even after cancellation',async()=>{
+ const f=fixture(),offer=await offered(f),other=await f.write('competitor','quoteSubmit',{serviceRequestId:offer.serviceRequestId,...quoteData});
+ const result=await f.write('owner','quoteAccept',{id:offer.id},'chosen');
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:other.id},'chosen'),{code:'already-exists'});
+ for(const beforeCancel of [true,false]){
+  if(!beforeCancel)await f.write('owner','bookingCancel',{id:result.id,reason:'Plans changed'});
+  await assert.rejects(()=>f.write('owner','quoteAccept',{id:other.id}),{code:'failed-precondition'});
+  await assert.rejects(()=>f.write('owner','requestClose',{id:offer.serviceRequestId}),{code:'failed-precondition'});
+  await assert.rejects(()=>f.write('shop','quoteWithdraw',{id:offer.id}),{code:'failed-precondition'});
+ }
+ assert.equal(f.db.rows.get('quotations/'+other.id).status,'submitted');assert.equal(bookingAudits(f).filter(([,v])=>v.action==='marketplace.quoteAccept').length,1);
+});
+
+test('booking reads, confirmation and cancellation are scoped to the two eligible participants',async()=>{
+ const f=fixture(),b=await booked(f);
+ for(const uid of ['other','competitor']){await assert.rejects(()=>f.read(uid,'booking',{id:b.bookingId}),{code:'not-found'});assert.equal((await f.read(uid,'bookings')).items.length,0);await assert.rejects(()=>f.write(uid,'bookingCancel',{id:b.bookingId,reason:'Forged cancellation'}),{code:'not-found'});}
+ await assert.rejects(()=>f.write('competitor','bookingConfirm',{id:b.bookingId,...appointment}),{code:'not-found'});
+ await assert.rejects(()=>f.write('owner','bookingConfirm',{id:b.bookingId,...appointment}),{code:'permission-denied'});
+ for(const op of ['booking','bookings','bookingConfirm','bookingCancel'])await assert.rejects(()=>f.write('admin',op,{id:b.bookingId}),{code:/permission-denied|invalid-argument/});
+ f.db.rows.get('users/shop').verificationStatus='pending';await assert.rejects(()=>f.read('shop','booking',{id:b.bookingId}),{code:'permission-denied'});
+ f.db.rows.get('users/owner').accountStatus='suspended';await assert.rejects(()=>f.read('owner','bookings'),{code:'permission-denied'});
+});
+
+test('appointments validate strict calendar/time syntax and use South African UTC+02:00',()=>{
+ for(const values of [{appointmentDate:'2030-02-30'},{appointmentDate:'2030-2-01'},{appointmentDate:''},{appointmentDate:2030},{appointmentTime:'24:00'},{appointmentTime:'09:60'},{appointmentTime:'9:00'},{appointmentTime:'09:00Z'}])assert.throws(()=>B.appointment({...appointment,...values}),{code:'invalid-argument'});
+ const parsed=B.appointment({appointmentDate:'2030-01-02',appointmentTime:'00:30'});assert.equal(parsed.appointmentMillis,Date.parse('2030-01-01T22:30:00Z'));
+ const original=Date.now;try{Date.now=()=>parsed.appointmentMillis;assert.throws(()=>B.requireFutureAppointment(parsed),{code:'invalid-argument'});Date.now=()=>parsed.appointmentMillis-1;assert.doesNotThrow(()=>B.requireFutureAppointment(parsed));}finally{Date.now=original;}
+});
+
+test('confirmation preserves historical terms after archive, and a retry still succeeds after appointment time passes',async()=>{
+ const original=Date.now;try{
+  Date.now=()=>Date.parse('2030-01-01T10:00:00Z');const f=fixture(),b=await booked(f),data={id:b.bookingId,appointmentDate:'2030-01-02',appointmentTime:'00:30'};
+  f.db.rows.get('vehicles/car').archived=true;f.db.rows.get('serviceCategories/paint').archived=true;
+  await assert.rejects(()=>f.write('shop','bookingConfirm',{...data,appointmentDate:'2030-01-01',appointmentTime:'12:00'}),{code:'invalid-argument'});
+  let once=true;f.db.after=()=>{if(once){once=false;throw Error('Synthetic confirmation response lost');}};
+  await assert.rejects(()=>f.write('shop','bookingConfirm',data,'confirm-once'),/response lost/);
+  Date.now=()=>Date.parse('2030-01-03T10:00:00Z');const result=await f.write('shop','bookingConfirm',data,'confirm-once');assert.equal(result.id,b.bookingId);
+  const saved=(await f.read('owner','booking',{id:b.bookingId})).booking;assert.equal(saved.status,'confirmed');assert.equal(saved.appointmentAt,Date.parse('2030-01-01T22:30:00Z'));assert.equal(saved.appointmentDate,'2030-01-02');assert.equal(saved.appointmentTime,'00:30');assert.equal(saved.totalCents,100000);
+  await assert.rejects(()=>f.write('shop','bookingConfirm',data),{code:'failed-precondition'});await assert.rejects(()=>f.write('shop','bookingConfirm',{...data,appointmentTime:'01:30'},'confirm-once'),{code:'already-exists'});
+  assert.equal(bookingAudits(f).filter(([,v])=>v.action==='marketplace.bookingConfirm').length,1);
+ }finally{Date.now=original;}
+});
+
+test('confirmation rechecks both current accounts; cancellation remains available to an eligible counterpart',async()=>{
+ for(const change of [f=>{f.db.rows.get('users/owner').accountStatus='suspended';},f=>{f.users.set('owner',{emailVerified:true,disabled:true});},f=>{f.users.set('shop',{emailVerified:false,disabled:false});}]){
+  const f=fixture(),b=await booked(f);f.db.before=()=>change(f);await assert.rejects(()=>f.write('shop','bookingConfirm',{id:b.bookingId,...appointment}),{code:'failed-precondition'});assert.equal(f.db.rows.get('bookings/'+b.bookingId).status,'pending_confirmation');
+ }
+ for(const uid of ['owner','shop']){
+  const f=fixture(),b=await booked(f),counterpart=uid==='owner'?'shop':'owner';f.db.rows.get('users/'+counterpart).accountStatus='suspended';f.users.set(counterpart,{emailVerified:true,disabled:true});
+  const result=await f.write(uid,'bookingCancel',{id:b.bookingId,reason:'  The other account is unavailable.  '},'cancel-once');assert.deepEqual(await f.write(uid,'bookingCancel',{id:b.bookingId,reason:'  The other account is unavailable.  '},'cancel-once'),result);
+  const saved=(await f.read(uid,'booking',{id:b.bookingId})).booking;assert.equal(saved.status,'cancelled');assert.equal(saved.cancelledByRole,uid);assert.equal(saved.cancellationReason,'The other account is unavailable.');assert.equal(bookingAudits(f).filter(([,v])=>v.action==='marketplace.bookingCancel').length,1);
+ }
+});
+
+test('cancellation requires a useful reason and cannot reopen or overwrite a terminal booking',async()=>{
+ const f=fixture(),b=await booked(f);
+ for(const reason of ['',null,'  ','x'.repeat(501)])await assert.rejects(()=>f.write('owner','bookingCancel',{id:b.bookingId,reason}),{code:'invalid-argument'});
+ for(const extra of [{status:'confirmed'},{cancelledByRole:'shop'},{appointmentAt:0}])await assert.rejects(()=>f.write('owner','bookingCancel',{id:b.bookingId,reason:'Changed plans',...extra}),{code:'invalid-argument'});
+ await f.write('shop','bookingConfirm',{id:b.bookingId,...appointment});await f.write('owner','bookingCancel',{id:b.bookingId,reason:'Changed plans'});
+ await assert.rejects(()=>f.write('shop','bookingCancel',{id:b.bookingId,reason:'Overwrite'}),{code:'failed-precondition'});
+ await assert.rejects(()=>f.write('shop','bookingConfirm',{id:b.bookingId,...appointment}),{code:'failed-precondition'});
+ assert.equal(f.db.rows.get('bookings/'+b.bookingId).cancellationReason,'Changed plans');assert.equal(f.db.rows.get('bookings/'+b.bookingId).status,'cancelled');
+});
+
+test('booking pages are bounded, participant-scoped and redact customer identifiers for shops',async()=>{
+ const f=fixture(),b=await booked(f),template=f.db.rows.get('bookings/'+b.bookingId);
+ for(let n=0;n<25;n++){const id=String(n).padStart(2,'0');f.db.rows.set('bookings/b'+id,{...template});f.db.rows.set('bookings/other'+id,{...template,ownerId:'other',shopId:'competitor'});}
+ for(const uid of ['owner','shop']){const first=await f.read(uid,'bookings'),second=await f.read(uid,'bookings',{cursor:first.cursor});assert.equal(first.items.length,20);assert.equal(second.items.length,6);assert.equal(second.cursor,null);assert.equal(new Set([...first.items,...second.items].map(item=>item.id)).size,26);assert.ok([...first.items,...second.items].every(item=>uid==='owner'?item.ownerId==='owner':item.ownerId===undefined&&item.vehicleId===undefined));}
+ assert.ok(f.db.queries.filter(q=>q.path==='bookings').every(q=>q.maximum===21));
+});
+
+test('deadlines that pass while Auth is being checked cannot commit acceptance or confirmation',async t=>{
+ let now=Date.parse('2030-01-01T08:00:00Z');t.mock.method(Date,'now',()=>now);
+ const f=fixture(),offer=await offered(f);f.db.rows.get('quotations/'+offer.id).validUntil=Timestamp.fromMillis(now+1000);
+ f.auth.getUser=async()=>{now+=2000;return {emailVerified:true,disabled:false};};
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id}),{code:'failed-precondition'});
+ assert.equal(f.db.rows.has('bookings/'+offer.serviceRequestId),false);
+ const g=fixture(),b=await booked(g);now=Date.parse('2030-01-02T07:59:59Z');
+ g.auth.getUser=async()=>{now+=2000;return {emailVerified:true,disabled:false};};
+ await assert.rejects(()=>g.write('shop','bookingConfirm',{id:b.bookingId,appointmentDate:'2030-01-02',appointmentTime:'10:00'}),{code:'invalid-argument'});
+ assert.equal(g.db.rows.get('bookings/'+b.bookingId).status,'pending_confirmation');
 });

@@ -15,7 +15,8 @@ try{
  else if(!process.env.FIREBASE_AUTH_EMULATOR_HOST)throw Error('Configure a server-only Firebase service account credential.');
  initializeApp({projectId,...(credential?{credential}:{})});
  const auth=getAuth(),db=getFirestore(),storage=createStorage({url:process.env.SUPABASE_URL,key:process.env.SUPABASE_SECRET_KEY,bucket:process.env.SUPABASE_BUCKET||'verification'});
- const app=createApp({auth,services:createServices({db,auth,storage}),trustProxy:process.env.RENDER?1:false,
+ const photoStorage=createStorage({url:process.env.SUPABASE_URL,key:process.env.SUPABASE_SECRET_KEY,bucket:process.env.SUPABASE_PHOTO_BUCKET||'marketplace-photos',scope:'photos'});
+ const app=createApp({auth,services:createServices({db,auth,storage,photoStorage}),trustProxy:process.env.RENDER?1:false,
   allowedOrigins:corsOrigins(process.env.CORS_ORIGINS,process.env.NODE_ENV==='production')});
  const server=app.listen(Number(process.env.PORT)||3000,'0.0.0.0',()=>console.log('PimpMyRide API ready.'));
  server.requestTimeout=90000;

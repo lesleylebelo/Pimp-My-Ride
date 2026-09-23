@@ -45,6 +45,16 @@ test('shop feeds send the correct audience and navigate with a request identifie
   }
 });
 
+test('accepted quotations open their booking and cannot be withdrawn', async () => {
+  const {state,screens,navigation}=setup({data:{items:[{...quote,status:'accepted',bookingId:'booking-1'}],cursor:null}});
+  const tree=await mount(screens.ShopQuotesScreen,{navigation});
+  assert.equal(button(tree,'Withdraw quotation'),undefined);
+  await act(async()=>button(tree,'View booking').props.onPress());
+  assert.deepEqual(state.navigations,[['BookingDetail',{id:'booking-1'}]]);
+  assert.equal(state.calls.length,0);
+  await act(async()=>tree.unmount());
+});
+
 test('fresh closed requests and existing quotations block submission despite open navigation data', async () => {
   const {state, screens, navigation} = setup({data: {request: {...request, status: 'closed'}, quotes: []}});
   const props = {navigation, route: {params: {request}}};
