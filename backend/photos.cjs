@@ -85,19 +85,23 @@ function createPhotos({db,auth,storage,actor}){
   const attempt=db.doc(`storagePhotosUploadAttempts/${P.hash(`${a.uid}\n${request.requestId}`)}`),vehicleRef=db.doc(`vehicles/${vehicleId}`),workerToken=randomUUID();
   const freshAssetId=randomUUID(),path=`photos/${a.uid}/${vehicleId}/${freshAssetId}`;
   function checkRecord(record){if(record&&(record.uid!==a.uid||record.fingerprint!==fingerprint))D.fail('This upload key was already used with different data.','already-exists');}
-  function outcome(record){checkRecord(record);if(record?.state==='referenced')return {done:true,result:record.result};if(record?.state==='cleanupPending')throw closed();if(record?.state==='uploading'&&record.workerToken===workerToken)return {done:false,record};D.fail('The upload is still pending or its outcome is unknown. Refresh and retry the same photo shortly.','unavailable');}
+  const succeeded=record=>!!record?.result&&['referenced','cleanupPending'].includes(record.state);
+  function outcome(record){checkRecord(record);if(succeeded(record))return {done:true,result:record.result};if(record?.state==='cleanupPending')throw closed();if(record?.state==='uploading'&&record.workerToken===workerToken)return {done:false,record};D.fail('The upload is still pending or its outcome is unknown. Refresh and retry the same photo shortly.','unavailable');}
   let reservation;
   try{
    reservation=await db.runTransaction(async tx=>{
     const saved=(await tx.get(attempt)).data();checkRecord(saved);
     if(saved){
-     if(saved.state==='referenced')return {done:true,result:saved.result};
+     if(succeeded(saved))return {done:true,result:saved.result};
      if(saved.state==='uploading'&&saved.createdAt instanceof Timestamp&&saved.createdAt.toMillis()<=Date.now()-LEASE_MS){tx.update(attempt,{state:'cleanupPending',reason:'expired',updatedAt:stamp()});return {closed:true};}
      if(saved.state==='cleanupPending')return {closed:true};
      D.fail('The upload is still in progress. Refresh and retry the same photo shortly.','unavailable');
     }
-    await currentOwner(tx,a.uid);sameVersion(ownVehicle(await tx.get(vehicleRef),a.uid,true),version);
+    await currentOwner(tx,a.uid);const vehicle=ownVehicle(await tx.get(vehicleRef),a.uid,true);
     const record={provider:'supabase',uid:a.uid,vehicleId,slot,assetId:freshAssetId,path,fingerprint,workerToken,state:'uploading',createdAt:stamp(),updatedAt:stamp()};
+    // Fence a stale key durably before allowing a new one. A concurrent retry
+    // cannot subsequently reserve that key, even if this response is lost.
+    if(revision(vehicle)!==version){tx.create(attempt,{...record,state:'cleanupPending',reason:'stale-version'});return {closed:true};}
     tx.create(attempt,record);return {done:false,record};
    });
   }catch(error){
@@ -110,7 +114,7 @@ function createPhotos({db,auth,storage,actor}){
   const owned=reservation.record,assetRef=db.doc(`marketplacePhotos/${owned.assetId}`);
   async function settle(){return db.runTransaction(async tx=>{
    const saved=(await tx.get(attempt)).data();checkRecord(saved);
-   if(saved?.state==='referenced')return {done:true,result:saved.result};
+   if(succeeded(saved))return {done:true,result:saved.result};
    if(saved?.state==='uploading'&&saved.workerToken===workerToken)tx.update(attempt,{state:'cleanupPending',reason:'failed',updatedAt:stamp()});
    if(saved?.state==='cleanupPending'||(saved?.state==='uploading'&&saved.workerToken===workerToken))return {closed:true};
    return {unknown:true};
@@ -120,9 +124,12 @@ function createPhotos({db,auth,storage,actor}){
    return await db.runTransaction(async tx=>{
     await currentOwner(tx,a.uid);
     const [vehicleDoc,ledger]=await Promise.all([tx.get(vehicleRef),tx.get(attempt)]),vehicle=ownVehicle(vehicleDoc,a.uid,true),saved=ledger.data();
-    if(saved?.state!=='uploading'||saved.workerToken!==workerToken)D.fail('The upload lease was closed. Refresh before trying again.','failed-precondition');sameVersion(vehicle,version);
+    if(saved?.state!=='uploading'||saved.workerToken!==workerToken||!(saved.createdAt instanceof Timestamp)||saved.createdAt.toMillis()<=Date.now()-LEASE_MS)D.fail('The upload lease expired or was closed. Refresh before trying again.','failed-precondition');sameVersion(vehicle,version);
     const previousId=vehicle.photoSlots?.[slot];let previousRef,previous;
     if(previousId){const prior=await tx.get(db.doc(`marketplacePhotos/${D.id(previousId)}`)),value=checkedAsset(prior,{ownerId:a.uid,vehicleId});previousRef=db.doc(`storagePhotosUploadAttempts/${D.id(value.uploadAttemptId)}`);previous=await tx.get(previousRef);if(previous.data()?.path!==value.path||previous.data()?.assetId!==previousId)previousRef=null;}
+    // Previous-asset reads can take time too. Do not publish if the lease
+    // expires while resolving replacement metadata in this transaction.
+    if(saved.createdAt.toMillis()<=Date.now()-LEASE_MS)D.fail('The upload lease expired. Refresh before trying again.','failed-precondition');
     const slots={...vehicle.photoSlots,[slot]:owned.assetId},result={ok:true,id:owned.assetId,slot,version:version+1};
     tx.create(assetRef,{provider:'supabase',ownerId:a.uid,vehicleId,slot,path:owned.path,name:file.name,size:file.size,contentType:file.contentType,uploadedAt:stamp(),uploadAttemptId:attempt.id});
     tx.update(vehicleRef,{photoSlots:slots,photoIds:Object.values(slots),photoRevision:version+1,updatedAt:stamp()});
@@ -134,7 +141,7 @@ function createPhotos({db,auth,storage,actor}){
    let settled;try{settled=await settle();}catch{
     // Settlement itself can lose its acknowledgement. Only an authoritative
     // terminal ledger read can authorize a new key or confirm success.
-    try{const saved=(await attempt.get()).data();checkRecord(saved);if(saved?.state==='referenced')settled={done:true,result:saved.result};else if(saved?.state==='cleanupPending')settled={closed:true};}catch{}
+    try{const saved=(await attempt.get()).data();checkRecord(saved);if(succeeded(saved))settled={done:true,result:saved.result};else if(saved?.state==='cleanupPending')settled={closed:true};}catch{}
    }
    if(settled?.done)return settled.result;
    if(settled?.closed)throw closed(error instanceof ApiError?error.message:'The photo upload failed safely. Refresh photos and select it again.');

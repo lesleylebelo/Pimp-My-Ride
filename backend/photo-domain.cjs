@@ -45,6 +45,6 @@ function safePhoto(value,id){return {id,name:value.name,size:value.size,contentT
 async function snapshotRequestPhotos(tx,db,vehicle,ownerId,vehicleId,selected){
  const ids=photoIds(selected),current=new Set(Object.values(vehicle.photoSlots||{}));
  const records=await Promise.all(ids.map(id=>tx.get(db.doc(`marketplacePhotos/${id}`))));
- return records.map((doc,index)=>{const value=doc.data(),id=ids[index];if(!current.has(id)||!value||value.ownerId!==ownerId||value.vehicleId!==vehicleId)D.fail('A selected photo changed. Refresh the vehicle photos before submitting.','failed-precondition');return safePhoto(value,id);});
+ return records.map((doc,index)=>{const value=doc.data(),id=ids[index];if(!current.has(id)||!value||value.ownerId!==ownerId||value.vehicleId!==vehicleId||value.path!==`photos/${ownerId}/${vehicleId}/${id}`)D.fail('A selected photo changed. Refresh the vehicle photos before submitting.','failed-precondition');return safePhoto(value,id);});
 }
 module.exports={MAX_BYTES,MAX_PHOTOS,hash,slots,slot,version,eligible,photoIds,validatePhoto,safePhoto,snapshotRequestPhotos};

@@ -23,6 +23,7 @@ function setup({api=async()=>({id:'saved'}),read,auth={user:{uid:'owner'},profil
   const screens=loadUI('src/features/marketplace/screens/OwnerMarketplaceScreens.js',{
     '../../../shared/components/landing/LandingUI':{LandingText:props=>React.createElement('Text',props),LandingShell:({children})=>React.createElement('View',null,children),LandingButton:Primary,ui:{},ownerTabs:[],shopTabs:[],useLandingFeedback:()=>({})},
     '../../auth/context/AuthContext':{useAuth:()=>auth},
+    '../components/PhotoGallery':props=>React.createElement('PhotoGallery',props),
     '../services/marketApi':{marketApi:async(...args)=>{calls.push(args);return api(...args);}},
     '../hooks/useMarketData':{useMarketData:(op,input)=>{reads.push([op,input]);return {data:read?read(op,input):{items:[]},busy:false,error:'',refresh:async()=>{}};}},
   });
@@ -120,4 +121,48 @@ test('owner requests use the mine feed and disable opening or creating requests 
   await press(tree,'View Paint the doors');assert.deepEqual(context.moves,[['navigate','OwnerRequest',{id:'req-one'}]]);
   context.auth.offline=true;await act(async()=>tree.update(React.createElement(context.screens.OwnerRequestsScreen,{route:{params:{}},navigation:context.navigation})));
   await press(tree,'Create service request');await press(tree,'View Paint the doors');assert.equal(context.moves.length,1);await unmount(tree);
+});
+
+test('garage opens the correct vehicle photo library and blocks navigation offline',async()=>{
+ const context=setup({read:()=>({items:[vehicle,secondVehicle],cursor:null})}),tree=await mount(context,'GarageScreen');
+ await press(tree,'Photos for Ford Fiesta');assert.deepEqual(context.moves,[['navigate','VehiclePhotos',{id:secondVehicle.id}]]);
+ context.auth.offline=true;await act(async()=>tree.update(React.createElement(context.screens.GarageScreen,{navigation:context.navigation})));
+ assert.equal(button(tree,'Photos for Toyota Corolla').props.disabled,true);await press(tree,'Photos for Toyota Corolla');assert.equal(context.moves.length,1);await unmount(tree);
+});
+
+test('request photo selection follows the selected vehicle, resets when switching vehicles and submits only chosen IDs',async()=>{
+ const context=setup({read:op=>({items:op==='vehicles'?[vehicle,secondVehicle]:op==='categories'?[category]:[shop]})});
+ const tree=await mount(context,'RequestFormScreen'),gallery=()=>tree.root.findByType('PhotoGallery');assert.equal(tree.root.findAllByType('PhotoGallery').length,0);
+ await press(tree,'Toyota Corolla (2020)');assert.equal(gallery().props.target,'vehicle');assert.equal(gallery().props.id,vehicle.id);assert.deepEqual(gallery().props.selectedIds,[]);assert.notEqual(gallery().props.editable,true);
+ await act(async()=>gallery().props.onSelectionChange(['first-photo','second-photo']));assert.deepEqual(gallery().props.selectedIds,['first-photo','second-photo']);assert.ok(says(tree,'2 photos selected'));
+ await press(tree,'Ford Fiesta (2020)');assert.equal(gallery().props.id,secondVehicle.id);assert.deepEqual(gallery().props.selectedIds,[]);
+ await act(async()=>gallery().props.onSelectionChange(['ford-photo']));await press(tree,'Manage vehicle photos');assert.deepEqual(context.moves,[['navigate','VehiclePhotos',{id:secondVehicle.id}]]);
+ await press(tree,'Paint');await fillRequest(tree);await press(tree,'Submit request');
+ assert.equal(context.calls[0][0],'requestCreate');assert.equal(context.calls[0][1].vehicleId,secondVehicle.id);assert.deepEqual(context.calls[0][1].photoIds,['ford-photo']);assert.equal(Object.hasOwn(context.calls[0][1],'photos'),false);
+ assert.deepEqual(context.moves.at(-1),['replace','OwnerRequest',{id:'saved'}]);await unmount(tree);
+});
+
+test('request photo selection is locked during submission, retained on failure and explicitly clearable',async()=>{
+ let reject;const context=setup({read:op=>({items:op==='vehicles'?[vehicle]:op==='categories'?[category]:[shop]}),api:()=>new Promise((_,fail)=>{reject=fail;})});
+ const tree=await mount(context,'RequestFormScreen',{vehicleId:vehicle.id,vehicle}),gallery=()=>tree.root.findByType('PhotoGallery');
+ await act(async()=>gallery().props.onSelectionChange(['saved-photo']));await press(tree,'Paint');await fillRequest(tree);
+ let pending;await act(async()=>{pending=button(tree,'Submit request').props.onPress();});assert.equal(gallery().props.disabled,true);assert.equal(button(tree,'Manage vehicle photos').props.disabled,true);
+ await act(async()=>gallery().props.onSelectionChange(['wrong-photo']));assert.deepEqual(gallery().props.selectedIds,['saved-photo']);await press(tree,'Clear photo selection');assert.deepEqual(gallery().props.selectedIds,['saved-photo']);
+ await act(async()=>{reject(Error('Request outcome unavailable'));await pending;});assert.ok(says(tree,'Request outcome unavailable'));assert.deepEqual(gallery().props.selectedIds,['saved-photo']);
+ assert.deepEqual(context.calls[0][1].photoIds,['saved-photo']);await press(tree,'Clear photo selection');assert.deepEqual(gallery().props.selectedIds,[]);assert.equal(button(tree,'Clear photo selection'),undefined);await unmount(tree);
+});
+
+test('switching account clears request photo selections and offline callbacks cannot change them',async()=>{
+ const context=setup({read:op=>({items:op==='vehicles'?[vehicle]:op==='categories'?[category]:[shop]})}),params={vehicleId:vehicle.id,vehicle};
+ const tree=await mount(context,'RequestFormScreen',params),gallery=()=>tree.root.findByType('PhotoGallery');await act(async()=>gallery().props.onSelectionChange(['old-account-photo']));
+ context.auth.offline=true;await act(async()=>tree.update(React.createElement(context.screens.RequestFormScreen,{route:{params},navigation:context.navigation})));
+ assert.equal(gallery().props.disabled,true);await act(async()=>gallery().props.onSelectionChange(['offline-photo']));assert.deepEqual(gallery().props.selectedIds,['old-account-photo']);
+ context.auth.user={uid:'other-owner'};context.auth.offline=false;await act(async()=>tree.update(React.createElement(context.screens.RequestFormScreen,{route:{params},navigation:context.navigation})));
+ assert.deepEqual(gallery().props.selectedIds,[]);assert.equal(context.calls.length,0);await unmount(tree);
+});
+
+test('owner request details use a read-only request gallery only when attachments exist',async()=>{
+ let current={...request,photoIds:['request-photo']};const context=setup({read:()=>({request:current,quotes:[]})}),params={id:request.id};
+ const tree=await mount(context,'OwnerRequestScreen',params),gallery=tree.root.findByType('PhotoGallery');assert.equal(gallery.props.target,'request');assert.equal(gallery.props.id,request.id);assert.notEqual(gallery.props.editable,true);assert.equal(gallery.props.onSelectionChange,undefined);
+ current={...request,photoIds:[]};await act(async()=>tree.update(React.createElement(context.screens.OwnerRequestScreen,{route:{params},navigation:context.navigation})));assert.equal(tree.root.findAllByType('PhotoGallery').length,0);await unmount(tree);
 });

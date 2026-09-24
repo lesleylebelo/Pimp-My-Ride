@@ -1,6 +1,6 @@
 const {createHash}=require('node:crypto');
 const {FieldPath,FieldValue,Timestamp}=require('firebase-admin/firestore');
-const D=require('./domain.cjs'),M=require('./marketplace-domain.cjs'),B=require('./booking-domain.cjs');
+const D=require('./domain.cjs'),M=require('./marketplace-domain.cjs'),B=require('./booking-domain.cjs'),P=require('./photo-domain.cjs');
 const {mutation}=require('./mutations.cjs');
 const PAGE_SIZE=20;
 const stamp=()=>FieldValue.serverTimestamp();
@@ -9,14 +9,14 @@ const serialize=value=>value instanceof Timestamp?value.toMillis():Array.isArray
 const row=doc=>({id:doc.id,...serialize(doc.data())});
 const allowed={
  vehicles:['cursor','archived'],vehicleSave:['id','version','make','model','year','colour','registration'],vehicleArchive:['id','version','archived'],
- categories:['cursor'],shops:['cursor'],requestCreate:['vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId'],
+ categories:['cursor'],shops:['cursor'],requestCreate:['vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','photoIds'],
  requests:['feed','cursor'],request:['id','quotesCursor'],requestClose:['id'],quoteSubmit:['serviceRequestId','scope','items','completionDays','warranty','validForDays'],quotes:['cursor'],quoteWithdraw:['id'],
  quoteAccept:['id'],bookings:['cursor'],booking:['id'],bookingConfirm:['id','appointmentDate','appointmentTime'],bookingCancel:['id','reason'],
 };
 const mutations=new Set(['vehicleSave','vehicleArchive','requestCreate','requestClose','quoteSubmit','quoteWithdraw','quoteAccept','bookingConfirm','bookingCancel']);
 function eligible(profile,role){return profile?.role===role&&D.active(profile)&&!profile.statusOperation&&!profile.provisioningOperation&&(role!=='shop'||(profile.verificationStatus==='approved'&&!profile.reviewOperation));}
 function requireRole(profile,role){if(!eligible(profile,role))D.fail(role==='shop'?'An active, approved shop account is required.':'An active vehicle owner account is required.','permission-denied');}
-function requestFor(value,role){const result={...value};if(role==='shop'){delete result.ownerId;delete result.vehicleId;delete result.acceptedQuoteId;delete result.bookingId;}return result;}
+function requestFor(value,role){const result={...value};if(Array.isArray(result.photos))result.photos=result.photos.map(photo=>P.safePhoto(photo,photo.id));if(role==='shop'){delete result.ownerId;delete result.vehicleId;delete result.acceptedQuoteId;delete result.bookingId;}return result;}
 function createMarketplace({db,auth,actor}){
  const audit=(tx,uid,action,target,details={})=>tx.create(db.collection('auditLogs').doc(),{actor:uid,action:`marketplace.${action}`,target,details,createdAt:stamp()});
  async function current(tx,uid,role){const profile=(await tx.get(db.doc(`users/${uid}`))).data();requireRole(profile,role);return profile;}
@@ -116,14 +116,15 @@ function createMarketplace({db,auth,actor}){
     tx.update(ref,{archived,version:value.version+1,updatedAt:stamp()});audit(tx,a.uid,op,ref.id,{archived});return {id:ref.id};});
   }
   if(op==='requestCreate'){
-   const changes=M.serviceRequest(input),vehicleRef=db.doc(`vehicles/${D.id(input.vehicleId)}`),categoryRef=db.doc(`serviceCategories/${changes.categoryId}`),ref=db.collection('serviceRequests').doc();
+   const changes=M.serviceRequest(input),photoIds=P.photoIds(input.photoIds),vehicleRef=db.doc(`vehicles/${D.id(input.vehicleId)}`),categoryRef=db.doc(`serviceCategories/${changes.categoryId}`),ref=db.collection('serviceRequests').doc();
    return receipt.atomic(async tx=>{
     M.requireFutureDate(changes.preferredDate);
     await current(tx,a.uid,'owner');const [vehicleDoc,categoryDoc]=await Promise.all([tx.get(vehicleRef),tx.get(categoryRef)]),vehicle=ownVehicle(vehicleDoc,a.uid),category=categoryDoc.data();
     if(vehicle.archived)D.fail('Choose an active vehicle.','failed-precondition');
     if(!category||category.archived!==false)D.fail('Choose an active service category.','failed-precondition');
     if(changes.shopId){const shop=(await tx.get(db.doc(`users/${changes.shopId}`))).data();if(!eligible(shop,'shop'))D.fail('Choose an active, approved shop.','failed-precondition');await assertAuth(changes.shopId);}
-    tx.create(ref,{...changes,ownerId:a.uid,vehicleId:vehicleRef.id,vehicle:M.vehicleSnapshot(vehicle),categoryName:category.name,status:'open',createdAt:stamp(),updatedAt:stamp()});
+    const photos=await P.snapshotRequestPhotos(tx,db,vehicle,a.uid,vehicleRef.id,photoIds);
+    tx.create(ref,{...changes,photoIds,photos,ownerId:a.uid,vehicleId:vehicleRef.id,vehicle:M.vehicleSnapshot(vehicle),categoryName:category.name,status:'open',createdAt:stamp(),updatedAt:stamp()});
     audit(tx,a.uid,op,ref.id,{visibility:changes.visibility});return {id:ref.id};
    });
   }
@@ -183,7 +184,7 @@ function createMarketplace({db,auth,actor}){
     // External Auth reads can take time; check the offer deadline again just
     // before queuing the atomic writes, on every transaction attempt.
     if(quote.validUntil.toMillis()<=Date.now())D.fail('This quotation has expired.','failed-precondition');
-    tx.create(bookingRef,{...terms,ownerId:a.uid,shopId:quote.shopId,serviceRequestId:requestRef.id,quoteId:quoteRef.id,vehicleId:value.vehicleId,vehicle:M.vehicleSnapshot(value.vehicle),shopName:quote.shopName,requestTitle:value.title,categoryName:value.categoryName,city:value.city,status:'pending_confirmation',createdAt:stamp(),updatedAt:stamp()});
+    tx.create(bookingRef,{...terms,ownerId:a.uid,shopId:quote.shopId,serviceRequestId:requestRef.id,quoteId:quoteRef.id,vehicleId:value.vehicleId,vehicle:M.vehicleSnapshot(value.vehicle),photoIds:P.photoIds(value.photoIds),shopName:quote.shopName,requestTitle:value.title,categoryName:value.categoryName,city:value.city,status:'pending_confirmation',createdAt:stamp(),updatedAt:stamp()});
     tx.update(requestRef,{status:'booked',bookingId:bookingRef.id,acceptedQuoteId:quoteRef.id,bookedAt:stamp(),updatedAt:stamp()});
     tx.update(quoteRef,{status:'accepted',bookingId:bookingRef.id,acceptedAt:stamp(),updatedAt:stamp()});
     audit(tx,a.uid,op,bookingRef.id,{serviceRequestId:requestRef.id,quoteId:quoteRef.id});return {id:bookingRef.id};

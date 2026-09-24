@@ -7,6 +7,7 @@ import {marketApi} from '../services/marketApi';
 import {useMarketData} from '../hooks/useMarketData';
 import {Page, Card, Field, Button, Notice, Paging, usePages, formatMoney, QuoteCard} from '../components/MarketplaceUI';
 import {vehicleErrors, requestErrors, parseMoney} from '../utils/validation';
+import PhotoGallery from '../components/PhotoGallery';
 
 const hasErrors = errors => Object.values(errors).some(Boolean);
 const vehicleName = vehicle => `${vehicle.make} ${vehicle.model} (${vehicle.year})`;
@@ -54,6 +55,7 @@ export function GarageScreen({navigation}) {
     {(data?.items || []).map(vehicle => <Card key={vehicle.id}>
       <Text weight="semibold" style={styles.heading}>{vehicleName(vehicle)}</Text>
       <Text>{vehicle.colour} · {vehicle.registration}</Text>
+      <Button title={`Photos for ${vehicle.make} ${vehicle.model}`} outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehiclePhotos', {id: vehicle.id});}}/>
       {!archived && <><Button title={`Edit ${vehicle.make} ${vehicle.model}`} outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm', {vehicle});}}/>
         <Button title={`Request service for ${vehicle.make} ${vehicle.model}`} disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('RequestForm', {vehicleId: vehicle.id, vehicle});}}/></>}
       <ConfirmationButton title={archived ? `Restore ${vehicle.make} ${vehicle.model}` : `Archive ${vehicle.make} ${vehicle.model}`} message={archived ? 'Restore this vehicle to your active garage. Its open requests can become visible to shops again.' : 'Hide this vehicle from your active garage and stop new quotations on its requests until restored. Existing requests and quotations remain in your history.'} disabled={disabled} onConfirm={() => archive(vehicle)}/>
@@ -123,19 +125,19 @@ function RequestDraft({route, navigation}) {
   const vehicles = useMarketData('vehicles', {cursor: vehiclePages.cursor, archived: false});
   const categories = useMarketData('categories', {cursor: categoryPages.cursor});
   const shops = useMarketData('shops', {cursor: shopPages.cursor});
-  const [form, setForm] = useState(() => ({vehicleId: route.params?.vehicleId || '', title: '', description: '', categoryId: '', city: '', budgetMin: '', budgetMax: '', preferredDate: '', visibility: 'open', shopId: ''}));
+  const [form, setForm] = useState(() => ({vehicleId: route.params?.vehicleId || '', title: '', description: '', categoryId: '', city: '', budgetMin: '', budgetMax: '', preferredDate: '', visibility: 'open', shopId: '', photoIds: []}));
   const [selected, setSelected] = useState(() => ({vehicle: route.params?.vehicle || null, category: null, shop: null}));
   const [touched, setTouched] = useState({}), [submitted, setSubmitted] = useState(false);
   const mutation = useMutation(), errors = requestErrors(form), disabled = mutation.saving || mutation.offline;
   function edit(key, value) {if (!disabled) {setForm(previous => ({...previous, [key]: value})); setTouched(previous => ({...previous, [key]: true}));}}
   const fieldError = key => (submitted || touched[key]) ? errors[key] : null;
-  function choose(kind, item) {edit(`${kind}Id`, item.id); setSelected(previous => ({...previous, [kind]: item}));}
+  function choose(kind, item) {if (disabled) return; edit(`${kind}Id`, item.id); if (kind === 'vehicle') setForm(previous => ({...previous, photoIds: []})); setSelected(previous => ({...previous, [kind]: item}));}
   async function submit() {
     setSubmitted(true);
     if (disabled || hasErrors(errors)) return;
-    const {budgetMin, budgetMax, shopId, ...input} = form;
+    const {budgetMin, budgetMax, shopId, photoIds, ...input} = form;
     try {
-      const result = await mutation.run('requestCreate', {...input, budgetMinCents: parseMoney(budgetMin), budgetMaxCents: parseMoney(budgetMax), ...(form.visibility === 'direct' ? {shopId} : {})});
+      const result = await mutation.run('requestCreate', {...input, budgetMinCents: parseMoney(budgetMin), budgetMaxCents: parseMoney(budgetMax), ...(form.visibility === 'direct' ? {shopId} : {}), ...(photoIds.length ? {photoIds} : {})});
       if (result) navigation.replace('OwnerRequest', {id: result.id});
     } catch (_) { /* Preserve all selections and text for retry. */ }
   }
@@ -145,6 +147,14 @@ function RequestDraft({route, navigation}) {
     {form.vehicleId && <Text>Selected vehicle: {selected.vehicle ? vehicleName(selected.vehicle) : 'Vehicle from your garage'}</Text>}
     <Notice error={fieldError('vehicleId')}/>
     <Button title="Add a vehicle" outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm');}}/>
+    {!!form.vehicleId && <Card>
+      <Text weight="semibold">Attach vehicle photos (optional)</Text>
+      <Text>Choose up to five photos. Published requests keep these attachments even if you later change your garage photos.</Text>
+      <Button title="Manage vehicle photos" outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehiclePhotos', {id: form.vehicleId});}}/>
+      <PhotoGallery target="vehicle" id={form.vehicleId} selectedIds={form.photoIds} onSelectionChange={ids => edit('photoIds', ids)} disabled={disabled}/>
+      <Text>{form.photoIds.length} photos selected</Text>
+      {!!form.photoIds.length && <Button title="Clear photo selection" outline disabled={disabled} onPress={() => edit('photoIds', [])}/>}
+    </Card>}
     <SelectionList title="Categories" state={categories} pages={categoryPages} selected={form.categoryId} onSelect={item => choose('category', item)} label={item => item.name} disabled={disabled}/>
     {selected.category && <Text>Selected category: {selected.category.name}</Text>}
     <Notice error={fieldError('categoryId')}/>
@@ -189,7 +199,9 @@ export function OwnerRequestScreen({route, navigation}) {
       <Text>Created: {when(request.createdAt)}</Text>
       {request.bookingId && <Button title="View booking" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('BookingDetail', {id: request.bookingId});}}/>}
       {request.status === 'open' && <ConfirmationButton title="Close request" message="Stop new or updated quotations for this request. Existing quotations remain available to view. Closing does not create a booking." disabled={disabled} onConfirm={close}/>}
-    </Card><Text weight="semibold" style={styles.heading}>Private quotations</Text>
+    </Card>
+      {!!request.photoIds?.length && <PhotoGallery target="request" id={id}/>}
+      <Text weight="semibold" style={styles.heading}>Private quotations</Text>
       <Text>Compare quoted work, prices and validity. An accepted offer creates a booking awaiting the shop's confirmation.</Text>
       {request.status === 'open' && <Button title="Compare and select" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('QuoteComparison', {id});}}/>}
       {(data.quotes || []).map(quote => <QuoteCard key={quote.id} quote={quote}/>)}
