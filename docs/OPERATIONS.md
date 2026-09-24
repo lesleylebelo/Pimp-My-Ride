@@ -33,6 +33,32 @@ native devices cannot reach a host machine through the device's `localhost`.
 
 ## Safe local checks
 
+### Connection errors in Expo Go
+
+Expo Go on Android/iOS uses native networking; browser CORS does not diagnose
+its connection failures. Open the configured backend's `/health` URL in the
+same phone's browser first. A successful computer check does not establish that
+the phone can reach the service. Record whether the failure affects all backend
+screens or only uploads; a native upload can also fail while reading its local
+file, before it reaches the server.
+
+Start Expo from this application directory. A terminal's existing
+`EXPO_PUBLIC_API_URL` overrides `.env`; restart/reload the app after correcting
+the development server's environment. A phone cannot use the computer's
+`localhost` for a locally hosted API. This project's configured API uses HTTPS
+on Render, independently of the LAN address used to load the Expo bundle.
+
+Development builds now emit `[PimpMyRide connection]` warnings with only
+`stage` (`health`, `request` or `upload`), backend `origin`, and `reason`
+(`network` or `timeout`). Share those fields when diagnosing a failure. Tokens,
+request paths/queries, bodies, filenames, local file URIs and raw errors are
+excluded; production builds do not emit this diagnostic. An upload-stage
+failure alone cannot distinguish an unreadable file from an interrupted
+connection. Refresh saved status before manually retrying a mutation; the
+client does not automatically replay it.
+
+### Automated checks
+
 From the app root:
 
 ```text
