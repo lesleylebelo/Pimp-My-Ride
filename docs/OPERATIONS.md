@@ -1,8 +1,12 @@
 # Setup and manual configuration checks
 
-Use the inner `PimpMyRide` repository (branch `lesley`). Its tracked Render
-configuration deploys the `backend` directory; the running service is reported
-to deploy `main`. The outer workspace contains a pre-existing Git link without a
+Use the inner `PimpMyRide` directory. Earlier inspections recorded branch
+`lesley` and Render deploying `main`; these are historical observations. Current
+Git checks could not resolve HEAD or its symbolic reference, and files appear
+staged as additions. Preserve that state and review it before any Git operation;
+do not infer the branch or repair metadata as part of running the app. The
+tracked Render configuration uses the `backend` directory. The outer workspace
+contains a pre-existing Git link without a
 `.gitmodules` entry. Do not delete Git metadata or initialize a replacement repo.
 
 ## Run locally
@@ -55,7 +59,8 @@ Do not deploy until separately instructed. These are review steps for the owner:
    they are deployed. Root directory: `backend`; build: `npm ci`; start:
    `npm start` (`node server.cjs`); Node: 22.x; health path: `/health`.
 2. Verify `NODE_ENV`, `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON`,
-   `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_BUCKET`, and `CORS_ORIGINS`
+   `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_BUCKET`,
+   `SUPABASE_PHOTO_BUCKET`, and `CORS_ORIGINS`
    privately. `PORT` is provided by Render. No emulator variables may be present
    in production. Do not copy values into issues, screenshots, or this document.
 3. `CORS_ORIGINS` is an exact comma-separated HTTP(S) origin list with no paths,
@@ -112,8 +117,13 @@ The booking extension in BOOKING_MILESTONE.md needs its backend operations befor
 the corresponding client release. Bookings retain deny-by-default direct access
 and use standard participant-field indexes; no new secret, composite index,
 migration or production seeding is required by that extension.
+The photo extension in PHOTO_MILESTONE.md requires its separate private bucket
+and backend endpoints before the client release. Direct access to photo assets
+and upload-attempt collections stays denied. Photo reference queries use
+standard single-field indexes; retain those indexes rather than adding direct
+client access as a workaround.
 
-## Supabase and document handling
+## Supabase and private file handling
 
 Rotation of the previously exposed Supabase secret is **unconfirmed** (user:
 Unsure). Privately revoke/rotate it and replace Render's `SUPABASE_SECRET_KEY`.
@@ -133,8 +143,31 @@ The API verifies the private flag, role/status, file size, MIME and header
 signature. These checks are not document parsing or malware scanning. Names are
 metadata; immutable storage paths use server-generated UUIDs. Admin viewing
 requires recent authentication and produces a 60-second signed bearer URL; do
-not log, cache or share it. The only implemented media flow is shop verification
-documents, not vehicle images, portfolios, chat attachments or avatars.
+not log, cache or share it. Verification documents and vehicle/request photos
+are implemented as separate private storage scopes. Portfolios, chat attachments,
+avatars and job-progress photos remain unimplemented.
+
+For photos, configure the server-only `SUPABASE_PHOTO_BUCKET`, default
+`marketplace-photos`. Keep `SUPABASE_BUCKET=verification` for documents. The photo
+bucket name is also declared as a nonsecret default in `render.yaml`; this local
+change has not configured or deployed a running service. The photo
+bucket must be private, accept only `image/jpeg` and `image/png`, and have a
+5 MiB (5,242,880-byte) file limit. `backend/photo-storage-setup.sql` contains a
+bucket mutation followed by a policy query. It has not been executed; run setup
+only under separate environment/release authorization. Inspect all matching
+`storage.objects` policies, including broad policies for other buckets. No
+anonymous or authenticated client storage policy is required by this server-only
+flow. The API's private-flag check cannot establish deployed policy safety.
+
+The photo library allows five current slots per vehicle. Requests can attach
+zero to five current assets, retaining immutable references through booking
+history. Garage replacement/removal preserves published attachments and stored
+objects. Photo viewing rechecks current access and returns a 60-second bearer
+URL. An issued URL can still be used until expiry after logout/restriction;
+downloaded bytes cannot be revoked. No URL is stored in AsyncStorage. Native
+picker/image caches may retain image bytes, and the original file may contain
+EXIF/GPS metadata. Validation is not full decoding, metadata stripping or malware
+scanning. See PHOTO_MILESTONE.md for the complete API and client limitations.
 
 Uploads retain uncertain and superseded objects. The operator report and proposed
 retention rules are in [RETENTION_PROPOSAL.md](RETENTION_PROPOSAL.md). Deletion is
@@ -143,12 +176,30 @@ or persistent free-tier worker is assumed. Stored documents, upload ledgers,
 mutation receipts and audits continue to consume storage until retention is
 approved. Global reference queries fail closed when an index/read is unavailable.
 
+The separate photo report is documented in
+[PHOTO_RETENTION_PROPOSAL.md](PHOTO_RETENTION_PROPOSAL.md):
+
+```text
+node scripts/cleanup-photos.cjs --help
+node scripts/cleanup-photos.cjs --project PROJECT_ID --limit 100
+```
+
+It reads only Firestore and rejects `--apply` before credentials are loaded.
+Use mock/emulator fixtures for tests; do not create live records to exercise it.
+Report candidates do not authorize deletion. The report preserves vehicle and
+request references; explicit booking-reference checks are required before any
+future request deletion or automated storage deletion can be introduced.
+Repeated replacements can grow retained storage despite the five-slot limit.
+
 ## Remaining operational limits
 
 Rate limits are in memory per backend process and reset at restart; multiple
 instances do not share counters. Heartbeats have separate 600/IP/minute and
 12/account/minute budgets; other API calls use 90/IP/minute and 60/account/minute,
 and uploads additionally use 6/account/minute with two concurrent upload slots.
+Document and photo uploads share those slots. A client disconnect during service
+processing keeps its slot occupied until the storage/database operation settles;
+an aborted multipart parser releases its slot without starting service work.
 This reduces ordinary shared-network interference, not distributed abuse.
 
 Presence stores at most 20 live session deadlines in one record per account;

@@ -11,6 +11,7 @@ function setup(overrides = {}) {
   const landing = {LandingText: 'Text', LandingShell: ({children}) => React.createElement('View', null, children), LandingButton: PrimaryButton, ownerTabs: [], shopTabs: [], ui: {}, useLandingFeedback: () => ({showFeature() {}})};
   const screens = loadUI('src/features/marketplace/screens/BookingScreens.js', {
     '../../auth/context/AuthContext': {useAuth: () => state.auth},
+    '../components/PhotoGallery': props => React.createElement('PhotoGallery', props),
     '../../../shared/components/landing/LandingUI': landing,
     '../hooks/useMarketData': {useMarketData: (op, input) => {state.reads.push({op, input}); return {data: state.data, busy: state.busy, error: state.error, refresh: (...args) => state.refresh(...args)};}},
     '../services/marketApi': {marketApi: async (op, input) => {state.calls.push({op, input}); return state.api(op, input);}},
@@ -238,4 +239,15 @@ test('appointment validation uses SAST at the exact current-time boundary rather
   assert.match(cancellationError('   '), /required/);
   assert.equal(cancellationError('x'.repeat(500)), '');
   assert.match(cancellationError('x'.repeat(501)), /500/);
+});
+
+test('booking photo galleries reference the accepted request for both parties and disappear offline',async()=>{
+ for(const role of ['owner','shop']){
+  const withPhotos={...booking,photoIds:['accepted-photo'],status:'cancelled'},auth={user:{uid:`${role}-1`},profile:{role},offline:false};
+  const {state,screens,navigation}=setup({auth,data:{booking:withPhotos}}),props=detailProps(navigation),tree=await mount(screens.BookingDetailScreen,props);
+  const gallery=tree.root.findByType('PhotoGallery');assert.equal(gallery.props.target,'request');assert.equal(gallery.props.id,booking.serviceRequestId);assert.notEqual(gallery.props.id,booking.id);assert.notEqual(gallery.props.editable,true);assert.equal(gallery.props.onSelectionChange,undefined);
+  state.auth={...state.auth,offline:true};await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));assert.equal(tree.root.findAllByType('PhotoGallery').length,0);
+  state.auth={...state.auth,offline:false};state.data={booking:{...booking,photoIds:[]}};await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));assert.equal(tree.root.findAllByType('PhotoGallery').length,0);
+  assert.equal(state.calls.length,0);await act(async()=>tree.unmount());
+ }
 });

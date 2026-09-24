@@ -2,10 +2,15 @@
 
 ## Decisions and scope
 
-Canonical application repository: this directory, remote
-https://github.com/lesleylebelo/Pimp-My-Ride, working branch `lesley`.
-Render deploys `main`; no push, merge, deployment or live writes authorized here.
-Outer workspace Git link is pre-existing and is not restructured.
+The application remains in this inner `PimpMyRide` directory. Earlier inspections
+recorded remote https://github.com/lesleylebelo/Pimp-My-Ride, branch `lesley`,
+and Render deploying `main`; these are historical configuration observations.
+During the photo continuation, both `git rev-parse --verify HEAD` and
+`git symbolic-ref HEAD` failed, with the index showing files staged as additions.
+No current branch or commit is therefore asserted. Codex has not repaired Git
+metadata or changed the index. Preserve this state for the user's review before
+any later Git operation. The outer workspace Git link is pre-existing and is
+not restructured. No push, merge, deployment or live writes are authorized here.
 
 Preserve one sign-in, trusted role/claim routing, no public admin signup, automatic
 verification refresh without signing out, approved-shop marketplace gating,
@@ -39,8 +44,8 @@ AR, rewards and a parts marketplace are explicitly out of scope.
 React Native 0.86.3, React 19.2.3, Expo 57 and React Navigation implement the
 JavaScript client. Firebase Auth identifies users; Firestore stores profiles,
 categories, marketplace records/bookings, operations, receipts, audit and presence. Express 5/Firebase Admin on
-Render authorize privileged operations. Private Supabase objects hold verification
-documents. SecureStore holds native Auth persistence; AsyncStorage contains a
+Render authorize privileged operations. Separate private Supabase buckets hold
+verification documents and vehicle/request photos. SecureStore holds native Auth persistence; AsyncStorage contains a
 small account-scoped landing cache and the local login cooldown.
 
 | Location | Responsibility |
@@ -49,7 +54,7 @@ small account-scoped landing cache and the local login cooldown.
 | `src/features/auth/` | Shared sign-in, registration, verification, hosted password recovery, document/account UI |
 | `src/features/admin/` | Dashboard, accounts/reviews, categories, audit, presence and reauthentication |
 | `src/features/customer/`, `src/features/shop/` | Owner showcase prototype and compatibility entry for live shop jobs |
-| `src/features/marketplace/` | Garage/requests, shop feeds/private quotes, comparison/acceptance, booking list/detail, role navigation and shared API/UI |
+| `src/features/marketplace/` | Garage/requests, private photo library/attachments, shop feeds/private quotes, comparison/acceptance, booking list/detail, role navigation and shared API/UI |
 | `src/features/activity/` | Session lifecycle and heartbeat client |
 | `src/shared/` | UI, validation-related components, Firebase/API/network, secure persistence and offline cache |
 | `backend/` | HTTP security, domain validation, reviews, uploads, receipts, presence and read-only cleanup logic |
@@ -58,13 +63,15 @@ small account-scoped landing cache and the local login cooldown.
 | `docs/`, `assets/`, `vendor/` | Handover/design scope, bundled assets and existing dependency patch |
 
 Endpoints: `GET /health`; authenticated `POST /api/profile`, `/api/session`, `/api/marketplace`,
-`/api/documents/list`, `/api/documents/:kind`, `/api/admin`. Admin operations:
+`/api/documents/list`, `/api/documents/:kind`, `/api/photos`,
+`/api/photos/vehicles/:vehicleId/:slot`, `/api/admin`. Admin operations:
 dashboard, accounts/account, audit, presence, categories, categorySave,
 categoryArchive, editAccount, document, review, reviewRecover and status.
 The backend validates current Auth/profile permissions; client routes are not
 the security boundary. Marketplace operations implement vehicles, category/shop
 selection, open/direct requests, private quotations, quote acceptance and bookings;
-see MARKETPLACE_MILESTONE.md and BOOKING_MILESTONE.md.
+see MARKETPLACE_MILESTONE.md and BOOKING_MILESTONE.md. PHOTO_MILESTONE.md extends
+that journey with optional immutable request attachments and booking galleries.
 
 ## Feature status
 
@@ -87,13 +94,18 @@ certification. Static Figma screens do not establish implementation.
 | Approved shop | Open/direct request feeds, line-item quotes, own quote history and withdrawal | Implemented locally; audience isolation, duplicate prevention and state-transition tests |
 | Owner | Quotation comparison/selection and acceptance | Implemented locally; component flow, deadline/retry checks and simultaneous-acceptance emulator tests |
 | Owner/shop | Booking history/details, shop appointment confirmation and participant cancellation | Implemented locally; participant isolation, SAST validation, retained terms and transaction conflict tests; no rescheduling or capacity calendar |
-| Owner/shop | Photo uploads, job progress/completion, portfolio, maps and reviews | Planned; owner showcase discovery remains a prototype |
+| Owner | Private vehicle photos, replacement/removal and optional request attachments | Implemented locally; five JPEG/PNG slots at 5 MiB each, versioned publication and immutable request references; final checks below |
+| Approved shop | Authorized request photos and selected-shop booking photo history | Implemented locally; current audience/status checks and temporary signed previews; no general vehicle-library access |
+| Owner/shop | Job progress/completion, progress photos, portfolio, maps and reviews | Planned; owner showcase discovery remains a prototype |
 | All | Chat and advanced notifications | Optional scope, not implemented |
 
 All mutations, document access, fresh profiles, admin actions and verification
 checks require connectivity. Offline previews cannot upload or authorize work.
 Account switching isolates cache and selections; logout clears the landing cache.
-Documents and signed links are not stored in AsyncStorage. A revoked token may
+Documents, photo metadata and signed links are not stored in AsyncStorage.
+Native file-picker/image caches can retain bytes after logout; original photo
+EXIF/GPS is not stripped. Previously issued photo URLs remain usable until their
+60-second expiry. A revoked token may
 still read its own limited profile until ID-token expiry under the intentional
 direct-read exception documented in OPERATIONS.md.
 
@@ -101,10 +113,10 @@ direct-read exception documented in OPERATIONS.md.
 
 Local work for all four phases is implemented. External configuration checks,
 real browser/device testing, an approved release and retention approval remain.
-The latest continuation resumed on `b180472`, which includes earlier local work
-committed outside Codex's actions. Final review fixes and documentation updates
-remain in the working tree. Codex made no commits. The baseline audit remains
-unchanged in PROJECT_AUDIT.md.
+The historical stabilization continuation resumed on `b180472`, which included
+earlier work committed outside Codex's actions. That hash is not a claim about
+the current Git state described above. Codex made no commits. The baseline
+audit remains unchanged in PROJECT_AUDIT.md.
 
 | Phase | What changed and key files | Verification | Remaining/deployment | Suggested commit message |
 | --- | --- | --- | --- | --- |
@@ -149,17 +161,19 @@ rotated; uncertainty about its status is not evidence that it is safe.
 
 ## Tests actually run
 
-Current milestone verification on 23 September (supersedes stabilization totals):
+The completed booking check on 23 September recorded 119 frontend, 88 backend
+and 35 emulator checks. These are historical totals. Photo-milestone checks on
+24 September supersede those counts where a final result is recorded below:
 
 | Check | Result |
 | --- | --- |
-| `npm.cmd test` | 119 passed, 0 failed |
-| `npm.cmd run test:backend` | 88 passed, 0 failed |
-| `npm.cmd run test:security` | 6 rules + 17 foundation + 12 marketplace integration tests passed (35 total); emulator runner exited 0 |
-| JavaScript/CJS parsing | 116 source/test files parsed; 192 relative app imports resolved |
-| App/backend manifest and lockfile declarations | Matched; no dependency upgrade or audit fix |
-| Expo web export | Passed, 664 modules; ignored output `.local-checks/web` |
-| `git diff --check` | Passed |
+| `npm.cmd test` | 148 passed, 0 failed |
+| `npm.cmd run test:backend` | 129 passed, 0 failed |
+| `npm.cmd run test:security` | 42 passed: 6 rules, 17 foundation, 12 marketplace and 7 photo integration checks; runner exited 0 |
+| JavaScript/CJS parsing | 130 files parsed; 306 relative imports resolved |
+| App/backend manifest and lockfile declarations | Matched; no dependency upgrade or audit fix performed |
+| Expo web export | Passed, 668 modules; ignored output `.local-checks/web` |
+| `git diff --check` and documentation whitespace | Passed; CRLF notices only. Current Git HEAD is unresolved as noted above |
 
 The emulator run used only `demo-pmr-security`, loopback Auth/Firestore and mocked
 Supabase. Concurrent transaction contention retried successfully. Marketplace
@@ -168,8 +182,12 @@ private audiences, cents calculation, stale versions, duplicate submissions,
 archived resources, closing and withdrawal. Booking tests exercise authenticated
 HTTP acceptance/confirmation/cancellation and actual transaction races involving
 competing offers, same-offer retries, withdrawal/closure and cancellations.
-Rules deny direct marketplace/booking reads and writes for owners, shops and
-admins. Component tests use native mocks rather than a running browser/device.
+Photo coverage adds upload/attachment/booking HTTP flows, direct-audience and
+revocation checks, competing photo revisions, request-publication/removal races,
+receipt replay after detachment, lease expiry and malformed uploads. Mock tests
+exercise retained cleanup candidates and actual local HTTP disconnects across
+photo/document upload slots. Rules deny direct marketplace/booking/photo reads
+and writes for owners, shops and admins. Component tests use native mocks rather than a running browser/device.
 The attempted in-app browser connection reported `Browser is not available: iab`;
 no browser/device interaction or visual fidelity check is claimed.
 The web export disabled dotenv loading and used synthetic Firebase settings and
@@ -188,17 +206,21 @@ were verified through authenticated dashboards.
 
 ## Run, review and next task
 
-The garage/request/quotation milestone and the subsequent user-approved
-comparison/acceptance/booking milestone are implemented locally.
+The garage/request/quotation, comparison/acceptance/booking and user-approved
+vehicle/request photo milestones are implemented locally.
 [MARKETPLACE_MILESTONE.md](MARKETPLACE_MILESTONE.md) records the first slice;
 [BOOKING_MILESTONE.md](BOOKING_MILESTONE.md) records the extension, state machine,
-API/schema, privacy, tests and release order. This milestone started from the
-user's `5ecef81` commit. Its changes remain local; Codex made no commit or deployment.
+API/schema, privacy, tests and release order. That historical booking milestone
+started from the user's `5ecef81` commit. [PHOTO_MILESTONE.md](PHOTO_MILESTONE.md)
+records the extension with private libraries, request/booking attachments,
+storage setup and limits. These are implementation records, not evidence of a
+deployed revision. Codex made no commit, deployment or live data change.
 
 See [OPERATIONS.md](OPERATIONS.md) for setup, environment variable names, safe
 tests and manual Console/deployment checks; [AUTH_FLOW_DECISION.md](AUTH_FLOW_DECISION.md)
 for hosted recovery; [OPERATOR_RECOVERY.md](OPERATOR_RECOVERY.md) for privileged
-scripts; [RETENTION_PROPOSAL.md](RETENTION_PROPOSAL.md) for proposed retention.
+scripts; [RETENTION_PROPOSAL.md](RETENTION_PROPOSAL.md) for document retention;
+and [PHOTO_RETENTION_PROPOSAL.md](PHOTO_RETENTION_PROPOSAL.md) for photo retention.
 
 1. Privately rotate the exposed Supabase secret (user answered **Unsure** about
    completion) and verify server configuration without sharing its value.
@@ -209,13 +231,18 @@ scripts; [RETENTION_PROPOSAL.md](RETENTION_PROPOSAL.md) for proposed retention.
 3. Review the local changes. Any commit, merge, deployment, policy publication or
    live configuration change requires separate instruction; none was performed
    by Codex. Backend document-list support must precede its client release.
-4. Decide the proposed document/ledger/audit retention policy before implementing
-   deletion. Current report-only reconciliation preserves all files.
+4. Decide the proposed document/photo/ledger/audit retention policies before
+   implementing deletion. Current report-only reconciliation preserves all files.
+   Five current photo slots do not cap accumulated retained storage. Extend
+   photo cleanup with independent booking-reference checks before any future
+   request deletion or storage deletion automation.
 5. Review/release the implemented marketplace milestone only when separately
    instructed: deploy its Firestore indexes first, wait for readiness, then
    backend and client. Active categories and approved shops are required in the
-   selected test environment; no production seed data is created by setup.
-6. Proposed next milestone, awaiting approval: vehicle/request photos, followed
-   by job progress and completed-work reviews. Capacity calendars, rescheduling,
+   selected test environment; no production seed data is created by setup. Photo
+   release additionally needs a separately authorized private bucket/policy
+   setup and the backend photo endpoints before their client is released.
+6. Proposed next milestone, awaiting instruction: job progress, completion and
+   completed-work reviews. Capacity calendars, rescheduling, camera capture,
    notifications and richer discovery remain separate work. No further feature
    milestone, payments, AI, AR or wider redesign was started here.

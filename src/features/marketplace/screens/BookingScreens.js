@@ -8,6 +8,7 @@ import {marketApi} from '../services/marketApi';
 import {useMarketData} from '../hooks/useMarketData';
 import {Page, Card, Field, Button, Notice, Paging, usePages, formatMoney} from '../components/MarketplaceUI';
 import {appointmentErrors, cancellationError} from '../utils/bookingValidation';
+import PhotoGallery from '../components/PhotoGallery';
 
 const offlineMessage = 'Connect to the internet to view and manage bookings.';
 const statusLabels = {pending_confirmation: 'Awaiting shop confirmation', confirmed: 'Confirmed', cancelled: 'Cancelled'};
@@ -147,6 +148,7 @@ function BookingDetail({navigation, id}) {
         <Field label="Appointment time (HH:mm, SAST)" value={form.appointmentTime} onChangeText={value => change('appointmentTime', value)} onBlur={() => touch('appointmentTime')} error={fieldError('appointmentTime')} placeholder="14:30" autoCapitalize="none" maxLength={5} editable={!disabled}/>
         <Button title="Confirm booking" disabled={disabled} onPress={confirmAppointment}/>
       </Card>}
+      {!!booking.photoIds?.length && <PhotoGallery target="request" id={booking.serviceRequestId}/>}
       {canCancel && <Card>
         <Text weight="semibold" style={styles.heading}>Cancel booking</Text>
         <Text style={styles.muted}>Cancellation ends this booking for both parties and retains the accepted quotation in its history.</Text>

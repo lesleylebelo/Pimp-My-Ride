@@ -20,19 +20,19 @@ async function request(payload, expectedUid) {
  account(uid);
  return result;
 }
-async function mutate(identity, execute, expectedUid) {
+async function mutate(identity, execute, expectedUid, initial = {}) {
  const uid = account(expectedUid), key = JSON.stringify([uid,canonical(identity)]);
- const requestId = pending.get(key) || `p${Date.now()}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`;
- pending.delete(key); pending.set(key,requestId);
+ const intent = pending.get(key) || {...initial,requestId:`p${Date.now()}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`};
+ pending.delete(key); pending.set(key,intent);
  if (pending.size > 50) pending.delete(pending.keys().next().value);
  try {
-  const result = await execute(uid,requestId);
+  const result = await execute(uid,intent.requestId,intent);
   account(uid);
-  if (pending.get(key) === requestId) pending.delete(key);
+  if (pending.get(key) === intent) pending.delete(key);
   return result;
  } catch (error) {
   // Only a terminal server outcome allows a new key for the next manual attempt.
-  if (error.retryWithNewRequest === true && pending.get(key) === requestId) pending.delete(key);
+  if (error.retryWithNewRequest === true && pending.get(key) === intent) pending.delete(key);
   throw error;
  } finally {
   const current = firebase().auth.currentUser?.uid;
@@ -57,8 +57,10 @@ export async function uploadVehiclePhoto(id,slot,version,file,expectedUid) {
  if (Platform.OS === 'web' ? !/^(blob:|data:image\/(jpeg|png);base64,)/i.test(file.uri) : !/^(file|content):\/\//i.test(file.uri)) {
   throw new Error('Choose a photo from this device. Remote photo addresses are not supported.');
  }
- const identity = {op:'upload',id,slot:String(slot),version,file:{uri:file.uri,name:file.name,size:file.size,type:file.mimeType,lastModified:file.lastModified ?? file.file?.lastModified ?? null}};
- return mutate(identity,async (uid,requestId) => {
+ // A metadata refresh can observe an upload whose response was lost. Keep
+ // both its key and original revision until that same file intent is settled.
+ const identity = {op:'upload',id,slot:String(slot),file:{uri:file.uri,name:file.name,size:file.size,type:file.mimeType,lastModified:file.lastModified ?? file.file?.lastModified ?? null}};
+ return mutate(identity,async (uid,requestId,intent) => {
   const body = new FormData();
   if (Platform.OS === 'web') {
    const response = await fetch(file.uri);
@@ -70,6 +72,6 @@ export async function uploadVehiclePhoto(id,slot,version,file,expectedUid) {
    body.append('file',{uri:file.uri,name:file.name,type:file.mimeType});
   }
   account(uid);
-  return apiRequest(`photos/vehicles/${encodeURIComponent(id)}/${encodeURIComponent(slot)}?version=${encodeURIComponent(version)}&requestId=${encodeURIComponent(requestId)}`,body,{multipart:true,expectedUid:uid});
- },expectedUid);
+  return apiRequest(`photos/vehicles/${encodeURIComponent(id)}/${encodeURIComponent(slot)}?version=${encodeURIComponent(intent.version)}&requestId=${encodeURIComponent(requestId)}`,body,{multipart:true,expectedUid:uid});
+ },expectedUid,{version});
 }

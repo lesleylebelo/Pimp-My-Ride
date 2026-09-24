@@ -12,6 +12,7 @@ function setup(overrides = {}) {
   const landing = {LandingText: 'Text', LandingShell: ({children}) => React.createElement('View', null, children), LandingButton: PrimaryButton, ownerTabs: [], shopTabs: [], ui: {}, useLandingFeedback: () => ({showFeature() {}})};
   const screens = loadUI('src/features/marketplace/screens/ShopMarketplaceScreens.js', {
     '../../auth/context/AuthContext': {useAuth: () => state.auth},
+    '../components/PhotoGallery': props => React.createElement('PhotoGallery', props),
     '../../../shared/components/landing/LandingUI': landing,
     '../hooks/useMarketData': {useMarketData: (op, input) => { state.reads.push({op, input}); return {data: state.data, busy: state.busy, error: state.error, refresh: (...args) => state.refresh(...args)}; }},
     '../services/marketApi': {marketApi: async (op, input) => { state.calls.push({op, input}); return state.api(op, input); }},
@@ -168,4 +169,14 @@ test('a delayed quotation response cannot mark another account draft as submitte
   assert.doesNotMatch(text(tree), /Quotation submitted/);
   assert.deepEqual(state.navigations, []);
   await act(async () => tree.unmount());
+});
+
+test('shop request photos use a read-only request target and closed requests require an accepted quotation',async()=>{
+ const withPhotos={...request,photoIds:['attached-photo']};const {state,screens,navigation}=setup({data:{request:withPhotos,quotes:[]}});
+ const props={navigation,route:{params:{id:request.id}}},tree=await mount(screens.ShopRequestScreen,props);
+ let gallery=tree.root.findByType('PhotoGallery');assert.equal(gallery.props.target,'request');assert.equal(gallery.props.id,request.id);assert.notEqual(gallery.props.editable,true);assert.equal(gallery.props.onSelectionChange,undefined);
+ state.data={request:{...withPhotos,status:'booked'},quotes:[quote]};await act(async()=>tree.update(React.createElement(screens.ShopRequestScreen,props)));assert.equal(tree.root.findAllByType('PhotoGallery').length,0);
+ state.data={request:{...withPhotos,status:'booked'},quotes:[{...quote,status:'accepted'}]};await act(async()=>tree.update(React.createElement(screens.ShopRequestScreen,props)));gallery=tree.root.findByType('PhotoGallery');assert.equal(gallery.props.id,request.id);
+ state.data={request:{...request,photoIds:[]},quotes:[]};await act(async()=>tree.update(React.createElement(screens.ShopRequestScreen,props)));assert.equal(tree.root.findAllByType('PhotoGallery').length,0);
+ assert.equal(state.calls.length,0);await act(async()=>tree.unmount());
 });

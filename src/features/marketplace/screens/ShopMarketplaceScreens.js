@@ -8,6 +8,7 @@ import {marketApi} from '../services/marketApi';
 import {useMarketData} from '../hooks/useMarketData';
 import {Page, Card, Field, Button, Notice, Paging, usePages, formatMoney, QuoteCard} from '../components/MarketplaceUI';
 import {parseMoney, quoteErrors} from '../utils/validation';
+import PhotoGallery from '../components/PhotoGallery';
 
 const offlineMessage = 'Connect to the internet to view requests and manage quotations.';
 const errorMessage = error => error?.message || 'Unable to complete this action. Please retry.';
@@ -59,6 +60,7 @@ export function ShopRequestScreen({navigation, route}) {
     <Notice busy={busy} error={offline ? offlineMessage : error}/>
     {request && <>
       <Card><RequestSummary request={request} detailed/></Card>
+      {!!request.photoIds?.length && (request.status === 'open' || quotes.some(quote => quote.status === 'accepted')) && <PhotoGallery target="request" id={request.id}/>}
       {quotes.length > 0 ? <>
         <Text style={styles.heading}>Your quotation</Text>
         {quotes.map(quote => <QuoteCard key={quote.id} quote={quote}/>)}

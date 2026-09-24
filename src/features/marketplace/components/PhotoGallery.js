@@ -14,7 +14,7 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
  const [loading,setLoading] = useState(false), [fresh,setFresh] = useState(false), [error,setError] = useState('');
  const [files,setFiles] = useState({}), [messages,setMessages] = useState({}), [busy,setBusy] = useState(false);
  const [preview,setPreview] = useState(null), [viewing,setViewing] = useState(null);
- const active = useRef(false), generation = useRef(0), viewGeneration = useRef(0), mutationLock = useRef(false), pickerLock = useRef(false), viewLock = useRef(false);
+ const active = useRef(false), generation = useRef(0), viewGeneration = useRef(0), connectionEpoch = useRef(0), mutationLock = useRef(false), pickerLock = useRef(false), viewLock = useRef(false);
  const permission = useRef({});
  permission.current = {offline,focused,fresh,canManage,loading,busy,editable,version,disabled,selectedIds,onSelectionChange};
  const connected = !!uid && focused && !offline;
@@ -39,11 +39,12 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
  },[target,id,uid]);
 
  useEffect(() => {
+  ++connectionEpoch.current;
   ++generation.current; ++viewGeneration.current; viewLock.current = false;
   setItems([]); setVersion(null); setFresh(false); setCanManage(false); setPreview(null); setViewing(null); setError(''); setLoading(false);
   // Blurred screens and disconnected sessions do not keep private metadata or links.
   if (connected) void refresh();
-  return () => { ++generation.current; ++viewGeneration.current; };
+  return () => { ++connectionEpoch.current; ++generation.current; ++viewGeneration.current; };
  },[connected,refresh]);
 
  useEffect(() => {
@@ -58,20 +59,23 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
  }
  async function choose(slot) {
   if (!mayChange()) return;
+  const epoch = connectionEpoch.current, current = generation.current;
   pickerLock.current = true; setMessages(value => ({...value,[slot]:''}));
   try {
    const picked = await DocumentPicker.getDocumentAsync({type:PHOTO_TYPES,multiple:false,copyToCacheDirectory:true});
-   if (!active.current || permission.current.offline || !permission.current.focused || picked.canceled) return;
+   const p = permission.current;
+   if (!active.current || epoch !== connectionEpoch.current || current !== generation.current || p.offline || !p.focused || p.disabled || !p.editable || !p.canManage || !p.fresh || p.loading || mutationLock.current || picked.canceled) return;
    const file = picked.assets?.[0], issue = photoFileError(file);
    if (issue) { setMessages(value => ({...value,[slot]:issue})); return; }
    setFiles(value => ({...value,[slot]:file}));
-  } catch (_) { if (active.current) setMessages(value => ({...value,[slot]:'Unable to choose a photo. Try again.'})); }
+  } catch (_) { if (active.current && epoch === connectionEpoch.current && current === generation.current && !permission.current.offline && permission.current.focused) setMessages(value => ({...value,[slot]:'Unable to choose a photo. Try again.'})); }
   finally { pickerLock.current = false; }
  }
  async function mutate(slot,remove=false) {
   if (!mayChange()) return;
   const file = files[slot];
   if (!remove && photoFileError(file)) return;
+  const epoch = connectionEpoch.current;
   mutationLock.current = true; setBusy(true); setFresh(false); setError('');
   ++generation.current; ++viewGeneration.current; setPreview(null); setViewing(null);
   setMessages(value => ({...value,[slot]:''}));
@@ -79,14 +83,18 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
   try {
    if (remove) await removeVehiclePhoto(id,slot,permission.current.version,uid);
    else await uploadVehiclePhoto(id,slot,permission.current.version,file,uid);
-   if (!active.current) return;
+   if (!active.current || epoch !== connectionEpoch.current || permission.current.offline || !permission.current.focused) return;
    acknowledged = true;
    setFiles(value => ({...value,[slot]:null}));
    setMessages(value => ({...value,[slot]:remove ? 'Photo removed from this vehicle. Published requests keep their attached copy.' : 'Photo uploaded successfully.'}));
    const updated = await refresh();
    if (!updated && active.current && !permission.current.offline && permission.current.focused) setError('Your change was saved, but photo status could not refresh. Refresh photos before making another change.');
   } catch (e) {
-   if (active.current) setMessages(value => ({...value,[slot]:`${e.message || 'Unable to save this change.'} ${remove ? '' : 'Your selected photo is kept. '}Refresh photos to check the latest saved status before retrying.`}));
+   if (active.current && epoch === connectionEpoch.current && !permission.current.offline && permission.current.focused) {
+    const message = `${e.message || 'Unable to save this change.'} ${remove ? '' : 'Your selected photo is kept. '}Refresh photos to check the latest saved status before retrying.`;
+    setMessages(value => ({...value,[slot]:message}));
+    throw new Error(message);
+   }
   } finally {
    mutationLock.current = false;
    if (active.current) { setBusy(false); if (!acknowledged) setFresh(false); }
@@ -94,12 +102,12 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
  }
  async function view(photoId) {
   const p = permission.current;
-  if (!active.current || p.offline || !p.focused || p.disabled || p.loading || mutationLock.current || viewLock.current) return;
+  if (!active.current || p.offline || !p.focused || p.disabled || !p.fresh || p.loading || mutationLock.current || viewLock.current) return;
   const current = ++viewGeneration.current;
   viewLock.current = true; setViewing(photoId); setPreview(null);
   try {
    const result = await viewPhoto(target,id,photoId,uid), expiresAt = Math.min(Number(result.expiresAt),Date.now()+60000);
-   if (!active.current || current !== viewGeneration.current) return;
+   if (!active.current || current !== viewGeneration.current || permission.current.offline || !permission.current.focused || permission.current.disabled) return;
    if (typeof result.url !== 'string' || !result.url.startsWith('https://') || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error('This preview expired. View the photo again.');
    setPreview({photoId,url:result.url,expiresAt,error:''});
   } catch (e) {
@@ -119,10 +127,10 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
   <Text>{item ? `Saved: ${item.name}` : loading || error || !fresh ? 'Saved status not confirmed.' : 'No photo uploaded.'}</Text>
   {!!item && <>
    <Text>{Math.ceil(item.size/1024)} KB{item.uploadedAt ? ` · Uploaded ${new Date(item.uploadedAt).toLocaleDateString()}` : ''}</Text>
-   <Button title={viewing === item.id ? 'Opening photo...' : `View ${item.name}`} disabled={disabled || !connected || loading || busy || !!viewing} onPress={() => view(item.id)}/>
+   <Button title={viewing === item.id ? 'Opening photo...' : `View ${item.name}`} disabled={disabled || !connected || !fresh || loading || busy || !!viewing} onPress={() => view(item.id)}/>
    {target === 'vehicle' && !!onSelectionChange && <Button title={`${selectedIds.includes(item.id) ? 'Detach' : 'Attach'} photo ${item.slot || item.name}`} outline disabled={disabled || !connected || !fresh || loading || (!selectedIds.includes(item.id) && selectedIds.length >= PHOTO_LIMIT)} onPress={() => toggle(item)}/>}
    {preview?.photoId === item.id && <>
-    {preview.url && <Image accessibilityLabel={`Preview of ${item.name}`} source={{uri:preview.url,cache:'reload'}} resizeMode="contain" style={{width:'100%',height:240,borderRadius:8}} onError={() => setPreview(value => value?.photoId === item.id ? {...value,url:null,error:'Unable to load this preview. View the photo again.'} : value)}/>}
+    {preview.url && <Image accessibilityLabel={`Preview of ${item.name}`} source={{uri:preview.url,cache:'reload'}} resizeMode="contain" style={{width:'100%',height:240,borderRadius:8}} onError={() => setPreview(value => value?.photoId === item.id && value.url === preview.url ? {...value,url:null,error:'Unable to load this preview. View the photo again.'} : value)}/>}
     {!!preview.error && <Text accessibilityRole="alert">{preview.error}</Text>}
    </>}
   </>}

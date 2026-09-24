@@ -20,5 +20,7 @@ services:
         sync: false
       - key: SUPABASE_BUCKET
         value: verification
+      - key: SUPABASE_PHOTO_BUCKET
+        value: marketplace-photos
       - key: CORS_ORIGINS
         value: http://localhost:8081,http://127.0.0.1:8081
