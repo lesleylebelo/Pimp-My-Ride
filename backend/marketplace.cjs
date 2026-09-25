@@ -9,11 +9,11 @@ const serialize=value=>value instanceof Timestamp?value.toMillis():Array.isArray
 const row=doc=>({id:doc.id,...serialize(doc.data())});
 const allowed={
  vehicles:['cursor','archived'],vehicleSave:['id','version','make','model','year','colour','registration'],vehicleArchive:['id','version','archived'],
- categories:['cursor'],shops:['cursor'],requestCreate:['vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','photoIds'],
+ categories:['cursor'],shops:['cursor'],requestCreate:['vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','photoIds'],requestUpdate:['id','version','vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','photoIds'],
  requests:['feed','cursor'],request:['id','quotesCursor'],requestClose:['id'],quoteSubmit:['serviceRequestId','scope','items','completionDays','warranty','validForDays'],quotes:['cursor'],quoteWithdraw:['id'],
  quoteAccept:['id'],bookings:['cursor'],booking:['id'],bookingConfirm:['id','appointmentDate','appointmentTime'],bookingCancel:['id','reason'],
 };
-const mutations=new Set(['vehicleSave','vehicleArchive','requestCreate','requestClose','quoteSubmit','quoteWithdraw','quoteAccept','bookingConfirm','bookingCancel']);
+const mutations=new Set(['vehicleSave','vehicleArchive','requestCreate','requestUpdate','requestClose','quoteSubmit','quoteWithdraw','quoteAccept','bookingConfirm','bookingCancel']);
 function eligible(profile,role){return profile?.role===role&&D.active(profile)&&!profile.statusOperation&&!profile.provisioningOperation&&(role!=='shop'||(profile.verificationStatus==='approved'&&!profile.reviewOperation));}
 function requireRole(profile,role){if(!eligible(profile,role))D.fail(role==='shop'?'An active, approved shop account is required.':'An active vehicle owner account is required.','permission-denied');}
 function requestFor(value,role){const result={...value};if(Array.isArray(result.photos))result.photos=result.photos.map(photo=>P.safePhoto(photo,photo.id));if(role==='shop'){delete result.ownerId;delete result.vehicleId;delete result.acceptedQuoteId;delete result.bookingId;}return result;}
@@ -48,7 +48,7 @@ function createMarketplace({db,auth,actor}){
   M.fields(input,['op',...allowed[op],...(mutations.has(op)?['requestId']:[])]);
   if(a.profile.role==='owner')requireRole(a.profile,'owner');else requireRole(a.profile,'shop');
   const role=a.profile.role;
-  if(['vehicles','vehicleSave','vehicleArchive','requestCreate','requestClose','shops','categories','quoteAccept'].includes(op))requireRole(a.profile,'owner');
+  if(['vehicles','vehicleSave','vehicleArchive','requestCreate','requestUpdate','requestClose','shops','categories','quoteAccept'].includes(op))requireRole(a.profile,'owner');
   if(['quoteSubmit','quotes','quoteWithdraw','bookingConfirm'].includes(op))requireRole(a.profile,'shop');
   if(op==='vehicles'){
    const archived=input.archived===undefined?false:M.bool(input.archived,'Archived');
@@ -100,6 +100,31 @@ function createMarketplace({db,auth,actor}){
   // Unlike the legacy admin endpoint, every marketplace mutation must carry a
   // stable retry key. Missing keys never create a receipt or perform a write.
   D.id(input.requestId);const receipt=mutation(db,a.uid,`marketplace:${op}`,input);
+  if(op==='requestUpdate'){
+   const changes=M.serviceRequest(input),ref=db.doc(`serviceRequests/${D.id(input.id)}`);
+   return receipt.atomic(async tx=>{
+    await current(tx,a.uid,'owner');
+    const snapshot=await tx.get(ref),value=ownRequest(snapshot,a.uid);
+    if(value.status!=='open')D.fail('Only an open service request can be edited.','failed-precondition');
+    const currentVersion=value.version||1;
+    if(M.integer(input.version,'Request version',1,Number.MAX_SAFE_INTEGER)!==currentVersion)D.fail('This request changed. Refresh it before saving.','failed-precondition');
+    M.requireFutureDate(changes.preferredDate);
+    const vehicleId=D.id(input.vehicleId||value.vehicleId),vehicleRef=db.doc(`vehicles/${vehicleId}`),categoryRef=db.doc(`serviceCategories/${changes.categoryId}`);
+    const photoIds=P.photoIds(input.photoIds===undefined?value.photoIds:input.photoIds);
+    const [vehicleDoc,categoryDoc]=await Promise.all([tx.get(vehicleRef),tx.get(categoryRef)]),vehicle=ownVehicle(vehicleDoc,a.uid),category=categoryDoc.data();
+    if(vehicle.archived)D.fail('Choose an active vehicle.','failed-precondition');
+    if(!category||category.archived!==false)D.fail('Choose an active service category.','failed-precondition');
+    if(changes.shopId){
+     const shop=(await tx.get(db.doc(`users/${changes.shopId}`))).data();
+     if(!eligible(shop,'shop'))D.fail('Choose an active, approved shop.','failed-precondition');
+     await assertAuth(changes.shopId);
+    }
+    const photos=await P.snapshotRequestPhotos(tx,db,vehicle,a.uid,vehicleId,photoIds);
+    tx.update(ref,{...changes,vehicleId,vehicle:M.vehicleSnapshot(vehicle),photoIds,photos,categoryName:category.name,version:currentVersion+1,updatedAt:stamp()});
+    audit(tx,a.uid,op,ref.id);
+    return {id:ref.id};
+   });
+  }
   if(op==='vehicleSave'){
    const changes=M.vehicle(input),ref=input.id?db.doc(`vehicles/${D.id(input.id)}`):db.collection('vehicles').doc();
    if(!input.id&&input.version!==undefined)D.fail('A new vehicle cannot have an existing version.');
@@ -124,7 +149,7 @@ function createMarketplace({db,auth,actor}){
     if(!category||category.archived!==false)D.fail('Choose an active service category.','failed-precondition');
     if(changes.shopId){const shop=(await tx.get(db.doc(`users/${changes.shopId}`))).data();if(!eligible(shop,'shop'))D.fail('Choose an active, approved shop.','failed-precondition');await assertAuth(changes.shopId);}
     const photos=await P.snapshotRequestPhotos(tx,db,vehicle,a.uid,vehicleRef.id,photoIds);
-    tx.create(ref,{...changes,photoIds,photos,ownerId:a.uid,vehicleId:vehicleRef.id,vehicle:M.vehicleSnapshot(vehicle),categoryName:category.name,status:'open',createdAt:stamp(),updatedAt:stamp()});
+    tx.create(ref,{...changes,photoIds,photos,ownerId:a.uid,vehicleId:vehicleRef.id,vehicle:M.vehicleSnapshot(vehicle),categoryName:category.name,status:'open',version:1,createdAt:stamp(),updatedAt:stamp()});
     audit(tx,a.uid,op,ref.id,{visibility:changes.visibility});return {id:ref.id};
    });
   }

@@ -119,13 +119,14 @@ function SelectionList({title, state, pages, selected, onSelect, label, disabled
   </Card>;
 }
 
-export function RequestFormScreen(props){const {user}=useAuth();return <RequestDraft key={`${user?.uid}:${props.route.params?.vehicleId||'choose'}`} {...props}/>;}
+export function RequestFormScreen(props){const {user} = useAuth();const request=props.route.params?.request;return <RequestDraft key={`${user?.uid}:${request?.id||props.route.params?.vehicleId||'choose'}`} {...props}/>;}
 function RequestDraft({route, navigation}) {
+  const request = route.params?.request, editing = !!request;
   const vehiclePages = usePages(), categoryPages = usePages(), shopPages = usePages();
   const vehicles = useMarketData('vehicles', {cursor: vehiclePages.cursor, archived: false});
   const categories = useMarketData('categories', {cursor: categoryPages.cursor});
   const shops = useMarketData('shops', {cursor: shopPages.cursor});
-  const [form, setForm] = useState(() => ({vehicleId: route.params?.vehicleId || '', title: '', description: '', categoryId: '', city: '', budgetMin: '', budgetMax: '', preferredDate: '', visibility: 'open', shopId: '', photoIds: []}));
+  const [form, setForm] = useState(() => ({vehicleId: request?.vehicleId || route.params?.vehicleId || '', title: request?.title || '', description: request?.description || '', categoryId: request?.categoryId || '', city: request?.city || '', budgetMin: request?.budgetMinCents === undefined ? '' : String(request.budgetMinCents / 100), budgetMax: request?.budgetMaxCents === undefined ? '' : String(request.budgetMaxCents / 100), preferredDate: request?.preferredDate || '', visibility: request?.visibility || 'open', shopId: request?.shopId || '', photoIds: request?.photoIds || []}));
   const [selected, setSelected] = useState(() => ({vehicle: route.params?.vehicle || null, category: null, shop: null}));
   const [touched, setTouched] = useState({}), [submitted, setSubmitted] = useState(false);
   const mutation = useMutation(), errors = requestErrors(form), disabled = mutation.saving || mutation.offline;
@@ -137,11 +138,11 @@ function RequestDraft({route, navigation}) {
     if (disabled || hasErrors(errors)) return;
     const {budgetMin, budgetMax, shopId, photoIds, ...input} = form;
     try {
-      const result = await mutation.run('requestCreate', {...input, budgetMinCents: parseMoney(budgetMin), budgetMaxCents: parseMoney(budgetMax), ...(form.visibility === 'direct' ? {shopId} : {}), ...(photoIds.length ? {photoIds} : {})});
+      const result = await mutation.run(editing ? 'requestUpdate' : 'requestCreate', {...input, budgetMinCents: parseMoney(budgetMin), budgetMaxCents: parseMoney(budgetMax), ...(form.visibility === 'direct' ? {shopId} : {}), ...(editing ? {photoIds, id: request.id, version: request.version || 1} : (photoIds.length ? {photoIds} : {}))});
       if (result) navigation.replace('OwnerRequest', {id: result.id});
     } catch (_) { /* Preserve all selections and text for retry. */ }
   }
-  return <Page title="Request a service" navigation={navigation}>
+  return <Page title={editing ? 'Edit service request' : 'Request a service'} navigation={navigation}>
     <Text>Describe the work and set a budget in South African rand. Requests and quotations require a connection.</Text>
     <SelectionList title="Vehicles" state={vehicles} pages={vehiclePages} selected={form.vehicleId} onSelect={item => choose('vehicle', item)} label={vehicleName} disabled={disabled}/>
     {form.vehicleId && <Text>Selected vehicle: {selected.vehicle ? vehicleName(selected.vehicle) : 'Vehicle from your garage'}</Text>}
@@ -174,7 +175,7 @@ function RequestDraft({route, navigation}) {
     {form.visibility === 'direct' && <><SelectionList title="Approved shops" state={shops} pages={shopPages} selected={form.shopId} onSelect={item => choose('shop', item)} label={item => `${item.shopName} · ${item.city}`} disabled={disabled}/>
       {selected.shop && <Text>Selected shop: {selected.shop.shopName}</Text>}<Notice error={fieldError('shopId')}/></>}
     <Notice busy={mutation.saving} error={mutation.error}/>
-    <Button title="Submit request" disabled={disabled || hasErrors(errors)} onPress={submit}/>
+    <Button title={editing ? 'Save request' : 'Submit request'} disabled={disabled || hasErrors(errors)} onPress={submit}/>
   </Page>;
 }
 
@@ -198,6 +199,7 @@ export function OwnerRequestScreen({route, navigation}) {
       <Text>{request.visibility === 'direct' ? 'Direct request to one approved shop' : 'Open request to approved shops'}</Text>
       <Text>Created: {when(request.createdAt)}</Text>
       {request.bookingId && <Button title="View booking" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('BookingDetail', {id: request.bookingId});}}/>}
+      {request.status === 'open' && <Button title="Edit request" outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('RequestForm', {request});}}/>}
       {request.status === 'open' && <ConfirmationButton title="Close request" message="Stop new or updated quotations for this request. Existing quotations remain available to view. Closing does not create a booking." disabled={disabled} onConfirm={close}/>}
     </Card>
       {!!request.photoIds?.length && <PhotoGallery target="request" id={id}/>}
