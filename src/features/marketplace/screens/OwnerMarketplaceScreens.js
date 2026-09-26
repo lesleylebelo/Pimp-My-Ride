@@ -41,24 +41,29 @@ function useMutation() {
 
 export function GarageScreen({navigation}) {
   const [archived, setArchived] = useState(false), pages = usePages();
+  const [message, setMessage] = useState('');
   const {data, busy, error, refresh} = useMarketData('vehicles', {cursor: pages.cursor, archived});
   const mutation = useMutation(), disabled = busy || mutation.saving || mutation.offline;
   async function archive(vehicle) {
     const result = await mutation.run('vehicleArchive', {id: vehicle.id, version: vehicle.version, archived: !vehicle.archived});
-    if (result) await refresh().catch(() => {});
+    if (result) {
+      setMessage(vehicle.archived ? `${vehicle.make} ${vehicle.model} restored to your active garage.` : `${vehicle.make} ${vehicle.model} removed from your active garage. Its request and booking history was preserved.`);
+      await refresh().catch(() => {});
+    }
   }
   return <Page title="My garage" navigation={navigation}>
     <Text>Add your vehicles, then choose one when requesting a service.</Text>
     <Button title="Add vehicle" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm');}}/>
     <View style={styles.row}>{[false, true].map(value => <Button key={String(value)} title={value ? 'Archived vehicles' : 'Active vehicles'} outline={archived !== value} disabled={disabled} onPress={() => {if (!disabled) {setArchived(value); pages.first();}}}/>)}</View>
     <Notice busy={busy || mutation.saving} error={mutation.error || error}/>
+    {!!message && <Text accessibilityRole="status">{message}</Text>}
     {(data?.items || []).map(vehicle => <Card key={vehicle.id}>
       <Text weight="semibold" style={styles.heading}>{vehicleName(vehicle)}</Text>
       <Text>{vehicle.colour} · {vehicle.registration}</Text>
       <Button title={`Photos for ${vehicle.make} ${vehicle.model}`} outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehiclePhotos', {id: vehicle.id});}}/>
       {!archived && <><Button title={`Edit ${vehicle.make} ${vehicle.model}`} outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm', {vehicle});}}/>
         <Button title={`Request service for ${vehicle.make} ${vehicle.model}`} disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('RequestForm', {vehicleId: vehicle.id, vehicle});}}/></>}
-      <ConfirmationButton title={archived ? `Restore ${vehicle.make} ${vehicle.model}` : `Archive ${vehicle.make} ${vehicle.model}`} message={archived ? 'Restore this vehicle to your active garage. Its open requests can become visible to shops again.' : 'Hide this vehicle from your active garage and stop new quotations on its requests until restored. Existing requests and quotations remain in your history.'} disabled={disabled} onConfirm={() => archive(vehicle)}/>
+      <ConfirmationButton title={archived ? `Restore ${vehicle.make} ${vehicle.model}` : `Remove ${vehicle.make} ${vehicle.model}`} message={archived ? 'Restore this vehicle to your active garage. Its open requests can become visible to shops again.' : 'Remove this vehicle from your active garage. It will not be deleted permanently; past service requests, quotations, and bookings will be preserved.'} disabled={disabled} onConfirm={() => archive(vehicle)}/>
     </Card>)}
     {data && !busy && !data.items.length && <Text>{archived ? 'No archived vehicles.' : 'Your garage is empty. Add your first vehicle to get started.'}</Text>}
     <Button title="Refresh vehicles" outline disabled={disabled} onPress={() => {if (!disabled) void refresh().catch(() => {});}}/>
@@ -113,35 +118,41 @@ function SelectionList({title, state, pages, selected, onSelect, label, disabled
   return <Card><Text weight="semibold" style={styles.heading}>{title}</Text>
     <Notice busy={state.busy} error={state.error}/>
     {(state.data?.items || []).map(item => <Button key={item.id} title={`${selected === item.id ? 'Selected: ' : ''}${label(item)}`} outline={selected !== item.id} disabled={disabled || state.busy} onPress={() => {if (!disabled && !state.busy) onSelect(item);}}/>) }
-    {state.data && !state.busy && !state.data.items.length && <Text>No available options on this page.</Text>}
+    {state.data && !state.busy && !state.data.items.length && <Text>{title === 'Categories' ? 'No active service categories are configured. Ask an administrator to seed serviceCategories with archived set to false.' : 'No available options on this page.'}</Text>}
     <Button title={`Refresh ${title.toLowerCase()}`} outline disabled={disabled || state.busy} onPress={() => {if (!disabled && !state.busy) void state.refresh().catch(() => {});}}/>
     <Paging pages={pages} nextCursor={state.data?.cursor} busy={disabled || state.busy}/>
   </Card>;
 }
 
-export function RequestFormScreen(props){const {user}=useAuth();return <RequestDraft key={`${user?.uid}:${props.route.params?.vehicleId||'choose'}`} {...props}/>;}
+export function RequestFormScreen(props){const {user} = useAuth();const request=props.route.params?.request;return <RequestDraft key={`${user?.uid}:${request?.id||props.route.params?.vehicleId||'choose'}`} {...props}/>;}
 function RequestDraft({route, navigation}) {
+  const request = route.params?.request, editing = !!request;
   const vehiclePages = usePages(), categoryPages = usePages(), shopPages = usePages();
   const vehicles = useMarketData('vehicles', {cursor: vehiclePages.cursor, archived: false});
   const categories = useMarketData('categories', {cursor: categoryPages.cursor});
   const shops = useMarketData('shops', {cursor: shopPages.cursor});
-  const [form, setForm] = useState(() => ({vehicleId: route.params?.vehicleId || '', title: '', description: '', categoryId: '', city: '', budgetMin: '', budgetMax: '', preferredDate: '', visibility: 'open', shopId: '', photoIds: []}));
+  const [form, setForm] = useState(() => ({vehicleId: request?.vehicleId || route.params?.vehicleId || '', title: request?.title || '', description: request?.description || '', categoryId: request?.categoryId || '', city: request?.city || '', budgetMin: request?.budgetMinCents === undefined ? '' : String(request.budgetMinCents / 100), budgetMax: request?.budgetMaxCents === undefined ? '' : String(request.budgetMaxCents / 100), preferredDate: request?.preferredDate || '', visibility: request?.visibility || 'open', shopId: request?.shopId || '', photoIds: request?.photoIds || []}));
   const [selected, setSelected] = useState(() => ({vehicle: route.params?.vehicle || null, category: null, shop: null}));
   const [touched, setTouched] = useState({}), [submitted, setSubmitted] = useState(false);
   const mutation = useMutation(), errors = requestErrors(form), disabled = mutation.saving || mutation.offline;
+  const invalidFields = Object.keys(errors);
   function edit(key, value) {if (!disabled) {setForm(previous => ({...previous, [key]: value})); setTouched(previous => ({...previous, [key]: true}));}}
   const fieldError = key => (submitted || touched[key]) ? errors[key] : null;
+  function showValidation() {
+    setSubmitted(true);
+    setTouched(Object.fromEntries(Object.keys(form).map(key => [key, true])));
+  }
   function choose(kind, item) {if (disabled) return; edit(`${kind}Id`, item.id); if (kind === 'vehicle') setForm(previous => ({...previous, photoIds: []})); setSelected(previous => ({...previous, [kind]: item}));}
   async function submit() {
     setSubmitted(true);
     if (disabled || hasErrors(errors)) return;
     const {budgetMin, budgetMax, shopId, photoIds, ...input} = form;
     try {
-      const result = await mutation.run('requestCreate', {...input, budgetMinCents: parseMoney(budgetMin), budgetMaxCents: parseMoney(budgetMax), ...(form.visibility === 'direct' ? {shopId} : {}), ...(photoIds.length ? {photoIds} : {})});
+      const result = await mutation.run(editing ? 'requestUpdate' : 'requestCreate', {...input, budgetMinCents: parseMoney(budgetMin), budgetMaxCents: parseMoney(budgetMax), ...(form.visibility === 'direct' ? {shopId} : {}), ...(editing ? {photoIds, id: request.id, version: request.version || 1} : (photoIds.length ? {photoIds} : {}))});
       if (result) navigation.replace('OwnerRequest', {id: result.id});
     } catch (_) { /* Preserve all selections and text for retry. */ }
   }
-  return <Page title="Request a service" navigation={navigation}>
+  return <Page title={editing ? 'Edit service request' : 'Request a service'} navigation={navigation}>
     <Text>Describe the work and set a budget in South African rand. Requests and quotations require a connection.</Text>
     <SelectionList title="Vehicles" state={vehicles} pages={vehiclePages} selected={form.vehicleId} onSelect={item => choose('vehicle', item)} label={vehicleName} disabled={disabled}/>
     {form.vehicleId && <Text>Selected vehicle: {selected.vehicle ? vehicleName(selected.vehicle) : 'Vehicle from your garage'}</Text>}
@@ -174,7 +185,12 @@ function RequestDraft({route, navigation}) {
     {form.visibility === 'direct' && <><SelectionList title="Approved shops" state={shops} pages={shopPages} selected={form.shopId} onSelect={item => choose('shop', item)} label={item => `${item.shopName} · ${item.city}`} disabled={disabled}/>
       {selected.shop && <Text>Selected shop: {selected.shop.shopName}</Text>}<Notice error={fieldError('shopId')}/></>}
     <Notice busy={mutation.saving} error={mutation.error}/>
-    <Button title="Submit request" disabled={disabled || hasErrors(errors)} onPress={submit}/>
+    {!!invalidFields.length && !mutation.saving && <Card accessibilityRole="alert">
+      <Text weight="semibold">Complete these fields before submitting:</Text>
+      {invalidFields.map(key => <Text key={key}>{errors[key]}</Text>)}
+      <Button title="Show required fields" outline disabled={mutation.offline} onPress={showValidation}/>
+    </Card>}
+    <Button title={editing ? 'Save request' : 'Submit request'} disabled={disabled || hasErrors(errors)} onPress={submit}/>
   </Page>;
 }
 
@@ -198,6 +214,7 @@ export function OwnerRequestScreen({route, navigation}) {
       <Text>{request.visibility === 'direct' ? 'Direct request to one approved shop' : 'Open request to approved shops'}</Text>
       <Text>Created: {when(request.createdAt)}</Text>
       {request.bookingId && <Button title="View booking" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('BookingDetail', {id: request.bookingId});}}/>}
+      {request.status === 'open' && <Button title="Edit request" outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('RequestForm', {request});}}/>}
       {request.status === 'open' && <ConfirmationButton title="Close request" message="Stop new or updated quotations for this request. Existing quotations remain available to view. Closing does not create a booking." disabled={disabled} onConfirm={close}/>}
     </Card>
       {!!request.photoIds?.length && <PhotoGallery target="request" id={id}/>}

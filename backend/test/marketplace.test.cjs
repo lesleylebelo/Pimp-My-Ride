@@ -39,6 +39,26 @@ const requestData={vehicleId:'car',title:'Respray doors',description:'Repair and
 const quoteData={scope:'Prepare and respray both doors',items:[{description:'Preparation',amountCents:10000},{description:'Paint and labour',amountCents:90000}],completionDays:3,warranty:'Six months',validForDays:14};
 async function created(f,details={}){return (await f.write('owner','requestCreate',{...requestData,...details})).id;}
 const audits=f=>[...f.db.rows.entries()].filter(([path])=>path.startsWith('auditLogs/'));
+
+test('owner can update an open request transactionally and retries are idempotent',async()=>{
+ const f=fixture(),id=await created(f),before=f.db.rows.get(`serviceRequests/${id}`);
+ const input={id,version:before.version,title:'Updated title',description:'Updated description.',categoryId:'paint',city:'Pretoria',budgetMinCents:20000,budgetMaxCents:250000,preferredDate:'',visibility:'open'};
+ const first=await f.write('owner','requestUpdate',input,'update-request'),second=await f.write('owner','requestUpdate',input,'update-request');
+ assert.deepEqual(first,second);
+ const saved=f.db.rows.get(`serviceRequests/${id}`);
+ assert.equal(saved.title,'Updated title');assert.equal(saved.city,'Pretoria');assert.equal(saved.version,2);
+ assert.equal(audits(f).filter(([,value])=>value.action==='marketplace.requestUpdate').length,1);
+});
+
+test('request updates reject stale versions and closed or booked requests',async()=>{
+ const f=fixture(),id=await created(f),version=f.db.rows.get(`serviceRequests/${id}`).version;
+ await f.write('owner','requestUpdate',{id,version,title:'First update',description:requestData.description,categoryId:'paint',city:requestData.city,budgetMinCents:10000,budgetMaxCents:200000,preferredDate:'',visibility:'open'},'first-update');
+ await assert.rejects(()=>f.write('owner','requestUpdate',{id,version,title:'Stale update',description:requestData.description,categoryId:'paint',city:requestData.city,budgetMinCents:10000,budgetMaxCents:200000,preferredDate:'',visibility:'open'},'stale-update'),{code:'failed-precondition'});
+ f.db.rows.get(`serviceRequests/${id}`).status='closed';
+ await assert.rejects(()=>f.write('owner','requestUpdate',{id,version:2,title:'Closed update',description:requestData.description,categoryId:'paint',city:requestData.city,budgetMinCents:10000,budgetMaxCents:200000,preferredDate:'',visibility:'open'},'closed-update'),{code:'failed-precondition'});
+ f.db.rows.get(`serviceRequests/${id}`).status='booked';
+ await assert.rejects(()=>f.write('owner','requestUpdate',{id,version:2,title:'Booked update',description:requestData.description,categoryId:'paint',city:requestData.city,budgetMinCents:10000,budgetMaxCents:200000,preferredDate:'',visibility:'open'},'booked-update'),{code:'failed-precondition'});
+});
 test('vehicle creation and request creation are transactional, audited and safe on retry after a lost acknowledgement',async()=>{
  const f=fixture();let once=true;f.db.after=async()=>{if(once){once=false;throw Error('Synthetic lost response');}};
  await assert.rejects(()=>f.write('owner','vehicleSave',vehicle,'new-vehicle'),/lost response/);
@@ -127,7 +147,8 @@ test('bounded shop discovery returns only redacted approved, active, verified en
  const f=fixture({'users/suspended':{role:'shop',verificationStatus:'approved',accountStatus:'suspended'},'users/pending':{role:'shop',verificationStatus:'pending'},'users/unverified':{role:'shop',verificationStatus:'approved'},'users/disabled':{role:'shop',verificationStatus:'approved'}});
  f.users.set('unverified',{emailVerified:false,disabled:false});f.users.set('disabled',{emailVerified:true,disabled:true});
  const result=await f.read('owner','shops');assert.deepEqual(result.items.map(v=>v.id),['competitor','shop']);
- assert.deepEqual(Object.keys(result.items[1]).sort(),['city','id','province','services','shopName'].sort());
+ assert.deepEqual(Object.keys(result.items[1]).sort(),['city','id','province','services','shopName','verified'].sort());
+ assert.equal(result.items[1].verified,true);
  assert.ok(f.db.queries.every(query=>query.maximum===21));
 });
 test('vehicle and owner quotation pages have stable document cursors with no truncation',async()=>{
