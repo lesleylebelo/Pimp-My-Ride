@@ -1,62 +1,138 @@
-import React from 'react';
-import { Image, Pressable, StyleSheet, View } from 'react-native';
+import React, {useMemo, useState} from 'react';
+import {Modal, Pressable, StyleSheet, View} from 'react-native';
 import colors from '../../../shared/theme/colors';
 import {ownerRoutes} from '../../marketplace/components/MarketplaceUI';
-import { LandingButton, LandingShell, LandingText, ownerTabs, ui, useLandingFeedback } from '../../../shared/components/landing/LandingUI';
+import {useMarketData} from '../../marketplace/hooks/useMarketData';
+import {LandingButton, LandingShell, LandingText, ownerTabs, ui, useLandingFeedback} from '../../../shared/components/landing/LandingUI';
+import AppTextInput from '../../../shared/components/AppTextInput';
+
+const matches = (shop, query) => Object.values(shop).some(value => String(value || '').toLowerCase().includes(query));
 
 export default function OwnerHomeScreen({navigation}) {
   const feedback = useLandingFeedback();
+  const shopsPages = usePages();
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('');
+  const [location, setLocation] = useState(null);
+  const [locationOpen, setLocationOpen] = useState(false);
+  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
+  const [expanded, setExpanded] = useState(null);
+  const shops = useMarketData('shops', {cursor: shopsPages.cursor});
+  const categories = useMarketData('categories');
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleShops = useMemo(() => (shops.data?.items || []).filter(shop => {
+    const services = String(shop.services || '').toLowerCase();
+    return (!normalizedQuery || matches(shop, normalizedQuery)) &&
+      (!category || services.includes(category.toLowerCase())) &&
+      (!location || ((!location.city || shop.city === location.city) && (!location.province || shop.province === location.province)));
+  }), [shops.data, normalizedQuery, category, location]);
+  const locations = useMemo(() => {
+    const seen = new Set();
+    return (shops.data?.items || []).reduce((values, shop) => {
+      if (!shop.city && !shop.province) return values;
+      const key = `${shop.city || ''}|${shop.province || ''}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        values.push({city: shop.city || '', province: shop.province || ''});
+      }
+      return values;
+    }, []);
+  }, [shops.data]);
+  const provinces = useMemo(() => [...new Set((shops.data?.items || []).map(shop => shop.province).filter(Boolean))], [shops.data]);
+  const cities = useMemo(() => [...new Set((shops.data?.items || []).map(shop => shop.city).filter(Boolean))], [shops.data]);
+  const disabled = shops.busy || categories.busy;
   const soon = feedback.showFeature;
-  return <LandingShell title="Discover" tabs={ownerTabs} activeTab="Discover" {...feedback} onTabPress={label=>ownerRoutes[label]?navigation.navigate(ownerRoutes[label]):soon(label)}>
-    <LandingButton title="Create service request" onPress={()=>navigation.navigate('RequestForm')}/>
-    <View style={styles.locationRow}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Choose location" onPress={() => soon('Choose location')} style={styles.location}>
-        <LandingText weight="semibold" style={ui.green}>Johannesburg⌄</LandingText>
-      </Pressable>
-      <Pressable accessibilityRole="button" onPress={() => soon('Notifications')} style={styles.alerts}>
-        <LandingText weight="semibold" style={ui.green}>Alerts</LandingText>
-      </Pressable>
-    </View>
-    <LandingText style={ui.muted}>Find inspiration for your next upgrade</LandingText>
-    <LandingButton title="Search workshops or services" outline onPress={() => soon('Search workshops or services')} />
+
+  return <LandingShell title="Discover" tabs={ownerTabs} activeTab="Discover" {...feedback} onTabPress={label => ownerRoutes[label] ? navigation.navigate(ownerRoutes[label]) : soon(label)}>
+    <LandingButton title="Create service request" onPress={() => navigation.navigate('RequestForm')}/>
+    <LandingButton title={location ? `${location.city || location.province}⌄` : 'All locations⌄'} outline disabled={shops.busy} onPress={() => setLocationOpen(true)}/>
+    <LandingText style={ui.muted}>Find approved workshops for your next upgrade</LandingText>
+    <AppTextInput accessibilityLabel="Search workshops or services" label="Search workshops or services" value={query} onChangeText={setQuery} editable={!shops.busy}/>
     <View style={styles.categories}>
-      <LandingButton title="All" onPress={() => {}} style={styles.category} accessibilityHint="Showing the sample showcase" />
-      <LandingButton title="Body Kit" outline onPress={() => soon('Body Kit filter')} style={styles.category} />
-      <LandingButton title="More filters" outline onPress={() => soon('More filters')} style={styles.category} />
+      <LandingButton title="All" outline={!!category} disabled={categories.busy} onPress={() => setCategory('')} style={styles.category}/>
+      {(categories.data?.items || []).map(item => <LandingButton key={item.id} title={item.name} outline={category !== item.name} disabled={categories.busy} onPress={() => setCategory(item.name)} style={styles.category}/>)}
     </View>
-    <LandingText weight="bold" style={styles.heading}>Workshop showcases</LandingText>
-    <View style={ui.card}>
-      <LandingText style={ui.sample}>Sample showcase</LandingText>
-      <View style={styles.workshopRow}>
-        <Image source={require('../../../../assets/landing/workshop-logo.png')} style={styles.logo} accessible={false} />
-        <View style={styles.workshopText}>
-          <LandingText weight="bold" style={styles.workshopName}>Powerpipes AutoART ✓</LandingText>
-          <LandingText style={styles.caption}>Sandton · Body Kit</LandingText>
+    <LandingButton title="More filters" outline disabled={disabled} onPress={() => setMoreFiltersOpen(true)}/>
+    {(shops.busy || categories.busy) && <LandingText accessibilityRole="status" style={ui.muted}>Loading approved workshops...</LandingText>}
+    {!!(shops.error || categories.error) && <LandingText accessibilityRole="alert" style={ui.error}>{shops.error || categories.error}</LandingText>}
+    {!shops.busy && !shops.error && !visibleShops.length && <LandingText style={ui.muted}>No approved workshops match your search.</LandingText>}
+    {visibleShops.map(shop => {
+      const isExpanded = expanded === shop.id;
+      return <View key={shop.id} style={ui.card}>
+        <LandingButton title={isExpanded ? `Hide ${shop.shopName}` : `View ${shop.shopName}`} outline={!isExpanded} onPress={() => setExpanded(isExpanded ? null : shop.id)} accessibilityHint="Expands shop details on this page"/>
+        <LandingText weight="bold" style={styles.shopName}>{shop.shopName}{shop.verified ? ' ✓' : ''}</LandingText>
+        <LandingText style={styles.caption}>{[shop.city, shop.province].filter(Boolean).join(' · ') || 'Location not provided'}</LandingText>
+        {isExpanded && <View style={styles.details}>
+          <LandingText weight="semibold">Shop details</LandingText>
+          <LandingText>City: {shop.city || 'Not provided'}</LandingText>
+          <LandingText>Province: {shop.province || 'Not provided'}</LandingText>
+          <LandingText>Services: {shop.services || 'Not provided'}</LandingText>
+          <LandingButton title="Close details" outline onPress={() => setExpanded(null)}/>
+        </View>}
+      </View>;
+    })}
+    <View style={styles.pagination}>
+      <LandingButton title="First" outline disabled={disabled || shopsPages.number === 1} onPress={() => shopsPages.first()}/>
+      <LandingButton title="Previous" outline disabled={disabled || shopsPages.number === 1} onPress={() => shopsPages.previous()}/>
+      <LandingButton title="Next" outline disabled={disabled || !shops.data?.cursor} onPress={() => shopsPages.next(shops.data.cursor)}/>
+    </View>
+    <LandingText style={ui.muted}>Page {shopsPages.number}</LandingText>
+    <Modal visible={locationOpen} transparent animationType="fade" onRequestClose={() => setLocationOpen(false)}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard} accessibilityViewIsModal>
+          <LandingText accessibilityRole="header" weight="bold" style={styles.modalTitle}>Choose location</LandingText>
+          <LandingButton title="All locations" outline={!!location} onPress={() => {setLocation(null); setLocationOpen(false);}}/>
+          {locations.map(item => {
+            const selected = location?.city === item.city && location?.province === item.province;
+            return <LandingButton key={`${item.city}|${item.province}`} title={[item.city, item.province].filter(Boolean).join(' · ')} outline={!selected} onPress={() => {setLocation(item); setLocationOpen(false);}}/>;
+          })}
+          {!locations.length && <LandingText style={ui.muted}>No locations are available on this page.</LandingText>}
+          <LandingButton title="Close" outline onPress={() => setLocationOpen(false)}/>
         </View>
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel="View BMW M2 showcase" onPress={() => soon('Showcase details')}>
-        <Image source={require('../../../../assets/landing/owner-showcase.png')} style={styles.photo} accessibilityLabel="Red BMW M2 showcase" />
-      </Pressable>
-      <LandingText weight="bold" style={styles.cardTitle}>BMW M2 · Full body kit</LandingText>
-      <LandingText style={[ui.muted, styles.description]}>A sharper finish with a complete styling upgrade.</LandingText>
-      <LandingButton title="View Shop" outline onPress={() => soon('Shop profile')} />
-    </View>
+    </Modal>
+    <Modal visible={moreFiltersOpen} transparent animationType="fade" onRequestClose={() => setMoreFiltersOpen(false)}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard} accessibilityViewIsModal>
+          <LandingText accessibilityRole="header" weight="bold" style={styles.modalTitle}>More filters</LandingText>
+          <LandingText weight="semibold">Province</LandingText>
+          <LandingButton title="All provinces" outline={!!location?.province} onPress={() => setLocation(previous => previous?.city ? {city: previous.city, province: ''} : null)}/>
+          {provinces.map(province => <LandingButton key={province} title={province} outline={location?.province !== province} onPress={() => setLocation({province, city: ''})}/>)}
+          <LandingText weight="semibold">City</LandingText>
+          <LandingButton title="All cities" outline={!!location?.city} onPress={() => setLocation(previous => previous?.province ? {province: previous.province, city: ''} : null)}/>
+          {cities.map(city => <LandingButton key={city} title={city} outline={location?.city !== city} onPress={() => {
+            const match = (shops.data?.items || []).find(shop => shop.city === city);
+            setLocation({city, province: match?.province || ''});
+          }}/>)}
+          <LandingText weight="semibold">Category / service</LandingText>
+          <LandingButton title="All categories" outline={!category} onPress={() => setCategory('')}/>
+          {(categories.data?.items || []).map(item => <LandingButton key={item.id} title={item.name} outline={category !== item.name} onPress={() => setCategory(item.name)}/>)}
+          <LandingButton title="Close" outline onPress={() => setMoreFiltersOpen(false)}/>
+        </View>
+      </View>
+    </Modal>
   </LandingShell>;
 }
 
+function usePages() {
+  const [history, setHistory] = useState([null]);
+  return {
+    cursor: history[history.length - 1],
+    number: history.length,
+    next: cursor => cursor && setHistory(value => value[value.length - 1] === cursor ? value : [...value, cursor]),
+    previous: () => setHistory(value => value.length > 1 ? value.slice(0, -1) : value),
+    first: () => setHistory([null]),
+  };
+}
+
 const styles = StyleSheet.create({
-  locationRow: { flexDirection: 'row', alignItems: 'center', minHeight: 44, marginVertical: -12 },
-  location: { flex: 1, minHeight: 44, justifyContent: 'center' },
-  alerts: { minHeight: 44, justifyContent: 'center', paddingLeft: 12 },
-  categories: { flexDirection: 'row', gap: 8 },
-  category: { flex: 1, width: undefined, paddingHorizontal: 4 },
-  heading: { fontSize: 18, lineHeight: 25 },
-  workshopRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  logo: { width: 36, height: 36, borderRadius: 18 },
-  workshopText: { flex: 1, gap: 2 },
-  workshopName: { fontSize: 15, lineHeight: 21 },
-  caption: { fontSize: 12, lineHeight: 17, color: colors.textSecondary },
-  photo: { width: '100%', aspectRatio: 330 / 200, borderRadius: 8, resizeMode: 'cover' },
-  cardTitle: { fontSize: 16, lineHeight: 22 },
-  description: { fontSize: 13, lineHeight: 18 },
+  categories: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
+  category: {flexGrow: 1, width: undefined, paddingHorizontal: 12},
+  shopName: {fontSize: 17, lineHeight: 24},
+  caption: {fontSize: 13, lineHeight: 18, color: colors.textSecondary},
+  details: {gap: 8, paddingTop: 4},
+  pagination: {flexDirection: 'row', gap: 8},
+  modalBackdrop: {flex: 1, justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0,0,0,0.35)'},
+  modalCard: {width: '100%', maxWidth: 420, alignSelf: 'center', padding: 24, gap: 12, borderRadius: 14, backgroundColor: colors.white},
+  modalTitle: {fontSize: 20, lineHeight: 28},
 });

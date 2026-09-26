@@ -147,7 +147,8 @@ test('bounded shop discovery returns only redacted approved, active, verified en
  const f=fixture({'users/suspended':{role:'shop',verificationStatus:'approved',accountStatus:'suspended'},'users/pending':{role:'shop',verificationStatus:'pending'},'users/unverified':{role:'shop',verificationStatus:'approved'},'users/disabled':{role:'shop',verificationStatus:'approved'}});
  f.users.set('unverified',{emailVerified:false,disabled:false});f.users.set('disabled',{emailVerified:true,disabled:true});
  const result=await f.read('owner','shops');assert.deepEqual(result.items.map(v=>v.id),['competitor','shop']);
- assert.deepEqual(Object.keys(result.items[1]).sort(),['city','id','province','services','shopName'].sort());
+ assert.deepEqual(Object.keys(result.items[1]).sort(),['city','id','province','services','shopName','verified'].sort());
+ assert.equal(result.items[1].verified,true);
  assert.ok(f.db.queries.every(query=>query.maximum===21));
 });
 test('vehicle and owner quotation pages have stable document cursors with no truncation',async()=>{

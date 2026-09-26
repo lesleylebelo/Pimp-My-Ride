@@ -73,8 +73,8 @@ test('garage pages vehicles and archive/restore require confirmation with the di
   const context=setup({read:(op,input)=>({items:input.archived?[{...vehicle,archived:true}]:input.cursor?[secondVehicle]:[vehicle],cursor:input.cursor?null:'next-vehicles'})});
   const tree=await mount(context,'GarageScreen');
   await press(tree,'Next');assert.ok(context.reads.some(([op,input])=>op==='vehicles'&&input.cursor==='next-vehicles'));
-  await press(tree,'Archive Ford Fiesta');await press(tree,'Cancel');assert.equal(context.calls.length,0);
-  await press(tree,'Archive Ford Fiesta');await press(tree,'Confirm');assert.deepEqual(context.calls,[['vehicleArchive',{id:'vehicle-two',version:3,archived:true}]]);
+  await press(tree,'Remove Ford Fiesta');await press(tree,'Cancel');assert.equal(context.calls.length,0);
+  await press(tree,'Remove Ford Fiesta');await press(tree,'Confirm');assert.deepEqual(context.calls,[['vehicleArchive',{id:'vehicle-two',version:3,archived:true}]]);assert.ok(says(tree,'Ford Fiesta removed from your active garage.'));
   await press(tree,'Archived vehicles');assert.ok(context.reads.some(([op,input])=>op==='vehicles'&&input.archived===true&&input.cursor===null));
   await press(tree,'Restore Toyota Corolla');await press(tree,'Confirm');assert.deepEqual(context.calls[1],['vehicleArchive',{id:'vehicle-one',version:3,archived:false}]);
   await unmount(tree);
@@ -94,6 +94,23 @@ test('request form selects paginated real records, validates amounts and dates, 
   assert.equal(context.calls.length,1);assert.deepEqual(context.calls[0],['requestCreate',{vehicleId:'vehicle-two',categoryId:'paint',title:'Paint the doors',description:'Repair and paint both front doors.',city:'Pretoria',preferredDate:'',visibility:'direct',shopId:'shop-one',budgetMinCents:50010,budgetMaxCents:100025}]);
   await act(async()=>{release();await pending;});assert.equal(field(tree,'Description').props.value,'Repair and paint both front doors.');assert.ok(says(tree,'Selected shop: Demo Customs'));assert.ok(says(tree,'Network interrupted.'));
   fail=false;await press(tree,'Submit request');assert.deepEqual(context.moves,[['replace','OwnerRequest',{id:'new-request'}]]);await unmount(tree);
+});
+
+test('untouched empty request form exposes all validation errors through the summary affordance',async()=>{
+ const context=setup({read:op=>({items:op==='vehicles'?[vehicle]:op==='categories'?[category]:[shop]})});
+ const tree=await mount(context,'RequestFormScreen');
+ assert.equal(button(tree,'Submit request').props.disabled,true);
+ assert.ok(says(tree,'Complete these fields before submitting:'));
+ assert.ok(says(tree,'Vehicle is required.'));
+ assert.ok(says(tree,'Service category is required.'));
+ assert.ok(says(tree,'Title is required.'));
+ assert.ok(says(tree,'Description is required.'));
+ assert.ok(says(tree,'City is required.'));
+ assert.ok(says(tree,'Enter an amount up to R1,000,000 with at most two decimal places.'));
+ await press(tree,'Show required fields');
+ assert.ok(says(tree,'Vehicle is required.'));
+ assert.ok(says(tree,'Title is required.'));
+ await unmount(tree);
 });
 
 test('switching a request from direct to open omits the old shop selection from the payload',async()=>{

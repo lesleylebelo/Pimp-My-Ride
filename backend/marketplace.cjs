@@ -63,7 +63,7 @@ function createMarketplace({db,auth,actor}){
    // Query approval first, then filter one bounded page for live Auth/account state.
    // A sparse page can be empty and still carry a next cursor.
    const result=await page(db.collection('users').where('role','==','shop').where('verificationStatus','==','approved'),input.cursor);
-   const items=await Promise.all(result.docs.map(async doc=>{const p=doc.data();if(!eligible(p,'shop')||!await authEligible(doc.id))return null;return {id:doc.id,...Object.fromEntries(['shopName','city','province','services'].map(key=>[key,p.shop?.[key]||'']))};}));
+   const items=await Promise.all(result.docs.map(async doc=>{const p=doc.data();if(!eligible(p,'shop')||!await authEligible(doc.id))return null;return {id:doc.id,verified:true,...Object.fromEntries(['shopName','city','province','services'].map(key=>[key,p.shop?.[key]||'']))};}));
    return {items:items.filter(Boolean),cursor:result.cursor};
   }
   if(op==='requests'){
