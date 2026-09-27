@@ -18,9 +18,11 @@ export default function AppTextInput({
   error,
   helperText,
   style,
+  inputStyle,
   ...inputProps
 }) {
   const [revealed, setRevealed] = useState(false);
+  const [focused, setFocused] = useState(false);
   const isSecure = secureTextEntry && !revealed;
 
   return (
@@ -30,6 +32,7 @@ export default function AppTextInput({
         style={[
           styles.inputRow,
           multiline && styles.inputRowMultiline,
+          focused && styles.inputRowFocused,
           error && styles.inputRowError,
         ]}
       >
@@ -54,7 +57,9 @@ export default function AppTextInput({
           autoCapitalize={secureTextEntry ? "none" : autoCapitalize}
           multiline={multiline}
           textAlignVertical={multiline ? "top" : "center"}
-          style={[styles.input, multiline && styles.inputMultiline]}
+          onFocus={event => { setFocused(true); inputProps.onFocus?.(event); }}
+          onBlur={event => { setFocused(false); inputProps.onBlur?.(event); }}
+          style={[styles.input, multiline && styles.inputMultiline, inputStyle]}
         />
         {showPasswordToggle ? (
           <Pressable
@@ -95,10 +100,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: colors.white,
-    borderRadius: radius.button,
+    borderRadius: 12,
     paddingHorizontal: spacing.md,
-    borderWidth: 1,
+    borderBottomWidth: 1,
     borderColor: colors.border,
+  },
+  inputRowFocused: {
+    borderColor: colors.primary,
   },
   inputRowMultiline: {
     alignItems: "flex-start",

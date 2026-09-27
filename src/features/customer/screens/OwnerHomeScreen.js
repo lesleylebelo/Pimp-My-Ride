@@ -19,6 +19,8 @@ export default function OwnerHomeScreen({navigation}) {
   const [locationOpen, setLocationOpen] = useState(false);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
   const [expanded, setExpanded] = useState(null);
+  const [liked, setLiked] = useState(false);
+  const [saved, setSaved] = useState(false);
   const shops = useMarketData('shops', {cursor: shopsPages.cursor});
   const categories = useMarketData('categories');
   const normalizedQuery = query.trim().toLowerCase();
@@ -47,14 +49,46 @@ export default function OwnerHomeScreen({navigation}) {
 
   return <LandingShell title="Discover" tabs={ownerTabs} activeTab="Discover" {...feedback} onTabPress={label => ownerRoutes[label] ? navigation.navigate(ownerRoutes[label]) : soon(label)}>
     <LandingButton title="Create service request" onPress={() => navigation.navigate('RequestForm')}/>
-    <View style={ui.card}>
-      <LandingText weight="medium">Community builds</LandingText>
-      <Image source={require('../../../../assets/landing/workshop-logo.png')} accessibilityLabel="Example community build inspiration" resizeMode="cover" style={styles.buildImage}/>
-      <LandingText weight="medium">Build inspiration</LandingText>
-      <LandingText style={ui.muted}>A visual example to inspire your next vehicle project.</LandingText>
+    <View style={styles.feedHeading}>
+      <View>
+        <LandingText weight="medium" style={styles.feedTitle}>Community builds</LandingText>
+        <LandingText style={styles.caption}>Fresh ideas from the scene</LandingText>
+      </View>
+      <Ionicons name="arrow-forward" size={18} color={colors.primary} accessibilityElementsHidden/>
+    </View>
+    <View style={[ui.card, styles.postCard]}>
+      <View style={styles.authorRow}>
+        <View style={styles.avatar}><LandingText weight="medium" style={styles.avatarText}>jt</LandingText></View>
+        <View style={styles.authorCopy}>
+          <LandingText weight="medium" style={styles.authorName}>jordan t.</LandingText>
+          <LandingText style={styles.caption}>nissan skyline · 2h</LandingText>
+        </View>
+        <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} accessibilityElementsHidden/>
+      </View>
+      <Image source={require('../../../../assets/landing/discover.png')} accessibilityLabel="Example community build inspiration" resizeMode="cover" style={styles.buildImage}/>
+      <LandingText weight="medium" style={styles.postTitle}>built for the long way home.</LandingText>
+      <LandingText style={styles.postCopy}>A few thoughtful details can change the whole feel. Sharing this build for your next project inspiration.</LandingText>
+      <View style={styles.engagementRow}>
+        <View style={styles.engagementActions}>
+          <Pressable accessibilityRole="button" accessibilityLabel={liked ? 'Unlike community build' : 'Like community build'} accessibilityState={{selected: liked}} onPress={() => setLiked(value => !value)} style={styles.engagementButton}>
+            <Ionicons name={liked ? 'heart' : 'heart-outline'} size={20} color={liked ? colors.primary : colors.textSecondary}/>
+            <LandingText style={[styles.metric, liked && styles.activeMetric]}>{liked ? '25' : '24'}</LandingText>
+          </Pressable>
+          <View style={styles.engagementButton} accessible accessibilityLabel="12 comments">
+            <Ionicons name="chatbubble-outline" size={19} color={colors.textSecondary}/>
+            <LandingText style={styles.metric}>12</LandingText>
+          </View>
+        </View>
+        <Pressable accessibilityRole="button" accessibilityLabel={saved ? 'Remove saved community build' : 'Save community build'} accessibilityState={{selected: saved}} onPress={() => setSaved(value => !value)} hitSlop={8}>
+          <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={20} color={saved ? colors.primary : colors.textSecondary}/>
+        </Pressable>
+      </View>
+    </View>
+    <View style={styles.workshopHeading}>
+      <LandingText weight="medium" style={styles.feedTitle}>Find your workshop</LandingText>
+      <LandingText style={styles.caption}>Explore verified workshops and their services.</LandingText>
     </View>
     <LandingButton title={location ? `${location.city || location.province}⌄` : 'All locations⌄'} outline disabled={shops.busy} onPress={() => setLocationOpen(true)}/>
-    <LandingText style={ui.muted}>Explore verified workshops and the services they offer.</LandingText>
     <AppTextInput accessibilityLabel="Search workshops or services" label="Search workshops or services" value={query} onChangeText={setQuery} editable={!shops.busy}/>
     <LandingText weight="medium">Browse by service</LandingText>
     <View style={styles.categories}>
@@ -139,9 +173,25 @@ function usePages() {
 }
 
 const styles = StyleSheet.create({
+  feedHeading: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8},
+  feedTitle: {fontSize: 20, lineHeight: 28},
+  postCard: {padding: 14, gap: 12},
+  authorRow: {flexDirection: 'row', alignItems: 'center', gap: 10},
+  avatar: {width: 38, height: 38, borderRadius: 19, backgroundColor: colors.brandGreenLight, alignItems: 'center', justifyContent: 'center'},
+  avatarText: {fontSize: 14, color: colors.primary},
+  authorCopy: {flex: 1, gap: 1},
+  authorName: {fontSize: 14},
+  postTitle: {fontSize: 17, lineHeight: 24},
+  postCopy: {fontSize: 14, lineHeight: 21, color: colors.textSecondary},
+  engagementRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4},
+  engagementActions: {flexDirection: 'row', alignItems: 'center', gap: 20},
+  engagementButton: {minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 6},
+  metric: {fontSize: 12, color: colors.textSecondary},
+  activeMetric: {color: colors.primary},
+  workshopHeading: {gap: 2, paddingTop: 12},
   categories: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
   category: {flexGrow: 1, width: undefined, paddingHorizontal: 12, borderRadius: radius.pill},
-  buildImage: {width: '100%', height: 180, borderRadius: 8, borderWidth: 1, borderColor: colors.border},
+  buildImage: {width: '100%', height: 220, borderRadius: 16, backgroundColor: colors.border},
   shopHeading: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8},
   shopName: {fontSize: 17, lineHeight: 24},
   verified: {flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: colors.brandGreenLight, borderRadius: radius.pill},
@@ -150,6 +200,6 @@ const styles = StyleSheet.create({
   details: {gap: 8, paddingTop: 4},
   pagination: {flexDirection: 'row', gap: 8},
   modalBackdrop: {flex: 1, justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0,0,0,0.35)'},
-  modalCard: {width: '100%', maxWidth: 420, alignSelf: 'center', padding: 24, gap: 12, borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.white},
+  modalCard: {width: '100%', maxWidth: 420, alignSelf: 'center', padding: 24, gap: 12, borderRadius: 20, backgroundColor: colors.white},
   modalTitle: {fontSize: 20, lineHeight: 28},
 });
