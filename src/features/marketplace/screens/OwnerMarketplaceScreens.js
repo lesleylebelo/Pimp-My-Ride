@@ -1,7 +1,9 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {StyleSheet, View} from 'react-native';
+import {Pressable, StyleSheet, View} from 'react-native';
+import {Ionicons} from '@expo/vector-icons';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
 import ConfirmationButton from '../../../shared/components/ConfirmationButton';
+import colors from '../../../shared/theme/colors';
 import {useAuth} from '../../auth/context/AuthContext';
 import {marketApi} from '../services/marketApi';
 import {useMarketData} from '../hooks/useMarketData';
@@ -116,10 +118,16 @@ export function OwnerRequestsScreen({navigation}) {
 }
 
 function SelectionList({title, state, pages, selected, onSelect, label, disabled}) {
-  return <Card><Text weight="semibold" style={styles.heading}>{title}</Text>
+  return <Card style={styles.selectionCard}><Text weight="medium" style={styles.sectionEyebrow}>{title}</Text>
     <Notice busy={state.busy} error={state.error}/>
-    {(state.data?.items || []).map(item => <Button key={item.id} title={`${selected === item.id ? 'Selected: ' : ''}${label(item)}`} outline={selected !== item.id} disabled={disabled || state.busy} onPress={() => {if (!disabled && !state.busy) onSelect(item);}}/>) }
-    {state.data && !state.busy && !state.data.items.length && <Text>{title === 'Categories' ? 'No active service categories are configured. Ask an administrator to seed serviceCategories with archived set to false.' : 'No available options on this page.'}</Text>}
+    <View style={styles.selectionChips}>{(state.data?.items || []).map(item => {
+      const active = selected === item.id;
+      return <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={`${active ? 'Selected: ' : ''}${label(item)}`} accessibilityState={{selected: active, disabled: disabled || state.busy}} disabled={disabled || state.busy} onPress={() => {if (!disabled && !state.busy) onSelect(item);}} style={[styles.selectionChip, active && styles.selectedChip]}>
+        <Text style={[styles.selectionText, active && styles.selectedText]}>{label(item)}</Text>
+        {active && <Ionicons name="checkmark" size={16} color={colors.primary}/>}
+      </Pressable>;
+    })}</View>
+    {state.data && !state.busy && !state.data.items.length && <Text>{title.includes('MODIFICATION TYPE') ? 'No active service categories are configured. Ask an administrator to seed serviceCategories with archived set to false.' : 'No available options on this page.'}</Text>}
     <Button title={`Refresh ${title.toLowerCase()}`} outline disabled={disabled || state.busy} onPress={() => {if (!disabled && !state.busy) void state.refresh().catch(() => {});}}/>
     <Paging pages={pages} nextCursor={state.data?.cursor} busy={disabled || state.busy}/>
   </Card>;
@@ -154,11 +162,14 @@ function RequestDraft({route, navigation}) {
     } catch (_) { /* Preserve all selections and text for retry. */ }
   }
   return <Page title={editing ? 'Edit service request' : 'Request a service'} navigation={navigation}>
-    <Text>Describe the work and set a budget in South African rand. Requests and quotations require a connection.</Text>
-    <SelectionList title="Vehicles" state={vehicles} pages={vehiclePages} selected={form.vehicleId} onSelect={item => choose('vehicle', item)} label={vehicleName} disabled={disabled}/>
-    {form.vehicleId && <Text>Selected vehicle: {selected.vehicle ? vehicleName(selected.vehicle) : 'Vehicle from your garage'}</Text>}
+    <Text style={styles.formIntro}>Tell us what you have in mind. Shops will use these details to prepare a quote.</Text>
+    <SelectionList title="01  /  YOUR VEHICLE" state={vehicles} pages={vehiclePages} selected={form.vehicleId} onSelect={item => choose('vehicle', item)} label={vehicleName} disabled={disabled}/>
+    {form.vehicleId && <View style={styles.selectedVehicle}><View style={styles.selectedVehicleCopy}>
+      <Text style={styles.selectedVehicleLabel}>SELECTED VEHICLE</Text>
+      <Text style={styles.selectedVehicleName}>{selected.vehicle ? vehicleName(selected.vehicle) : 'Vehicle from your garage'}</Text>
+    </View><Ionicons name="checkmark-circle" size={21} color={colors.primary}/></View>}
     <Notice error={fieldError('vehicleId')}/>
-    <Button title="Add a vehicle" outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm');}}/>
+    {!form.vehicleId && <Button title="Add a vehicle" outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm');}}/>}
     {!!form.vehicleId && <Card>
       <Text weight="semibold">Attach vehicle photos (optional)</Text>
       <Text>Choose up to five photos. Published requests keep these attachments even if you later change your garage photos.</Text>
@@ -167,18 +178,22 @@ function RequestDraft({route, navigation}) {
       <Text>{form.photoIds.length} photos selected</Text>
       {!!form.photoIds.length && <Button title="Clear photo selection" outline disabled={disabled} onPress={() => edit('photoIds', [])}/>}
     </Card>}
-    <SelectionList title="Categories" state={categories} pages={categoryPages} selected={form.categoryId} onSelect={item => choose('category', item)} label={item => item.name} disabled={disabled}/>
-    {selected.category && <Text>Selected category: {selected.category.name}</Text>}
+    <SelectionList title="02  /  MODIFICATION TYPE" state={categories} pages={categoryPages} selected={form.categoryId} onSelect={item => choose('category', item)} label={item => item.name} disabled={disabled}/>
+    {selected.category && <Text style={styles.selectionSummary}>Selected: {selected.category.name}</Text>}
     <Notice error={fieldError('categoryId')}/>
-    <Card>
-      <Field label="Request title" value={form.title} onChangeText={value => edit('title', value)} onBlur={() => setTouched(previous => ({...previous, title: true}))} maxLength={100} editable={!disabled} error={fieldError('title')}/>
-      <Field label="Description" value={form.description} onChangeText={value => edit('description', value)} onBlur={() => setTouched(previous => ({...previous, description: true}))} maxLength={300} multiline editable={!disabled} error={fieldError('description')} helperText={`${form.description.length}/300 characters`}/>
+    <View style={styles.formSection}>
+      <Text style={styles.sectionEyebrow}>03  /  THE DETAILS</Text>
+      <Field label="Request title" placeholder="e.g. satin black vinyl wrap" value={form.title} onChangeText={value => edit('title', value)} onBlur={() => setTouched(previous => ({...previous, title: true}))} maxLength={100} editable={!disabled} error={fieldError('title')}/>
+      <Field label="Description" placeholder="Tell the shop what you’re looking for…" value={form.description} onChangeText={value => edit('description', value)} onBlur={() => setTouched(previous => ({...previous, description: true}))} maxLength={300} multiline editable={!disabled} error={fieldError('description')} helperText={`${form.description.length}/300 characters`}/>
       <Field label="City" value={form.city} onChangeText={value => edit('city', value)} onBlur={() => setTouched(previous => ({...previous, city: true}))} maxLength={100} editable={!disabled} error={fieldError('city')}/>
-      <Field label="Minimum budget (ZAR)" value={form.budgetMin} onChangeText={value => edit('budgetMin', value)} onBlur={() => setTouched(previous => ({...previous, budgetMin: true}))} keyboardType="decimal-pad" maxLength={12} editable={!disabled} error={fieldError('budgetMin')}/>
-      <Field label="Maximum budget (ZAR)" value={form.budgetMax} onChangeText={value => edit('budgetMax', value)} onBlur={() => setTouched(previous => ({...previous, budgetMax: true}))} keyboardType="decimal-pad" maxLength={12} editable={!disabled} error={fieldError('budgetMax')}/>
+      <Text style={styles.budgetLabel}>BUDGET RANGE  ·  ZAR</Text>
+      <View style={styles.budgetRow}>
+        <Field style={styles.budgetField} label="Minimum budget (ZAR)" placeholder="R 0" value={form.budgetMin} onChangeText={value => edit('budgetMin', value)} onBlur={() => setTouched(previous => ({...previous, budgetMin: true}))} keyboardType="decimal-pad" maxLength={12} editable={!disabled} error={fieldError('budgetMin')} inputStyle={styles.budgetInput}/>
+        <Field style={styles.budgetField} label="Maximum budget (ZAR)" placeholder="R 0" value={form.budgetMax} onChangeText={value => edit('budgetMax', value)} onBlur={() => setTouched(previous => ({...previous, budgetMax: true}))} keyboardType="decimal-pad" maxLength={12} editable={!disabled} error={fieldError('budgetMax')} inputStyle={styles.budgetInput}/>
+      </View>
       <Field label="Preferred date (optional, YYYY-MM-DD)" value={form.preferredDate} onChangeText={value => edit('preferredDate', value)} onBlur={() => setTouched(previous => ({...previous, preferredDate: true}))} autoCapitalize="none" maxLength={10} editable={!disabled} error={fieldError('preferredDate')}/>
-    </Card>
-    <Card><Text weight="semibold">Who can quote?</Text>
+    </View>
+    <Card><Text weight="medium" style={styles.sectionEyebrow}>04  /  WHO CAN QUOTE?</Text>
       <Button title="Any approved shop" outline={form.visibility !== 'open'} disabled={disabled} onPress={() => edit('visibility', 'open')}/>
       <Button title="One approved shop" outline={form.visibility !== 'direct'} disabled={disabled} onPress={() => edit('visibility', 'direct')}/>
       <Text>{form.visibility === 'direct' ? 'Only your selected shop can view this request and submit a quotation.' : 'Approved shops can view this request and submit private quotations.'}</Text>
@@ -230,4 +245,25 @@ export function OwnerRequestScreen({route, navigation}) {
   </Page>;
 }
 
-const styles = StyleSheet.create({heading: {fontSize: 18, lineHeight: 26}, row: {flexDirection: 'row', flexWrap: 'wrap', gap: 8}});
+const styles = StyleSheet.create({
+  heading: {fontSize: 18, lineHeight: 26},
+  row: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
+  formIntro: {color: colors.textSecondary, lineHeight: 22},
+  sectionEyebrow: {fontSize: 11, lineHeight: 16, letterSpacing: 1.1, color: colors.textSecondary},
+  selectionCard: {padding: 14, gap: 14},
+  selectionChips: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
+  selectionChip: {minHeight: 40, maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 13, paddingVertical: 9, borderRadius: 999, backgroundColor: colors.surfaceCard, borderWidth: 1, borderColor: colors.border},
+  selectedChip: {borderColor: colors.primary},
+  selectionText: {fontSize: 13, color: colors.textSecondary},
+  selectedText: {color: colors.textPrimary},
+  selectedVehicle: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderRadius: 16, backgroundColor: colors.surfaceCard},
+  selectedVehicleCopy: {flex: 1, gap: 4},
+  selectedVehicleLabel: {fontSize: 10, letterSpacing: 1, color: colors.textSecondary},
+  selectedVehicleName: {fontSize: 15, lineHeight: 21, color: colors.textPrimary},
+  selectionSummary: {fontSize: 13, color: colors.textSecondary},
+  formSection: {padding: 16, borderRadius: 20, backgroundColor: colors.surfaceCard, gap: 10},
+  budgetLabel: {fontSize: 11, letterSpacing: 1, color: colors.textSecondary, paddingTop: 2},
+  budgetRow: {flexDirection: 'row', gap: 12},
+  budgetField: {flex: 1, minWidth: 0},
+  budgetInput: {fontFamily: 'monospace', fontVariant: ['tabular-nums']},
+});

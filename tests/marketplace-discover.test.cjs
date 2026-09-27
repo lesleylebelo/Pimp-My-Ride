@@ -24,7 +24,7 @@ function setup() {
   const screens = loadUI('src/features/customer/screens/OwnerHomeScreen.js', {
     '../../../shared/components/landing/LandingUI': landing,
     '../../marketplace/components/MarketplaceUI': {ownerRoutes: {Discover: 'Discover'}},
-    '../../../../assets/landing/workshop-logo.png': 'workshop-logo',
+    '../../../../assets/landing/discover.png': 'discover.png',
     '../../marketplace/hooks/useMarketData': {
       useMarketData: op => op === 'shops'
         ? {data: {items: shops, cursor: null}, busy: false, error: ''}
@@ -46,6 +46,20 @@ test('discover presents community build inspiration beside verified workshop sho
   assert.ok(tree.root.findAllByType('Image').some(node => node.props.accessibilityLabel === 'Example community build inspiration'));
   assert.match(text(tree), /Workshop showcases/);
   assert.match(text(tree), /Verified workshop/);
+  await act(async () => tree.unmount());
+});
+
+test('community feed like and save controls reflect their local selected state', async () => {
+  const {screens, navigation} = setup();
+  let tree;
+  await act(async () => { tree = Renderer.create(React.createElement(screens.default, {navigation})); });
+  const like = button(tree, 'Like community build');
+  const save = button(tree, 'Save community build');
+  await act(async () => like.props.onPress());
+  await act(async () => save.props.onPress());
+  assert.equal(button(tree, 'Unlike community build').props.accessibilityState.selected, true);
+  assert.equal(button(tree, 'Remove saved community build').props.accessibilityState.selected, true);
+  assert.match(text(tree), /25/);
   await act(async () => tree.unmount());
 });
 

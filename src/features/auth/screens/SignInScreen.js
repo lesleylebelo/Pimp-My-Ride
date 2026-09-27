@@ -151,7 +151,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 12,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surfaceCard,
   },
   headerText: {
     marginLeft: spacing.md,
@@ -164,7 +164,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 14,
-    color: colors.textSecondary,
+    color: colors.primary,
     marginTop: 2,
   },
   socialRow: {
@@ -184,14 +184,14 @@ const styles = StyleSheet.create({
   dividerText: {
     marginHorizontal: spacing.sm,
     fontSize: 13,
-    color: colors.textSecondary,
+    color: colors.primary,
   },
   forgotWrap: {
     alignSelf: "flex-end",
     marginBottom: 0,
   },
   forgotText: {
-    color: colors.primary,
+    color: colors.textSecondary,
     fontWeight: "500",
     fontSize: 14,
   },
@@ -205,7 +205,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   footerLink: {
-    color: colors.primary,
+    color: colors.textSecondary,
     fontWeight: "500",
     fontSize: 14,
   },

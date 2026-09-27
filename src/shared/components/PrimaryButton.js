@@ -33,7 +33,7 @@ export default function PrimaryButton({ title, onPress, style, textStyle, disabl
 const styles = StyleSheet.create({
   button: {
     backgroundColor: colors.primary,
-    borderRadius: radius.button,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.primary,
     minHeight: 48,

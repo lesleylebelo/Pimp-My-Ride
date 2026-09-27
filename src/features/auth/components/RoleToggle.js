@@ -34,7 +34,7 @@ function Segment({ label, active, onPress }) {
 const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
-    backgroundColor: colors.white,
+    backgroundColor: colors.surfaceCard,
     borderRadius: radius.button,
     borderWidth: 1,
     borderColor: colors.border,

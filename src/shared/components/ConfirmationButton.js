@@ -38,7 +38,7 @@ export default function ConfirmationButton({title, message, onConfirm, disabled,
 }
 const styles = StyleSheet.create({
   backdrop: {flex:1,justifyContent:'center',alignItems:'center',padding:24,backgroundColor:'rgba(0,0,0,0.4)'},
-  card: {width:'100%',maxWidth:440,padding:24,gap:18,borderWidth:1,borderColor:colors.border,borderRadius:12,backgroundColor:colors.white},
+  card: {width:'100%',maxWidth:440,padding:24,gap:18,borderRadius:20,backgroundColor:colors.white},
   title: {fontSize:22,fontWeight:'500',color:colors.primary},
   error: {color:colors.error}, danger: {backgroundColor:colors.error,borderColor:colors.error},
 });

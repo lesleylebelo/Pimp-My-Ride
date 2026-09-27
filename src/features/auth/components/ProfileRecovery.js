@@ -7,6 +7,7 @@ import {completeProfile} from '../services/accounts';
 import {useAuth} from '../context/AuthContext';
 import {registrationErrors} from '../utils/registration';
 import {authError} from '../utils/authErrors';
+import colors from '../../../shared/theme/colors';
 export default function ProfileRecovery() {
  const {user,refresh,offline}=useAuth();
  const [issues,setIssues]=useState({});
@@ -31,7 +32,7 @@ export default function ProfileRecovery() {
  {['fullName','phone',...(role==='shop'?['shopName','regNumber','address','city','province','services']:[])].map(key=><AppTextInput key={key} label={{fullName:'Full name',phone:'Phone number',shopName:'Shop name',regNumber:'Registration number',address:'Address',city:'City',province:'Province',services:'Services offered'}[key]} value={form[key]||''} error={issues[key]} onChangeText={value=>change(key,value)}/>)}
  <Text>This academic demo stores account and shop details in Firebase, verification files in private Supabase Storage, and processes requests through a backend hosted on Render. Use fictional sample documents. Contact the student project team for correction or deletion. No real transactions are offered.</Text>
  <Pressable accessibilityRole="checkbox" accessibilityState={{checked:form.agreed}} onPress={()=>setForm(f=>({...f,agreed:!f.agreed}))}><Text>{form.agreed?'☑':'☐'} I accept these academic demo terms and privacy notice.</Text></Pressable>
- <Text accessibilityRole="alert" style={{color:'#C0392B'}}>{error}</Text>
+ <Text accessibilityRole="alert" style={{color:colors.error}}>{error}</Text>
  <PrimaryButton title="Save profile" loading={busy} disabled={offline} onPress={save}/>
  </View>;
 }

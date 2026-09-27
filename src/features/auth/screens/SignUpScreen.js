@@ -338,7 +338,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 12,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surfaceCard,
   },
   stepHeading: {
     fontSize: 26,
@@ -349,7 +349,7 @@ const styles = StyleSheet.create({
   },
   terms: {
     fontSize: 12,
-    color: colors.textSecondary,
+    color: colors.primary,
     marginTop: spacing.xs,
     lineHeight: 18,
   },
@@ -367,7 +367,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   footerLink: {
-    color: colors.primary,
+    color: colors.textSecondary,
     fontWeight: "500",
     fontSize: 14,
   },
