@@ -59,24 +59,21 @@ export default function SignInScreen({ navigation, route }) {
           <View style={styles.headerRow}>
             <LogoMark size={64} variant="onLight" />
             <View style={styles.headerText}>
-              <Text style={styles.title}>Welcome Back</Text>
+              <Text style={styles.title}>Welcome back</Text>
               <Text style={styles.subtitle}>One account. Your own workspace.</Text>
             </View>
           </View>
-
-
-
-
+          <View style={styles.formCard}>
           <View style={styles.dividerRow}>
             <View style={styles.dividerLine} />
             <Text style={styles.dividerText}>
-              continue with email
+              Continue with email
             </Text>
             <View style={styles.dividerLine} />
           </View>
 
           <AppTextInput
-            label="Email Address"
+            label="Email address"
             placeholder="example@gmail.com"
             value={email}
             onChangeText={(text) => {
@@ -104,13 +101,14 @@ export default function SignInScreen({ navigation, route }) {
             style={styles.forgotWrap}
             onPress={() => navigation.navigate("ForgotPassword")}
           >
-            <Text style={styles.forgotText}>Forgot Password?</Text>
+            <Text style={styles.forgotText}>Forgot password?</Text>
           </Pressable>
+          </View>
 
           <Text>{offline ? "You are offline. Connect to sign in." : "Your account determines which workspace opens."}</Text>
           <Text accessibilityRole="alert" style={{color:colors.error,marginBottom:12}}>{cooldown.error || submitError}</Text>
           <PrimaryButton
-            title={cooldown.seconds > 0 ? `Try again in ${cooldown.seconds}s` : 'Sign In'}
+            title={cooldown.seconds > 0 ? `Try again in ${cooldown.seconds}s` : 'Sign in'}
             onPress={handleSignIn}
             loading={loading}
             disabled={offline || cooldown.seconds !== 0}
@@ -122,7 +120,7 @@ export default function SignInScreen({ navigation, route }) {
             <Pressable
               onPress={() => navigation.navigate("SignUp")}
             >
-              <Text style={styles.footerLink}>Sign Up</Text>
+              <Text style={styles.footerLink}>Sign up</Text>
             </Pressable>
           </View>
         </ScrollView>
@@ -138,12 +136,22 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: spacing.lg,
-    paddingTop: spacing.xl,
+    paddingTop: spacing.lg,
+    flexGrow: 1,
+    justifyContent: "center",
   },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: spacing.xl,
+  },
+  formCard: {
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    backgroundColor: colors.white,
   },
   headerText: {
     marginLeft: spacing.md,
@@ -151,7 +159,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 26,
-    fontWeight: "800",
+    fontWeight: "500",
     color: colors.textPrimary,
   },
   subtitle: {
@@ -180,11 +188,11 @@ const styles = StyleSheet.create({
   },
   forgotWrap: {
     alignSelf: "flex-end",
-    marginBottom: spacing.lg,
+    marginBottom: 0,
   },
   forgotText: {
     color: colors.primary,
-    fontWeight: "700",
+    fontWeight: "500",
     fontSize: 14,
   },
   footerRow: {
@@ -198,7 +206,7 @@ const styles = StyleSheet.create({
   },
   footerLink: {
     color: colors.primary,
-    fontWeight: "700",
+    fontWeight: "500",
     fontSize: 14,
   },
 });

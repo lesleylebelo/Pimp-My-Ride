@@ -46,10 +46,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.white,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.primary,
-    borderRadius: radius.lg,
-    paddingVertical: 16,
+    borderRadius: radius.button,
+    minHeight: 48,
+    paddingVertical: 12,
     width: "100%",
   },
   pressed: {
@@ -61,6 +62,6 @@ const styles = StyleSheet.create({
   text: {
     color: colors.primary,
     fontSize: typography.button.fontSize,
-    fontWeight: "700",
+    fontWeight: "500",
   },
 });

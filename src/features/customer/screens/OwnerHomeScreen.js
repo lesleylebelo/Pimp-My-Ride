@@ -1,6 +1,8 @@
 import React, {useMemo, useState} from 'react';
-import {Modal, Pressable, StyleSheet, View} from 'react-native';
+import {Image, Modal, Pressable, StyleSheet, View} from 'react-native';
+import {Ionicons} from '@expo/vector-icons';
 import colors from '../../../shared/theme/colors';
+import {radius} from '../../../shared/theme/typography';
 import {ownerRoutes} from '../../marketplace/components/MarketplaceUI';
 import {useMarketData} from '../../marketplace/hooks/useMarketData';
 import {LandingButton, LandingShell, LandingText, ownerTabs, ui, useLandingFeedback} from '../../../shared/components/landing/LandingUI';
@@ -45,14 +47,22 @@ export default function OwnerHomeScreen({navigation}) {
 
   return <LandingShell title="Discover" tabs={ownerTabs} activeTab="Discover" {...feedback} onTabPress={label => ownerRoutes[label] ? navigation.navigate(ownerRoutes[label]) : soon(label)}>
     <LandingButton title="Create service request" onPress={() => navigation.navigate('RequestForm')}/>
+    <View style={ui.card}>
+      <LandingText weight="medium">Community builds</LandingText>
+      <Image source={require('../../../../assets/landing/workshop-logo.png')} accessibilityLabel="Example community build inspiration" resizeMode="cover" style={styles.buildImage}/>
+      <LandingText weight="medium">Build inspiration</LandingText>
+      <LandingText style={ui.muted}>A visual example to inspire your next vehicle project.</LandingText>
+    </View>
     <LandingButton title={location ? `${location.city || location.province}⌄` : 'All locations⌄'} outline disabled={shops.busy} onPress={() => setLocationOpen(true)}/>
-    <LandingText style={ui.muted}>Find approved workshops for your next upgrade</LandingText>
+    <LandingText style={ui.muted}>Explore verified workshops and the services they offer.</LandingText>
     <AppTextInput accessibilityLabel="Search workshops or services" label="Search workshops or services" value={query} onChangeText={setQuery} editable={!shops.busy}/>
+    <LandingText weight="medium">Browse by service</LandingText>
     <View style={styles.categories}>
       <LandingButton title="All" outline={!!category} disabled={categories.busy} onPress={() => setCategory('')} style={styles.category}/>
       {(categories.data?.items || []).map(item => <LandingButton key={item.id} title={item.name} outline={category !== item.name} disabled={categories.busy} onPress={() => setCategory(item.name)} style={styles.category}/>)}
     </View>
     <LandingButton title="More filters" outline disabled={disabled} onPress={() => setMoreFiltersOpen(true)}/>
+    <LandingText weight="medium">Workshop showcases</LandingText>
     {(shops.busy || categories.busy) && <LandingText accessibilityRole="status" style={ui.muted}>Loading approved workshops...</LandingText>}
     {!!(shops.error || categories.error) && <LandingText accessibilityRole="alert" style={ui.error}>{shops.error || categories.error}</LandingText>}
     {!shops.busy && !shops.error && !visibleShops.length && <LandingText style={ui.muted}>No approved workshops match your search.</LandingText>}
@@ -60,7 +70,10 @@ export default function OwnerHomeScreen({navigation}) {
       const isExpanded = expanded === shop.id;
       return <View key={shop.id} style={ui.card}>
         <LandingButton title={isExpanded ? `Hide ${shop.shopName}` : `View ${shop.shopName}`} outline={!isExpanded} onPress={() => setExpanded(isExpanded ? null : shop.id)} accessibilityHint="Expands shop details on this page"/>
-        <LandingText weight="bold" style={styles.shopName}>{shop.shopName}{shop.verified ? ' ✓' : ''}</LandingText>
+        <View style={styles.shopHeading}>
+          <LandingText weight="medium" style={styles.shopName}>{shop.shopName}</LandingText>
+          {shop.verified && <View style={styles.verified}><Ionicons name="checkmark-circle-outline" size={16} color={colors.primary}/><LandingText style={styles.verifiedText}>Verified workshop</LandingText></View>}
+        </View>
         <LandingText style={styles.caption}>{[shop.city, shop.province].filter(Boolean).join(' · ') || 'Location not provided'}</LandingText>
         {isExpanded && <View style={styles.details}>
           <LandingText weight="semibold">Shop details</LandingText>
@@ -80,7 +93,7 @@ export default function OwnerHomeScreen({navigation}) {
     <Modal visible={locationOpen} transparent animationType="fade" onRequestClose={() => setLocationOpen(false)}>
       <View style={styles.modalBackdrop}>
         <View style={styles.modalCard} accessibilityViewIsModal>
-          <LandingText accessibilityRole="header" weight="bold" style={styles.modalTitle}>Choose location</LandingText>
+          <LandingText accessibilityRole="header" weight="medium" style={styles.modalTitle}>Choose location</LandingText>
           <LandingButton title="All locations" outline={!!location} onPress={() => {setLocation(null); setLocationOpen(false);}}/>
           {locations.map(item => {
             const selected = location?.city === item.city && location?.province === item.province;
@@ -94,17 +107,17 @@ export default function OwnerHomeScreen({navigation}) {
     <Modal visible={moreFiltersOpen} transparent animationType="fade" onRequestClose={() => setMoreFiltersOpen(false)}>
       <View style={styles.modalBackdrop}>
         <View style={styles.modalCard} accessibilityViewIsModal>
-          <LandingText accessibilityRole="header" weight="bold" style={styles.modalTitle}>More filters</LandingText>
-          <LandingText weight="semibold">Province</LandingText>
+          <LandingText accessibilityRole="header" weight="medium" style={styles.modalTitle}>More filters</LandingText>
+          <LandingText weight="medium">Province</LandingText>
           <LandingButton title="All provinces" outline={!!location?.province} onPress={() => setLocation(previous => previous?.city ? {city: previous.city, province: ''} : null)}/>
           {provinces.map(province => <LandingButton key={province} title={province} outline={location?.province !== province} onPress={() => setLocation({province, city: ''})}/>)}
-          <LandingText weight="semibold">City</LandingText>
+          <LandingText weight="medium">City</LandingText>
           <LandingButton title="All cities" outline={!!location?.city} onPress={() => setLocation(previous => previous?.province ? {province: previous.province, city: ''} : null)}/>
           {cities.map(city => <LandingButton key={city} title={city} outline={location?.city !== city} onPress={() => {
             const match = (shops.data?.items || []).find(shop => shop.city === city);
             setLocation({city, province: match?.province || ''});
           }}/>)}
-          <LandingText weight="semibold">Category / service</LandingText>
+          <LandingText weight="medium">Category / service</LandingText>
           <LandingButton title="All categories" outline={!category} onPress={() => setCategory('')}/>
           {(categories.data?.items || []).map(item => <LandingButton key={item.id} title={item.name} outline={category !== item.name} onPress={() => setCategory(item.name)}/>)}
           <LandingButton title="Close" outline onPress={() => setMoreFiltersOpen(false)}/>
@@ -127,12 +140,16 @@ function usePages() {
 
 const styles = StyleSheet.create({
   categories: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
-  category: {flexGrow: 1, width: undefined, paddingHorizontal: 12},
+  category: {flexGrow: 1, width: undefined, paddingHorizontal: 12, borderRadius: radius.pill},
+  buildImage: {width: '100%', height: 180, borderRadius: 8, borderWidth: 1, borderColor: colors.border},
+  shopHeading: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8},
   shopName: {fontSize: 17, lineHeight: 24},
+  verified: {flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: colors.brandGreenLight, borderRadius: radius.pill},
+  verifiedText: {fontSize: 12, color: colors.primary},
   caption: {fontSize: 13, lineHeight: 18, color: colors.textSecondary},
   details: {gap: 8, paddingTop: 4},
   pagination: {flexDirection: 'row', gap: 8},
   modalBackdrop: {flex: 1, justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0,0,0,0.35)'},
-  modalCard: {width: '100%', maxWidth: 420, alignSelf: 'center', padding: 24, gap: 12, borderRadius: 14, backgroundColor: colors.white},
+  modalCard: {width: '100%', maxWidth: 420, alignSelf: 'center', padding: 24, gap: 12, borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.white},
   modalTitle: {fontSize: 20, lineHeight: 28},
 });

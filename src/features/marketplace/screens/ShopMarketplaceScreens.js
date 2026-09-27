@@ -203,7 +203,7 @@ function QuotesList({navigation}) {
 }
 
 const styles = StyleSheet.create({
-  heading: {fontSize: 18, fontWeight: '700', color: colors.primary},
+  heading: {fontSize: 18, fontWeight: '500', color: colors.primary},
   muted: {color: colors.textSecondary, lineHeight: 21},
   lineItem: {borderTopWidth: 1, borderColor: colors.border, paddingTop: 12, gap: 8},
   quote: {gap: 10},

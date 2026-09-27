@@ -13,9 +13,9 @@ export default function SplashScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
       <View style={styles.center}>
-        <LogoMark size={90} variant="onDark" />
+        <LogoMark size={90} variant="onLight" />
         <Text style={styles.title}>PimpMyRide</Text>
       </View>
       <Text style={styles.tagline}>Connect. Customize. Drive Your Style.</Text>
@@ -26,7 +26,7 @@ export default function SplashScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.background,
     justifyContent: "center",
   },
   center: {
@@ -36,15 +36,15 @@ const styles = StyleSheet.create({
   title: {
     marginTop: 20,
     fontSize: 30,
-    fontWeight: "800",
-    color: colors.white,
+    fontWeight: "500",
+    color: colors.primary,
   },
   tagline: {
     position: "absolute",
     bottom: 100,
     alignSelf: "center",
     fontSize: 15,
-    fontWeight: "600",
-    color: colors.white,
+    fontWeight: "400",
+    color: colors.textSecondary,
   },
 });

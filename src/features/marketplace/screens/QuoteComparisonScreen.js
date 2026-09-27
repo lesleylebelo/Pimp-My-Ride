@@ -59,7 +59,7 @@ function QuoteComparison({route, navigation}) {
     }
   }
 
-  return <Page title="Compare & select" navigation={navigation}>
+  return <Page title="Compare quotes" navigation={navigation}>
     <Notice busy={busy || saving} error={saveError || error || (offline ? 'Connect to compare and accept quotations.' : '')}/>
     {request && <>
       <Card>

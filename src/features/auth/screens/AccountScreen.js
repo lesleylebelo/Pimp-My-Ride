@@ -9,6 +9,7 @@ import {authError} from '../utils/authErrors';
 import {accountStage} from '../utils/registration';
 import PrimaryButton from '../../../shared/components/PrimaryButton';
 import VerificationDocuments from '../components/VerificationDocuments';
+import colors from '../../../shared/theme/colors';
 export default function AccountScreen() {
  const {user,profile,error,refresh,logout,offline,requireConnection}=useAuth();
  const [busy,setBusy]=useState(false),[message,setMessage]=useState(''),[resendAt,setResendAt]=useState(0);
@@ -18,8 +19,8 @@ export default function AccountScreen() {
  const stage=accountStage(user,profile);
  const titles={restricted:'Account access restricted',verify:'Verify your email',pending:'Shop verification pending',rejected:'Shop registration not approved',ready:'You’re signed in',incomplete:'Account setup needs attention',invalid:'Account role needs attention'};
  async function action(fn,success='') {if(actionLock.current||uploadLock.current)return;actionLock.current=true;setBusy(true);setMessage('');try {await fn();setMessage(success);}catch(e){setMessage(authError(e));}finally{actionLock.current=false;setBusy(false);}}
- return <SafeAreaView style={{flex:1,backgroundColor:'#F2F2F2'}}><ScrollView contentContainerStyle={{padding:24,gap:18}}>
- <Text style={{fontSize:26,fontWeight:'800',color:'#0E3B2C'}}>{offline ? 'You are offline' : error ? 'Account access needs attention' : titles[stage]}</Text>
+ return <SafeAreaView style={{flex:1,backgroundColor:colors.background}}><ScrollView contentContainerStyle={{padding:24,gap:18}}>
+ <Text style={{fontSize:26,fontWeight:'500',color:colors.primary}}>{offline ? 'You are offline' : error ? 'Account access needs attention' : titles[stage]}</Text>
  <Text>{profile?.fullName || user?.email}</Text><Text>{profile?.role === 'owner' ? 'Vehicle owner' : profile?.role === 'shop' ? 'Custom shop' : profile?.role === 'admin' ? 'Administrator' : ''}</Text>
  {stage==='verify' && <><Text>Open the verification email sent to {user.email}. After you verify, return to the app. This page checks automatically and will continue when verification is confirmed.</Text>
 

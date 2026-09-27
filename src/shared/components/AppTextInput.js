@@ -87,7 +87,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: typography.label.fontSize,
-    fontWeight: "600",
+    fontWeight: "500",
     color: colors.textPrimary,
     marginBottom: spacing.sm,
   },
@@ -95,7 +95,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: colors.white,
-    borderRadius: radius.lg,
+    borderRadius: radius.button,
     paddingHorizontal: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
@@ -111,7 +111,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    paddingVertical: 18,
+    paddingVertical: 12,
     fontSize: typography.body.fontSize,
     color: colors.textPrimary,
   },
