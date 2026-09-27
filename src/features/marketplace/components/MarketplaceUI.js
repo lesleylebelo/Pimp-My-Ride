@@ -1,15 +1,15 @@
-import React,{useState} from 'react';
+import React,{useEffect,useRef,useState} from 'react';
 import {Text,View} from 'react-native';
 import {useAuth} from '../../auth/context/AuthContext';
 import {LandingShell,LandingButton,ownerTabs,shopTabs,ui,useLandingFeedback} from '../../../shared/components/landing/LandingUI';
 import AppTextInput from '../../../shared/components/AppTextInput';
 export const ownerRoutes={Discover:'Discover',Garage:'Garage','My Requests':'OwnerRequests',Bookings:'Bookings',Profile:'OwnerAccount'};
 export const shopRoutes={'Find Jobs':'ShopJobs',Requests:'ShopRequests',Quotes:'ShopQuotes',Bookings:'Bookings','My Shop':'ShopAccount'};
-export function Page({title,navigation,children,showTabs=true}){
+export function Page({title,navigation,children,showTabs=true,onScroll,onLayout,onContentSizeChange}){
  const {profile}=useAuth(),shop=profile?.role==='shop',routes=shop?shopRoutes:ownerRoutes,feedback=useLandingFeedback();
  const state=navigation?.getState?.(),route=state?.routes?.[state.index]?.name;
  const activeTab=Object.keys(routes).find(k=>routes[k]===route)||(route==='BookingDetail'?'Bookings':shop?(route==='QuoteForm'?'Quotes':'Find Jobs'):['RequestForm','OwnerRequest','QuoteComparison'].includes(route)?'My Requests':'Garage');
- return <LandingShell title={title} tabs={showTabs?(shop?shopTabs:ownerTabs):undefined} activeTab={activeTab} {...feedback} onTabPress={label=>routes[label]?navigation?.navigate(routes[label]):feedback.showFeature(label)}>
+ return <LandingShell title={title} tabs={showTabs?(shop?shopTabs:ownerTabs):undefined} activeTab={activeTab} {...feedback} onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} onTabPress={label=>routes[label]?navigation?.navigate(routes[label]):feedback.showFeature(label)}>
   {navigation?.canGoBack?.()&&<LandingButton title="Back" outline onPress={()=>navigation.goBack()}/>}
   {children}
  </LandingShell>;
@@ -18,12 +18,18 @@ export const Card=({children,style,...props})=><View {...props} style={[ui.card,
 export const Field=AppTextInput;
 export const Button=LandingButton;
 export function Notice({busy,error}){return <>{busy&&<Text accessibilityRole="status" style={ui.muted}>Loading...</Text>}{!!error&&<Text accessibilityRole="alert" style={ui.error}>{error}</Text>}</>;}
-export function usePages(){const [history,setHistory]=useState([null]);return {cursor:history.at(-1),number:history.length,next:cursor=>setHistory(h=>cursor&&h.at(-1)!==cursor?[...h,cursor]:h),previous:()=>setHistory(h=>h.length>1?h.slice(0,-1):h),first:()=>setHistory([null])};}
-export function Paging({pages,nextCursor,busy}){return <View style={{gap:8}}><Text style={ui.muted}>Page {pages.number}</Text><View style={{flexDirection:'row',gap:8}}>
- <Button title="First" outline style={{flex:1}} disabled={busy||pages.number===1} onPress={()=>{if(!busy)pages.first();}}/>
- <Button title="Previous" outline style={{flex:1}} disabled={busy||pages.number===1} onPress={()=>{if(!busy)pages.previous();}}/>
- <Button title="Next" outline style={{flex:1}} disabled={busy||!nextCursor} onPress={()=>{if(!busy&&nextCursor)pages.next(nextCursor);}}/>
- </View></View>;}
+const sameItem=(left,right)=>left===right||Object.keys(left).length===Object.keys(right).length&&Object.keys(left).every(key=>Object.is(left[key],right[key]));
+export function useInfiniteCursor(data,busy,setCursor,{itemsKey='items',cursorKey='cursor',autoLoad=true}={}){
+ const [items,setItems]=useState([]),requested=useRef(new Set()),viewport=useRef(0),content=useRef(0),seen=useRef(new WeakSet());
+ const pageItems=data?.[itemsKey],nextCursor=data?.[cursorKey];
+ useEffect(()=>{if(!data||seen.current.has(data))return;seen.current.add(data);if(Array.isArray(pageItems))setItems(previous=>{const indexes=new Map(previous.map((item,index)=>[item.id,index])),next=[...previous];let changed=false;for(const item of pageItems){const index=indexes.get(item.id);if(index===undefined){indexes.set(item.id,next.length);next.push(item);changed=true;}else if(!sameItem(next[index],item)){next[index]=item;changed=true;}}return changed?next:previous;});},[data,pageItems]);
+ const loadNext=()=>{if(nextCursor&&!busy&&!requested.current.has(nextCursor)){requested.current.add(nextCursor);setCursor(nextCursor);}};
+ const onScroll=event=>{const {contentOffset,contentSize,layoutMeasurement}=event.nativeEvent;if(autoLoad&&contentSize.height-contentOffset.y-layoutMeasurement.height<260)loadNext();};
+ const onLayout=event=>{viewport.current=event.nativeEvent.layout.height;if(autoLoad&&content.current-viewport.current<260)loadNext();};
+ const onContentSizeChange=(_,height)=>{content.current=height;if(autoLoad&&height-viewport.current<260)loadNext();};
+ const reset=()=>{requested.current.clear();seen.current=new WeakSet();if(data)seen.current.add(data);setItems([]);};
+ return {items,onScroll,onLayout,onContentSizeChange,loadNext,reset};
+}
 export function StatusTag({children}) {
  return <View style={ui.statusTag}><Text style={ui.statusText}>{children}</Text></View>;
 }

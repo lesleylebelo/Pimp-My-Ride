@@ -6,9 +6,11 @@ const path=require('node:path');
 
 function load(file){const src=fs.readFileSync(file,'utf8');const {code}=babel.transformSync(src,{configFile:false,babelrc:false,plugins:[require.resolve('@babel/plugin-transform-modules-commonjs')]});const mod={exports:{}};new Function('require','module','exports',code)(name=>load(path.resolve(path.dirname(file),name+'.js')),mod,mod.exports);return mod.exports;}
 const {registrationErrors,fileError,accountStage}=load(path.resolve(__dirname,'../src/features/auth/utils/registration.js'));
+const {authError}=load(path.resolve(__dirname,'../src/features/auth/utils/authErrors.js'));
 const valid={fullName:'Demo Owner',email:'owner@example.com',phone:'0821234567',password:'Password1234',confirmPassword:'Password1234',agreed:true};
 test('valid owner registration and international SA phone accepted',()=>{assert.deepEqual(registrationErrors(valid,'owner',1),{});assert.deepEqual(registrationErrors({...valid,phone:'+27 82 123 4567'},'owner',1),{});});
 test('registration rejects blank fields, bad email/phone, weak or mismatched password and missing consent',()=>{const e=registrationErrors({fullName:' ',email:'bad',phone:'123',password:'a',confirmPassword:'b'},'owner',1);for(const key of ['fullName','email','phone','password','confirmPassword','agreed'])assert.ok(e[key]);});
+test('signup errors identify common auth failures accurately',()=>{assert.match(authError({code:'auth/email-already-in-use'}),/already exists/);assert.match(authError({code:'auth/weak-password'}),/stronger password/);assert.match(authError({code:'auth/network-request-failed'}),/internet connection/);});
 test('shop details cannot skip required fields',()=>assert.equal(Object.keys(registrationErrors({},'shop',2)).length,6));
 test('shop requires all three documents',()=>assert.equal(Object.keys(registrationErrors({},'shop',3)).length,3));
 test('file validation blocks invalid MIME, unknown size, empty and oversized documents',()=>{const f={uri:'file:///demo.pdf',mimeType:'application/pdf',size:1};assert.equal(fileError(f),null);for(const change of [{mimeType:'application/javascript'},{size:undefined},{size:0},{size:5242881}])assert.ok(fileError({...f,...change}));});

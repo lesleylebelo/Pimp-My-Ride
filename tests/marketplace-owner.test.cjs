@@ -16,12 +16,13 @@ const says=(tree,text)=>tree.root.findAllByType('Text').some(node=>String([node.
 const change=(tree,label,value)=>act(async()=>field(tree,label).props.onChangeText(value));
 const press=(tree,title)=>act(async()=>button(tree,title).props.onPress());
 const unmount=tree=>act(async()=>tree.unmount());
+const scrollToBottom=tree=>act(async()=>{const view=tree.root.findAllByType('View').find(node=>node.props.onScroll);view.props.onScroll({nativeEvent:{contentOffset:{y:500},contentSize:{height:1200},layoutMeasurement:{height:600}}});});
 function setup({api=async()=>({id:'saved'}),read,auth={user:{uid:'owner'},profile:{role:'owner'},offline:false}}={}){
   const calls=[],reads=[],moves=[];
   const navigation={navigate:(...args)=>moves.push(['navigate',...args]),replace:(...args)=>moves.push(['replace',...args]),goBack:()=>moves.push(['back'])};
   const Primary=loadUI('src/shared/components/PrimaryButton.js').default;
   const screens=loadUI('src/features/marketplace/screens/OwnerMarketplaceScreens.js',{
-    '../../../shared/components/landing/LandingUI':{LandingText:props=>React.createElement('Text',props),LandingShell:({children})=>React.createElement('View',null,children),LandingButton:Primary,ui:{},ownerTabs:[],shopTabs:[],useLandingFeedback:()=>({})},
+    '../../../shared/components/landing/LandingUI':{LandingText:props=>React.createElement('Text',props),LandingShell:({children,...props})=>React.createElement('View',props,children),LandingButton:Primary,ui:{},ownerTabs:[],shopTabs:[],useLandingFeedback:()=>({})},
     '../../auth/context/AuthContext':{useAuth:()=>auth},
     '../components/PhotoGallery':props=>React.createElement('PhotoGallery',props),
     '../services/marketApi':{marketApi:async(...args)=>{calls.push(args);return api(...args);}},
@@ -69,10 +70,10 @@ test('offline owner forms block actions and an unmounted request does not naviga
   await act(async()=>{release({id:vehicle.id});await pending;});assert.deepEqual(context.moves,[]);
 });
 
-test('garage pages vehicles and archive/restore require confirmation with the displayed version',async()=>{
+test('garage appends vehicles while scrolling and archive/restore require confirmation with the displayed version',async()=>{
   const context=setup({read:(op,input)=>({items:input.archived?[{...vehicle,archived:true}]:input.cursor?[secondVehicle]:[vehicle],cursor:input.cursor?null:'next-vehicles'})});
   const tree=await mount(context,'GarageScreen');
-  await press(tree,'Next');assert.ok(context.reads.some(([op,input])=>op==='vehicles'&&input.cursor==='next-vehicles'));
+  assert.equal(button(tree,'Next'),undefined);await scrollToBottom(tree);assert.ok(context.reads.some(([op,input])=>op==='vehicles'&&input.cursor==='next-vehicles'));
   await press(tree,'Remove Ford Fiesta');await press(tree,'Cancel');assert.equal(context.calls.length,0);
   await press(tree,'Remove Ford Fiesta');await press(tree,'Confirm');assert.deepEqual(context.calls,[['vehicleArchive',{id:'vehicle-two',version:3,archived:true}]]);assert.ok(says(tree,'Ford Fiesta removed from your active garage.'));
   await press(tree,'Archived vehicles');assert.ok(context.reads.some(([op,input])=>op==='vehicles'&&input.archived===true&&input.cursor===null));
@@ -80,11 +81,14 @@ test('garage pages vehicles and archive/restore require confirmation with the di
   await unmount(tree);
 });
 
-test('request form selects paginated real records, validates amounts and dates, and preserves a failed direct draft',async()=>{
+test('request form scrolls vehicle choices independently, validates amounts and dates, and preserves a failed direct draft',async()=>{
   let fail=true,release;
   const context=setup({read:(op,input)=>op==='vehicles'?{items:input.cursor?[secondVehicle]:[vehicle],cursor:input.cursor?null:'vehicle-page-two'}:op==='categories'?{items:[category]}:{items:[shop]},api:async()=>{if(fail){await new Promise(resolve=>{release=resolve;});throw Error('Network interrupted. Retry this request.');}return {id:'new-request'};}});
   const tree=await mount(context,'RequestFormScreen');
-  await act(async()=>buttons(tree,'Next')[0].props.onPress());await press(tree,'Ford Fiesta (2020)');await press(tree,'Paint');
+  const selector=tree.root.findAllByType('View').find(node=>node.props.onLayout&&node.props.style?.some?.(style=>style?.padding===14));
+  assert.ok(selector);await act(async()=>selector.props.onLayout({nativeEvent:{layout:{y:0,height:180}}}));
+  assert.ok(context.reads.some(([op,input])=>op==='vehicles'&&input.cursor==='vehicle-page-two'));
+  assert.equal(button(tree,'Next'),undefined);await press(tree,'Ford Fiesta (2020)');await press(tree,'Paint');
   await fillRequest(tree);await change(tree,'Maximum budget (ZAR)','40');assert.ok(says(tree,'Maximum budget must be at least the minimum.'));
   await press(tree,'Submit request');assert.equal(context.calls.length,0);
   await change(tree,'Maximum budget (ZAR)','1000.25');await change(tree,'Preferred date (optional, YYYY-MM-DD)','2026-02-30');assert.equal(button(tree,'Submit request').props.disabled,true);
@@ -121,20 +125,20 @@ test('switching a request from direct to open omits the old shop selection from 
   await unmount(tree);
 });
 
-test('owner detail shows private quotations, pages them and closes only through a confirmed action',async()=>{
+test('owner detail scrolls private quotations and closes only through a confirmed action',async()=>{
   const quote={id:'quote-one',shopName:'Demo Customs',scope:'Paint both doors',items:[{description:'Labour and paint',amountCents:75000}],totalCents:75000,status:'submitted',completionDays:3,validUntil:Date.now()+10000};
   const context=setup({read:(op,input)=>({request,quotes:input.quotesCursor?[]:[quote],quotesCursor:input.quotesCursor?null:'quote-page-two'})});
   const tree=await mount(context,'OwnerRequestScreen',{id:request.id});
   assert.ok(says(tree,'Demo Customs'));assert.ok(says(tree,'R750.00'));
-  await press(tree,'Next');assert.ok(context.reads.some(([op,input])=>op==='request'&&input.quotesCursor==='quote-page-two'));
+  assert.equal(button(tree,'Next'),undefined);await scrollToBottom(tree);assert.ok(context.reads.some(([op,input])=>op==='request'&&input.quotesCursor==='quote-page-two'));
   await press(tree,'Close request');await press(tree,'Cancel');assert.equal(context.calls.length,0);
   await press(tree,'Close request');await press(tree,'Confirm');assert.deepEqual(context.calls,[['requestClose',{id:'req-one'}]]);
   await unmount(tree);
 });
 
-test('owner requests use the mine feed and disable opening or creating requests while offline',async()=>{
+test('owner requests scroll through the mine feed and disable opening or creating requests while offline',async()=>{
   const context=setup({read:(op,input)=>({items:[request],cursor:input.cursor?null:'request-page-two'})});
-  const tree=await mount(context,'OwnerRequestsScreen');await press(tree,'Next');assert.ok(context.reads.some(([op,input])=>op==='requests'&&input.feed==='mine'&&input.cursor==='request-page-two'));
+  const tree=await mount(context,'OwnerRequestsScreen');assert.equal(button(tree,'Next'),undefined);await scrollToBottom(tree);assert.ok(context.reads.some(([op,input])=>op==='requests'&&input.feed==='mine'&&input.cursor==='request-page-two'));
   await press(tree,'View Paint the doors');assert.deepEqual(context.moves,[['navigate','OwnerRequest',{id:'req-one'}]]);
   context.auth.offline=true;await act(async()=>tree.update(React.createElement(context.screens.OwnerRequestsScreen,{route:{params:{}},navigation:context.navigation})));
   await press(tree,'Create service request');await press(tree,'View Paint the doors');assert.equal(context.moves.length,1);await unmount(tree);

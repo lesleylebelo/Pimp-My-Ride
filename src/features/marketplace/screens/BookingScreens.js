@@ -6,7 +6,7 @@ import colors from '../../../shared/theme/colors';
 import {useAuth} from '../../auth/context/AuthContext';
 import {marketApi} from '../services/marketApi';
 import {useMarketData} from '../hooks/useMarketData';
-import {Page, Card, Field, Button, Notice, Paging, StatusTag, usePages, formatMoney} from '../components/MarketplaceUI';
+import {Page, Card, Field, Button, Notice, StatusTag, useInfiniteCursor, formatMoney} from '../components/MarketplaceUI';
 import {appointmentErrors, cancellationError} from '../utils/bookingValidation';
 import PhotoGallery from '../components/PhotoGallery';
 
@@ -32,20 +32,21 @@ export function BookingsScreen(props) {
 }
 
 function BookingsList({navigation}) {
-  const {offline, profile} = useAuth(), pages = usePages();
-  const {data, busy, error, refresh} = useMarketData('bookings', {cursor: pages.cursor});
+  const {offline, profile} = useAuth(), [cursor,setCursor]=useState(null);
+  const {data, busy, error, refresh} = useMarketData('bookings', {cursor});
+  const feed=useInfiniteCursor(data,busy,setCursor);
   const disabled = busy || offline;
-  return <Page title="Bookings" navigation={navigation}>
+  return <Page title="Bookings" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
     <Text style={styles.muted}>{profile?.role === 'shop' ? 'Confirm appointments for accepted quotations and view your booking history.' : 'View your accepted quotations, shop appointments and booking history.'}</Text>
     <Notice busy={busy} error={offline ? offlineMessage : error}/>
-    {!offline && (data?.items || []).map(booking => <Card key={booking.id}>
+    {!offline && feed.items.map(booking => <Card key={booking.id}>
       <BookingSummary booking={booking}/>
       <Text weight="semibold">Accepted total: {formatMoney(booking.totalCents)}</Text>
       <Button title="View booking" disabled={disabled} onPress={() => { if (!disabled) navigation.navigate('BookingDetail', {id: booking.id}); }}/>
     </Card>)}
-    {!offline && !busy && data && !data.items.length && <Text>No bookings yet. A booking is created when a customer accepts a quotation.</Text>}
+    {!offline && !busy && data && !feed.items.length && <Text>No bookings yet. A booking is created when a customer accepts a quotation.</Text>}
     <Button title="Refresh bookings" disabled={disabled} onPress={() => { if (!disabled) void refresh().catch(() => {}); }}/>
-    <Paging pages={pages} nextCursor={data?.cursor} busy={disabled}/>
+    {busy && !!feed.items.length && <Text style={styles.muted}>Loading more bookings...</Text>}
   </Page>;
 }
 

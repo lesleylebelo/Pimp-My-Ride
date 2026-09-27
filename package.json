@@ -30,6 +30,7 @@
     "expo-font": "~57.0.3",
     "expo-secure-store": "~57.0.3",
     "expo-status-bar": "~57.0.1",
+    "expo-web-browser": "~57.0.3",
     "firebase": "^12.19.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",

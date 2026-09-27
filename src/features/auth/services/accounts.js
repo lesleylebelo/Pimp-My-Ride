@@ -2,38 +2,103 @@ import {apiRequest} from '../../../shared/services/api';
 import {Platform} from 'react-native';
 import {guardedLogin} from './loginCooldown';
 import { requireConnection } from '../../../shared/services/network';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, getIdTokenResult, sendEmailVerification } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateCurrentUser, deleteUser, getIdTokenResult, sendEmailVerification } from 'firebase/auth';
 import { doc, getDocFromServer } from 'firebase/firestore';
-import { firebase } from '../../../shared/services/firebase';
+import { firebase, withIsolatedAuth } from '../../../shared/services/firebase';
 import { DOCUMENT_KEYS, fileError } from '../utils/registration';
-export async function login(email, password) {
- await requireConnection();
- const { auth, db } = firebase();
- const { user } = await guardedLogin(() => signInWithEmailAndPassword(auth, email.trim(), password));
+let accountActionPending = false;
+async function isolatedAccountAction(operation) {
+ if (accountActionPending) throw new Error('Another account action is in progress.');
+ accountActionPending = true;
  try {
+  await requireConnection();
+  if (firebase().auth.currentUser) throw new Error('Sign out before starting another account action.');
+  return await withIsolatedAuth(operation);
+ } finally { accountActionPending = false; }
+}
+export async function login(email, password) {
+ return isolatedAccountAction(async ({auth, db}) => {
+  const { user } = await guardedLogin(() => signInWithEmailAndPassword(auth, email.trim(), password));
+  if(!user.emailVerified){
+   const unverified=new Error('Please verify your email before signing in. Open the verification link in your inbox, or resend the email.');
+   unverified.code='auth/email-not-verified';throw unverified;
+  }
   const snapshot = await getDocFromServer(doc(db, 'users', user.uid));
-  if (!snapshot.exists()) return user; 
-  if (snapshot.data().accountStatus && snapshot.data().accountStatus !== 'active') throw new Error('This account is restricted. Contact the project administrator.');
-  const role = snapshot.data().role;
+  if (!snapshot.exists()) {
+   const missing=new Error('Your sign-in account exists, but its profile was not saved. Sign out, return to Create account, and submit the original signup details to finish this incomplete signup. If that does not work, contact support.');
+   missing.code='auth/profile-missing';throw missing;
+  }
+  const profile=snapshot.data();
+  if(typeof profile.fullName!=='string'||!profile.fullName.trim()||typeof profile.phone!=='string'||!profile.phone.trim()){
+   const invalid=new Error('Your account profile is incomplete or damaged. Sign-in cannot continue; contact support to restore account access.');
+   invalid.code='auth/profile-invalid';throw invalid;
+  }
+  if (profile.accountStatus && profile.accountStatus !== 'active') throw new Error('This account is restricted. Contact the project administrator.');
+  const role = profile.role;
   if (!['owner','shop','admin'].includes(role)) throw new Error('Account access is unavailable. Contact the project administrator.');
   if (role === 'admin' && (await getIdTokenResult(user,true)).claims.admin !== true) throw new Error('This account does not have administrator access.');
-  return user;
- } catch (error) { await signOut(auth); throw error; }
+  // Only a verified user with a valid profile may enter the persisted app session.
+  const mainAuth = firebase().auth;
+  if (mainAuth.currentUser) throw new Error('Your account changed. Please try again.');
+  await updateCurrentUser(mainAuth, user);
+  return mainAuth.currentUser;
+ });
 }
 export async function register(form, role) {
  if (!['owner','shop'].includes(role)) throw new Error('This role cannot register.');
- await requireConnection();
- const { auth, db } = firebase();
- await createUserWithEmailAndPassword(auth, form.email.trim(), form.password);
- await completeProfile(form, role);
+ return isolatedAccountAction(async session => {
+ const { auth, db } = session;
+ let user;
+ try{({user}=await createUserWithEmailAndPassword(auth, form.email.trim(), form.password));}
+ catch(error){
+  if(error.code!=='auth/email-already-in-use')throw error;
+  user=await guardedLogin(()=>signInWithEmailAndPassword(auth,form.email.trim(),form.password)).then(result=>result.user,loginError=>{
+   if(['auth/invalid-credential','auth/wrong-password','auth/user-not-found'].includes(loginError.code)){
+    const failure=new Error('An account with this email already exists. Sign in with its password or reset the password, then try again.');
+    failure.code='auth/email-already-in-use';throw failure;
+   }
+   throw loginError;
+  });
+   const snapshot=await getDocFromServer(doc(db,'users',user.uid));
+   if(snapshot.exists()){
+    if(typeof snapshot.data().fullName!=='string'||!snapshot.data().fullName.trim()||typeof snapshot.data().phone!=='string'||!snapshot.data().phone.trim()){
+     const invalid=new Error('This account exists but its saved profile is incomplete. Contact support to restore it.');
+     invalid.code='auth/profile-invalid';throw invalid;
+    }
+    const exists=new Error('An account with this email already exists. Sign in to continue.');
+    exists.code='auth/email-already-in-use';throw exists;
+   }
+   await saveProfile(form,role,user,auth);
+   if(!user.emailVerified)await sendVerification(user);
+   return;
+ }
+ try{await saveProfile(form,role,user,auth);}
+ catch(error){
+  try{await deleteUser(user);}
+  catch(cleanupError){
+   const failure=new Error(`Your account profile could not be saved (${error.message||'server error'}), and the incomplete account could not be removed (${cleanupError.message||'cleanup error'}). Please contact support before trying again.`);
+   failure.code='auth/profile-rollback-failed';throw failure;
+  }
+  throw error;
+ }
+ await sendVerification(user);
+ });
 }
 
-export async function completeProfile(form, role) {
- await requireConnection();
+export async function resendVerification(email, password) {
+ return isolatedAccountAction(async ({auth}) => {
+  const {user} = await guardedLogin(() => signInWithEmailAndPassword(auth, email.trim(), password));
+  if (user.emailVerified) {
+   const error = new Error('Your email is already verified. Return to sign in to continue.');
+   error.code = 'auth/email-already-verified';
+   throw error;
+  }
+  await sendEmailVerification(user);
+ });
+}
+
+function profilePayload(form,role,user) {
  if (!['owner','shop'].includes(role)) throw new Error('This role cannot register.');
- const { auth, db } = firebase();
- const user = auth.currentUser;
- if (!user) throw new Error('Please sign in again.');
  const data = {
   fullName: form.fullName.trim(), email: user.email, phone: form.phone.replace(/[\s()-]/g,''), role,
   termsVersion: 'academic-v2', agreed: form.agreed === true,
@@ -42,8 +107,15 @@ export async function completeProfile(form, role) {
   data.shop = Object.fromEntries(['shopName','regNumber','address','city','province','services'].map(k => [k, form[k].trim()]));
   data.verificationStatus = 'pending';
  }
- await apiRequest('profile',data);
- try { await sendEmailVerification(user); } catch (_) {  }
+ return data;
+}
+async function saveProfile(form,role,user,authClient) {
+ if(!user)throw new Error('Please sign in again.');
+ await apiRequest('profile',profilePayload(form,role,user),{authClient,expectedUid:user.uid});
+}
+async function sendVerification(user) {
+ try{await sendEmailVerification(user);}
+ catch{const failure=new Error("Your account and profile were created, but we couldn't send the verification email. Use Resend verification email to try again. You remain signed out.");failure.code='auth/verification-email-failed';throw failure;}
 }
 export async function listDocuments(expectedUid) {
  const user = firebase().auth.currentUser;

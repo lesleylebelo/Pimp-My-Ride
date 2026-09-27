@@ -1,12 +1,13 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {StyleSheet, View} from 'react-native';
+import {Pressable, StyleSheet, View} from 'react-native';
+import {Ionicons} from '@expo/vector-icons';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
 import {useAuth} from '../../auth/context/AuthContext';
 import ConfirmationButton from '../../../shared/components/ConfirmationButton';
 import colors from '../../../shared/theme/colors';
 import {marketApi} from '../services/marketApi';
 import {useMarketData} from '../hooks/useMarketData';
-import {Page, Card, Field, Button, Notice, Paging, usePages, formatMoney, QuoteCard} from '../components/MarketplaceUI';
+import {Page, Card, Field, Button, Notice, useInfiniteCursor, formatMoney, QuoteCard} from '../components/MarketplaceUI';
 import {parseMoney, quoteErrors} from '../utils/validation';
 import PhotoGallery from '../components/PhotoGallery';
 
@@ -32,24 +33,62 @@ function RequestSummary({request, detailed = false}) {
 
 function RequestsFeed({navigation, feed}) {
   const {offline} = useAuth();
-  const pages = usePages();
-  const {data, busy, error, refresh} = useMarketData('requests', {feed, cursor: pages.cursor});
+  const [cursor, setCursor] = useState(null);
+  const isJobsFeed = feed === 'open';
+  const {data, busy, error, refresh} = useMarketData('requests', {feed, cursor});
+  const requestFeed=useInfiniteCursor(data,busy,setCursor);
+  const feedRequests=requestFeed.items;
   const disabled = busy || offline;
-  return <Page title={feed === 'direct' ? 'Direct requests' : 'Find jobs'} navigation={navigation}>
-    <Text style={styles.muted}>{feed === 'direct' ? 'Customers have invited your shop to quote on these requests.' : 'Browse open customer requests and prepare a quotation for work your shop can complete.'}</Text>
+  const retry = () => {void refresh().catch(() => {});};
+
+  if (!isJobsFeed) return <Page title="Direct requests" navigation={navigation} onScroll={requestFeed.onScroll} onLayout={requestFeed.onLayout} onContentSizeChange={requestFeed.onContentSizeChange}>
+    <Text style={styles.muted}>Customers have invited your shop to quote on these requests.</Text>
     <Notice busy={busy} error={offline ? offlineMessage : error}/>
-    {(data?.items || []).map(request => <Card key={request.id}>
+    {feedRequests.map(request => <Card key={request.id}>
       <RequestSummary request={request}/>
       <Button title="View request" disabled={disabled} onPress={() => { if (!disabled) navigation.navigate('ShopRequest', {id: request.id}); }}/>
     </Card>)}
-    {!busy && data && !data.items.length && <Text>{feed === 'direct' ? 'No direct requests yet.' : 'No open requests are available.'}</Text>}
+    {!busy && data && !data.items.length && <Text>No direct requests yet.</Text>}
     <Button title="Refresh requests" disabled={disabled} onPress={reload(refresh)}/>
-    <Paging pages={pages} nextCursor={data?.cursor} busy={disabled}/>
+    {busy && !!feedRequests.length && <Text style={styles.loadMore}>Loading more requests...</Text>}
+  </Page>;
+
+  return <Page title="Find Jobs" navigation={navigation} onScroll={requestFeed.onScroll} onLayout={requestFeed.onLayout} onContentSizeChange={requestFeed.onContentSizeChange}>
+    <Text style={styles.feedIntro}>Browse open customer requests and prepare a quotation for work your shop can complete.</Text>
+    <Notice busy={busy && !feedRequests.length} error={offline ? offlineMessage : error}/>
+    {!!error && <Button title="Retry loading requests" outline onPress={retry}/>}
+    {!busy && !error && !feedRequests.length && <Text style={styles.muted}>No open requests are available.</Text>}
+    {feedRequests.map(request => <Card key={request.id} style={styles.jobCard}>
+      <View style={styles.jobAuthor}>
+        <View style={styles.categoryIcon}><Ionicons name="construct-outline" size={18} color={colors.primary}/></View>
+        <View style={styles.jobAuthorCopy}>
+          <Text style={styles.jobCategory}>{request.categoryName || 'Service request'}</Text>
+          <Text style={styles.muted}>{[request.city, request.createdAt ? postedLabel(request.createdAt) : null].filter(Boolean).join(' · ')}</Text>
+        </View>
+        <Text style={styles.openStatus}>Open</Text>
+      </View>
+      <Text style={styles.jobTitle}>{request.title}</Text>
+      <Text style={styles.jobVehicle}>{[request.vehicle?.year, request.vehicle?.make, request.vehicle?.model].filter(Boolean).join(' ')}</Text>
+      {!!request.description && <Text style={styles.jobDescription} numberOfLines={3}>{request.description}</Text>}
+      <Text style={styles.jobBudget}>{request.budgetMinCents == null && request.budgetMaxCents == null ? 'Budget not specified' : `${request.budgetMinCents == null ? 'No minimum' : formatMoney(request.budgetMinCents)} – ${request.budgetMaxCents == null ? 'No maximum' : formatMoney(request.budgetMaxCents)}`}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel={`View request: ${request.title}`} disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('ShopRequest', {id: request.id});}} style={styles.viewJob}>
+        <Text style={styles.viewJobText}>View request</Text>
+        <Ionicons name="arrow-forward" size={16} color={colors.primary}/>
+      </Pressable>
+    </Card>)}
+    {busy && !!feedRequests.length && <Text accessibilityRole="status" style={styles.loadMore}>Loading more requests...</Text>}
   </Page>;
 }
 
 export function ShopJobsScreen(props) { return <RequestsFeed {...props} feed="open"/>; }
 export function ShopRequestsScreen(props) { return <RequestsFeed {...props} feed="direct"/>; }
+
+function postedLabel(value) {
+  const timestamp = typeof value?.toMillis === 'function' ? value.toMillis() : new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return '';
+  const hours = Math.max(0, Math.floor((Date.now() - timestamp) / 3600000));
+  return hours < 1 ? 'just now' : hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
 
 export function ShopRequestScreen({navigation, route}) {
   const {offline} = useAuth();
@@ -162,8 +201,9 @@ export function ShopQuotesScreen(props) {
 }
 
 function QuotesList({navigation}) {
-  const {offline} = useAuth(), pages = usePages();
-  const {data, busy, error, refresh} = useMarketData('quotes', {cursor: pages.cursor});
+  const {offline} = useAuth(), [cursor,setCursor]=useState(null);
+  const {data, busy, error, refresh} = useMarketData('quotes', {cursor});
+  const feed=useInfiniteCursor(data,busy,setCursor);
   const [saving, setSaving] = useState(false), [message, setMessage] = useState(''), [withdrawn, setWithdrawn] = useState({});
   const lock = useRef(false), active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
@@ -181,11 +221,11 @@ function QuotesList({navigation}) {
     } catch (e) { if (active.current) setMessage(errorMessage(e)); throw e; }
     finally { lock.current = false; if (active.current) setSaving(false); }
   }
-  return <Page title="My quotations" navigation={navigation}>
+  return <Page title="My quotations" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
     <Text style={styles.muted}>Your submitted, accepted and withdrawn quotations. Accepted offers link to their booking. Withdrawing an unaccepted offer keeps its history.</Text>
     <Notice busy={busy || saving} error={offline ? offlineMessage : error}/>
     {!!message && <Text accessibilityLiveRegion="polite">{message}</Text>}
-    {(data?.items || []).map(original => {
+    {feed.items.map(original => {
       const quote = withdrawn[original.id] ? {...original, status: 'withdrawn'} : original;
       return <View key={quote.id} style={styles.quote}>
         <Text style={styles.heading}>{quote.requestTitle || 'Service request'}</Text>
@@ -196,15 +236,29 @@ function QuotesList({navigation}) {
         {quote.status === 'submitted' && <ConfirmationButton title="Withdraw quotation" message="This withdraws your offer and keeps its history. A replacement quotation cannot be submitted for this request." disabled={disabled} danger onConfirm={() => withdraw(quote.id)}/>}
       </View>;
     })}
-    {!busy && data && !data.items.length && <Text>You have not submitted a quotation yet.</Text>}
+    {!busy && data && !feed.items.length && <Text>You have not submitted a quotation yet.</Text>}
     <Button title="Refresh quotations" disabled={disabled} onPress={reload(refresh)}/>
-    <Paging pages={pages} nextCursor={data?.cursor} busy={disabled}/>
+    {busy && !!feed.items.length && <Text style={styles.muted}>Loading more quotations...</Text>}
   </Page>;
 }
 
 const styles = StyleSheet.create({
   heading: {fontSize: 18, fontWeight: '500', color: colors.primary},
   muted: {color: colors.textSecondary, lineHeight: 21},
+  feedIntro: {color: colors.textSecondary, lineHeight: 21},
+  jobCard: {padding: 16, gap: 12},
+  jobAuthor: {flexDirection: 'row', alignItems: 'center', gap: 10},
+  categoryIcon: {width: 38, height: 38, borderRadius: 19, backgroundColor: colors.brandGreenLight, alignItems: 'center', justifyContent: 'center'},
+  jobAuthorCopy: {flex: 1, gap: 2},
+  jobCategory: {fontSize: 14, fontWeight: '500', color: colors.textPrimary},
+  openStatus: {fontSize: 12, color: colors.success, backgroundColor: colors.successSurface, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999},
+  jobTitle: {fontSize: 18, lineHeight: 25, fontWeight: '600', color: colors.textPrimary},
+  jobVehicle: {fontSize: 13, color: colors.textSecondary},
+  jobDescription: {fontSize: 14, lineHeight: 21, color: colors.textPrimary},
+  jobBudget: {fontSize: 13, fontWeight: '500', color: colors.textPrimary},
+  viewJob: {minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: 4},
+  viewJobText: {fontSize: 14, fontWeight: '500', color: colors.primary},
+  loadMore: {alignSelf: 'center', paddingVertical: 8, color: colors.textSecondary},
   lineItem: {borderTopWidth: 1, borderColor: colors.border, paddingTop: 12, gap: 8},
   quote: {gap: 10},
 });

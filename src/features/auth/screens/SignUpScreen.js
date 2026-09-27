@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { register } from '../services/accounts';
 import { authError } from '../utils/authErrors';
 import { registrationErrors } from '../utils/registration';
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -47,12 +47,14 @@ export default function SignUpScreen({ navigation, route }) {
   const {run,offline} = useAuth();
   const [errors,setErrors] = useState({});
   const [loading,setLoading] = useState(false);
+  const submitting = useRef(false);
   const [submitError,setSubmitError] = useState('');
+  const [submitInfo,setSubmitInfo] = useState('');
   useEffect(() => { setRole(initialRole);setStep(1);setErrors({}); }, [initialRole]);
   
 
   const setField = key => value => {
-    const next={...form,[key]:value};setForm(next);setSubmitError('');
+    const next={...form,[key]:value};setForm(next);setSubmitError('');setSubmitInfo('');
     const issues={...registrationErrors(next,role,1),...registrationErrors(next,role,2)};
     setErrors(previous=>({...previous,[key]:issues[key]||null,
       ...(key==='password' && next.confirmPassword ? {confirmPassword:issues.confirmPassword||null} : {})}));
@@ -75,23 +77,32 @@ export default function SignUpScreen({ navigation, route }) {
   }, [step, navigation]));
 
   const handleRoleChange = (nextRole) => {
-    setErrors({});setSubmitError('');
+    setErrors({});setSubmitError('');setSubmitInfo('');
     setRole(nextRole);
     setStep(1);
   };
 
   const handlePrimaryAction = async () => {
-    if (loading) return;
+    if (submitting.current || offline) return;
     const issues=registrationErrors(form,role,step);setErrors(issues);
     if(Object.keys(issues).length) return;
     if(role==='shop' && step<2) {setStep(step+1);return;}
-    setLoading(true);setSubmitError('');
-    try { await run(async()=> {
-      await register(form,role);
-
-    }); }
-    catch(error) {setSubmitError(authError(error));Alert.alert('Registration needs attention',authError(error));}
-    finally {setLoading(false);}
+    submitting.current=true;
+    setLoading(true);setSubmitError('');setSubmitInfo('');
+    const showVerification = emailSent => {
+      setForm(previous=>({...previous,password:'',confirmPassword:''}));
+      navigation.replace('VerifyEmail',{email:form.email.trim(),emailSent});
+    };
+    try {
+      await run(()=>register(form,role));
+      showVerification(true);
+    }
+    catch(error) {
+      const message=authError(error);setSubmitError(message);
+      if(error?.code==='auth/verification-email-failed')showVerification(false);
+      else if(error?.code?.startsWith('api/')||error?.code==='auth/profile-rollback-failed')Alert.alert('Account creation failed',message);
+    }
+    finally {submitting.current=false;setLoading(false);}
   };
 
   const headerTitle = "Create account";
@@ -145,6 +156,7 @@ export default function SignUpScreen({ navigation, route }) {
             </View>}
             <Text>{offline ? "Connect to the internet to create an account." : role === "shop" ? "After verifying your email, upload your shop documents for review." : ""}</Text>
             <Text accessibilityRole="alert" style={{color:colors.error}}>{submitError}</Text>
+            {!!submitInfo && <Text accessibilityRole="status" style={{color:colors.success}}>{submitInfo}</Text>}
 
             <PrimaryButton
               title={

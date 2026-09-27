@@ -9,6 +9,7 @@ const field=(tree,label)=>tree.root.findAllByType('TextInput').find(n=>n.props.a
 const says=(tree,text)=>tree.root.findAllByType('Text').some(n=>n.props.children===text||(Array.isArray(n.props.children)&&n.props.children.filter(v=>typeof v==='string').join('')===text));
 const change=(tree,label,value)=>act(async()=>field(tree,label).props.onChangeText(value));
 const press=(tree,label)=>act(async()=>button(tree,label).props.onPress());
+const scrollToBottom=tree=>act(async()=>{const scroll=tree.root.findByType('ScrollView');scroll.props.onScroll({nativeEvent:{contentOffset:{y:900},contentSize:{height:1400},layoutMeasurement:{height:500}}});});
 const navigation={navigate(){},goBack(){}};
 function screens(mocks={}){
  return loadUI('src/features/admin/screens/AdminScreens.js',{
@@ -98,37 +99,37 @@ test('category live validation, failure retry and archive keep the draft until a
  await act(async()=>tree.unmount());
 });
 
-test('account cursor navigation avoids duplicate next pages, supports previous and resets for filters',async()=>{
+test('accounts append on scroll without duplicate cursors and reset for filters',async()=>{
  let current,busy=false;
  const {AccountsScreen}=screens({'../services/useAdminData':{useAdminData:(op,args)=>{
   current={op,args};return {busy,refresh:async()=>{},data:{items:[{id:args.cursor?'b':'a',fullName:'Demo',role:'owner'}],cursor:args.cursor?null:'a'}};
  }}});
  const props={route:{params:{}}},tree=await mount(AccountsScreen,props);
- assert.deepEqual(current.args,{filter:'all',cursor:null});assert.equal(button(tree,'Previous page').props.disabled,true);
- await act(async()=>{const next=button(tree,'Next page').props.onPress;next();next();});
- assert.equal(current.args.cursor,'a');assert.equal(button(tree,'Next page').props.disabled,true);
- await press(tree,'Previous page');assert.equal(current.args.cursor,null);assert.equal(button(tree,'Previous page').props.disabled,true);
- await press(tree,'Next page');await press(tree,'shop');
+ assert.deepEqual(current.args,{filter:'all',cursor:null});assert.equal(button(tree,'Next page'),undefined);
+ await scrollToBottom(tree);
+ assert.equal(current.args.cursor,'a');assert.equal(button(tree,'Next page'),undefined);assert.ok(says(tree,'Demo'));
+ await press(tree,'shop');
  assert.deepEqual(current.args,{filter:'shop',cursor:null});
  busy=true;await act(async()=>tree.update(React.createElement(AccountsScreen,{navigation,...props})));
- assert.equal(button(tree,'Next page').props.disabled,true);
- await press(tree,'Next page');assert.equal(current.args.cursor,null);
- assert.ok(field(tree,'Search this page by name, email or UID'));
+ assert.equal(button(tree,'Next page'),undefined);
+ await scrollToBottom(tree);assert.equal(current.args.cursor,null);
+ assert.ok(field(tree,'Search accounts by name, email or UID'));
  await act(async()=>tree.unmount());
 });
 
-test('category cursors and page-local search preserve the draft across pages',async()=>{
+test('category lists append on scroll and search across loaded results while preserving the draft',async()=>{
  let args;
  const {CategoriesScreen}=screens({'../services/useAdminData':{useAdminData:(op,input)=>{
   args=input;return {refresh:async()=>{},data:{items:[input.cursor?{id:'wheels',name:'Wheels',description:'Wheel service'}:{id:'paint',name:'Paint',description:'Paint service'}],cursor:input.cursor?null:'paint'}};
  }}});
  const tree=await mount(CategoriesScreen);
  await change(tree,'Name','Draft');await change(tree,'Description','Unsubmitted details');
- await change(tree,'Search this page by category name or description','Wheels');
- assert.ok(says(tree,'No matching categories on this page.'));
- await press(tree,'Next page');assert.equal(args.cursor,'paint');assert.ok(says(tree,'Wheels'));
- assert.equal(field(tree,'Name').props.value,'Draft');assert.equal(button(tree,'Next page').props.disabled,true);
- await press(tree,'First page');assert.equal(args.cursor,null);assert.equal(button(tree,'Previous page').props.disabled,true);
+ await change(tree,'Search categories by name or description','Wheels');
+ assert.ok(says(tree,'No matching categories loaded yet.'));
+ assert.equal(button(tree,'Next page'),undefined);await scrollToBottom(tree);assert.equal(args.cursor,'paint');assert.ok(says(tree,'Wheels'));
+ assert.equal(field(tree,'Name').props.value,'Draft');assert.equal(button(tree,'Next page'),undefined);
+ await change(tree,'Search categories by name or description','');
+ assert.equal(args.cursor,'paint');
  assert.equal(field(tree,'Description').props.value,'Unsubmitted details');
  await act(async()=>tree.unmount());
 });

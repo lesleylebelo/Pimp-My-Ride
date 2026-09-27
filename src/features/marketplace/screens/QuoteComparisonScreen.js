@@ -5,7 +5,7 @@ import ConfirmationButton from '../../../shared/components/ConfirmationButton';
 import {useAuth} from '../../auth/context/AuthContext';
 import {useMarketData} from '../hooks/useMarketData';
 import {marketApi} from '../services/marketApi';
-import {Page, Card, Button, Notice, Paging, usePages, formatMoney, QuoteCard} from '../components/MarketplaceUI';
+import {Page, Card, Button, Notice, useInfiniteCursor, formatMoney, QuoteCard} from '../components/MarketplaceUI';
 
 const available = (quote, now) => quote?.status === 'submitted' && Number(quote.validUntil) > now;
 
@@ -16,24 +16,24 @@ export function QuoteComparisonScreen(props) {
 }
 
 function QuoteComparison({route, navigation}) {
-  const {user, offline} = useAuth(), id = route.params.id, pages = usePages();
-  const {data, busy, error, refresh} = useMarketData('request', {id, quotesCursor: pages.cursor});
+  const {user, offline} = useAuth(), id = route.params.id, [cursor,setCursor]=useState(null);
+  const {data, busy, error, refresh} = useMarketData('request', {id, quotesCursor: cursor});
+  const quoteFeed=useInfiniteCursor(data,busy,setCursor,{itemsKey:'quotes',cursorKey:'quotesCursor'});
   const [selection, setSelection] = useState(null), [saving, setSaving] = useState(false), [saveError, setSaveError] = useState('');
   const [now, setNow] = useState(Date.now);
   const lock = useRef(false), current = useRef({mounted: true, uid: user?.uid});
   current.current.uid = user?.uid;
   useEffect(() => {current.current.mounted = true; return () => {current.current.mounted = false;};}, []);
 
-  // A selection belongs only to the loaded page. A refresh must not silently
-  // carry an old offer into a new set of prices or availability states.
-  const request = data?.request, quotes = data?.quotes || [];
-  const selected = !busy && !offline && !error && selection?.data === data && selection?.cursor === pages.cursor
-    ? quotes.find(quote => quote.id === selection.id) : null;
+  // Keep the selected offer while its accumulated feed pages continue loading.
+  const request = data?.request, quotes = quoteFeed.items;
+  const selected = !busy && !offline && !error ? quotes.find(quote => quote.id === selection?.id) : null;
   const disabled = busy || saving || offline || !!error;
   const canAccept = !disabled && request?.status === 'open' && available(selected, Math.max(now, Date.now()));
   useEffect(() => {
-    if (busy || offline || error || selection && (selection.data !== data || selection.cursor !== pages.cursor)) setSelection(null);
-  }, [busy, offline, error, data, pages.cursor, selection]);
+    const currentSelection = selection && quotes.find(quote => quote.id === selection.id);
+    if (offline || error || !busy && selection && currentSelection !== selection.quote) setSelection(null);
+  }, [busy, offline, error, data, selection, quotes]);
   useEffect(() => {
     const nextExpiry = Math.min(...quotes.filter(quote => available(quote, Date.now())).map(quote => Number(quote.validUntil)));
     if (!Number.isFinite(nextExpiry)) return undefined;
@@ -59,7 +59,7 @@ function QuoteComparison({route, navigation}) {
     }
   }
 
-  return <Page title="Compare quotes" navigation={navigation}>
+  return <Page title="Compare quotes" navigation={navigation} onScroll={quoteFeed.onScroll} onLayout={quoteFeed.onLayout} onContentSizeChange={quoteFeed.onContentSizeChange}>
     <Notice busy={busy || saving} error={saveError || error || (offline ? 'Connect to compare and accept quotations.' : '')}/>
     {request && <>
       <Card>
@@ -76,20 +76,20 @@ function QuoteComparison({route, navigation}) {
         return <QuoteCard key={quote.id} quote={quote}>
           {!quote.warranty && <Text>Warranty: not specified</Text>}
           {request.status === 'open' && <Button title={`${selected?.id === quote.id ? 'Selected' : 'Select'}: ${quote.shopName || 'Shop quotation'}`} outline={selected?.id !== quote.id} disabled={disabled || !eligible}
-            onPress={() => {if (!disabled && eligible && available(quote, Date.now())) {setSelection({id: quote.id, cursor: pages.cursor, data}); setSaveError('');}}}/>}
+            onPress={() => {if (!disabled && eligible && available(quote, Date.now())) {setSelection({id: quote.id, quote}); setSaveError('');}}}/>}
         </QuoteCard>;
       })}
-      {!busy && !quotes.length && <Text>No quotations on this page.</Text>}
-      <Paging pages={pages} nextCursor={data.quotesCursor} busy={disabled}/>
+      {!busy && !quotes.length && <Text>No quotations yet.</Text>}
+      {busy && !!quotes.length && <Text style={styles.muted}>Loading more quotations...</Text>}
       {request.status === 'open' && <Card>
-        <Text weight="semibold">{selected ? `Selected: ${selected.shopName || 'Shop quotation'} · ${formatMoney(selected.totalCents)}` : 'Select an available quotation on this page.'}</Text>
+        <Text weight="semibold">{selected ? `Selected: ${selected.shopName || 'Shop quotation'} · ${formatMoney(selected.totalCents)}` : 'Select an available quotation from the list.'}</Text>
         {selected && !available(selected, Math.max(now, Date.now())) && <Text>This quotation has expired. Choose another offer or refresh the list.</Text>}
         <ConfirmationButton key={selected?.id || 'none'} title="Continue to book" disabled={!canAccept}
           message={selected ? `Accept ${selected.shopName || 'this shop'}’s quotation for ${formatMoney(selected.totalCents)}? This selects one offer and creates a booking awaiting shop confirmation. The shop will set a future appointment. Cancelling the booking does not reopen the request.` : 'Select an available quotation first.'}
           onConfirm={accept}/>
       </Card>}
     </>}
-    <Button title="Refresh quotations" outline disabled={busy || saving || offline} onPress={() => {if (!busy && !saving && !offline) {setSelection(null); setSaveError(''); void refresh().catch(() => {});}}}/>
+    <Button title="Refresh quotations" outline disabled={busy || saving || offline} onPress={() => {if (!busy && !saving && !offline) {setSelection(null);quoteFeed.reset();setCursor(null);setSaveError(''); void refresh().catch(() => {});}}}/>
   </Page>;
 }
 
