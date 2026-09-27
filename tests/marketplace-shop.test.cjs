@@ -9,12 +9,12 @@ const quote = {id: 'quote-1', serviceRequestId: request.id, requestTitle: reques
 function setup(overrides = {}) {
   const state = {auth: {user: {uid: 'shop-1'}, profile: {role: 'shop'}, offline: false}, data: {request, quotes: []}, busy: false, error: '', calls: [], reads: [], navigations: [], api: async () => ({id: 'quote-1'}), refresh: async () => ({}), ...overrides};
   const PrimaryButton = loadUI('src/shared/components/PrimaryButton.js').default;
-  const landing = {LandingText: 'Text', LandingShell: ({children}) => React.createElement('View', null, children), LandingButton: PrimaryButton, ownerTabs: [], shopTabs: [], ui: {}, useLandingFeedback: () => ({showFeature() {}})};
+  const landing = {LandingText: 'Text', LandingShell: ({children, onScroll, onLayout, onContentSizeChange}) => React.createElement('View', {onScroll, onLayout, onContentSizeChange}, children), LandingButton: PrimaryButton, ownerTabs: [], shopTabs: [], ui: {}, useLandingFeedback: () => ({showFeature() {}})};
   const screens = loadUI('src/features/marketplace/screens/ShopMarketplaceScreens.js', {
     '../../auth/context/AuthContext': {useAuth: () => state.auth},
     '../components/PhotoGallery': props => React.createElement('PhotoGallery', props),
     '../../../shared/components/landing/LandingUI': landing,
-    '../hooks/useMarketData': {useMarketData: (op, input) => { state.reads.push({op, input}); return {data: state.data, busy: state.busy, error: state.error, refresh: (...args) => state.refresh(...args)}; }},
+    '../hooks/useMarketData': {useMarketData: (op, input) => { state.reads.push({op, input}); const data = op === 'requests' && state.readRequests ? state.readRequests(input) : state.data; return {data, busy: state.busy, error: state.error, refresh: (...args) => state.refresh(...args)}; }},
     '../services/marketApi': {marketApi: async (op, input) => { state.calls.push({op, input}); return state.api(op, input); }},
   });
   const navigation = {navigate: (...args) => state.navigations.push(args)};
@@ -38,12 +38,44 @@ test('shop feeds send the correct audience and navigate with a request identifie
     assert.deepEqual(state.reads.at(-1), {op: 'requests', input: {feed, cursor: null}});
     await act(async () => button(tree, 'View request').props.onPress());
     assert.deepEqual(state.navigations, [['ShopRequest', {id: request.id}]]);
-    await act(async () => button(tree, 'Next').props.onPress());
-    assert.equal(state.reads.at(-1).input.cursor, 'next-page');
-    await act(async () => button(tree, 'Previous').props.onPress());
-    assert.equal(state.reads.at(-1).input.cursor, null);
+    assert.equal(button(tree, 'Next'), undefined);
+    const scroller = tree.root.findAllByType('View').find(node => node.props.onScroll);
+    await act(async () => scroller.props.onScroll({nativeEvent:{contentOffset:{y:900},contentSize:{height:1200},layoutMeasurement:{height:500}}}));
+    assert.ok(state.reads.some(read => read.op === 'requests' && read.input.cursor === 'next-page'));
     await act(async () => tree.unmount());
   }
+});
+
+test('Find Jobs uses one request-card feed and loads the next cursor on scroll', async () => {
+  const nextRequest = {...request, id: 'request-2', title: 'Upgrade suspension', categoryName: 'Suspension', createdAt: new Date(Date.now() - 7200000).toISOString()};
+  const firstPage = {items: [request], cursor: 'next-page'}, secondPage = {items: [nextRequest], cursor: null};
+  const {state, screens, navigation} = setup({
+    data: firstPage,
+    readRequests: input => input.cursor ? secondPage : firstPage,
+  });
+  const tree = await mount(screens.ShopJobsScreen, {navigation});
+  assert.match(text(tree), /Restore paint/);
+  assert.match(text(tree), /Paint/);
+  assert.match(text(tree), /Ford Fiesta/);
+  assert.match(text(tree), /R100\.00/);
+  assert.doesNotMatch(text(tree), /Page \d|Previous|Next|Refresh requests/);
+  const scroller = tree.root.findAllByType('View').find(node => node.props.onScroll);
+  await act(async () => scroller.props.onScroll({nativeEvent: {
+    contentOffset: {y: 900},
+    contentSize: {height: 1200},
+    layoutMeasurement: {height: 500},
+  }}));
+  assert.match(text(tree), /Upgrade suspension/);
+  assert.ok(state.reads.some(read => read.op === 'requests' && read.input.cursor === 'next-page'));
+  await act(async () => tree.unmount());
+});
+
+test('Find Jobs View request action opens the matching request detail', async () => {
+  const {state, screens, navigation} = setup({data: {items: [request], cursor: null}});
+  const tree = await mount(screens.ShopJobsScreen, {navigation});
+  await act(async () => button(tree, 'View request').props.onPress());
+  assert.deepEqual(state.navigations, [['ShopRequest', {id: request.id}]]);
+  await act(async () => tree.unmount());
 });
 
 test('accepted quotations open their booking and cannot be withdrawn', async () => {

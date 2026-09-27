@@ -6,6 +6,26 @@ The user confirmed that Firebase's hosted password-reset handler is configured.
 This is user-confirmed configuration, not a tool-verified console setting or a
 delivered-email test. The app now deliberately uses that hosted flow.
 
+## Email verification and authentication boundary
+
+Signup creates the Auth account and profile, sends Firebase's hosted
+verification email, and signs out before returning to the form. Password login
+also signs out and refuses to continue until Firebase reports `emailVerified`.
+The email-verification screen therefore tells users to verify first and then
+sign in.
+
+The current Firebase-hosted `sendEmailVerification` action verifies the email
+address; it does not authenticate a user after the app has signed them out.
+Automatic sign-in on clicking that link is not provided by this flow. Do not
+retain a signup password in app storage as a workaround. To add automatic
+post-verification sign-in, first choose and configure a supported mechanism:
+for example, an email-link sign-in flow that authenticates only after the user
+opens the link, or a reviewed custom email-action handler with a secure,
+single-use credential exchange and registered web/native app links. This
+requires Firebase console/template and authorized-domain configuration plus
+end-to-end testing on the actual web and native return paths. Until that work is
+approved and configured, the user must sign in after verifying.
+
 `ForgotPasswordScreen` calls Firebase `sendPasswordResetEmail` with the Auth
 instance and trimmed email only, without `ActionCodeSettings` or a custom action
 URL. Firebase's configured email template supplies the hosted reset link. The

@@ -102,7 +102,7 @@ test('guest navigation exposes email recovery without custom password-reset rout
   '../features/marketplace/ShopNavigator','../features/admin/AdminNavigator',
   '../features/auth/screens/LegalScreen','../features/auth/screens/SplashScreen',
   '../features/auth/screens/SignInScreen','../features/auth/screens/SignUpScreen',
-  '../features/auth/screens/ForgotPasswordScreen','../shared/components/BackendStatus',
+  '../features/auth/screens/ForgotPasswordScreen','../features/auth/screens/VerifyEmailScreen','../shared/components/BackendStatus',
  ].map(name=>[name,placeholder]));
  const Navigator=loadUI('src/navigation/AppNavigator.js',{
   ...screenMocks,
@@ -112,6 +112,6 @@ test('guest navigation exposes email recovery without custom password-reset rout
   'react-native-safe-area-context':{SafeAreaProvider:'SafeAreaProvider'},'expo-status-bar':{StatusBar:'StatusBar'},
  }).default;
  let tree;await act(async()=>{tree=Renderer.create(React.createElement(Navigator));});
- assert.deepEqual(tree.root.findAllByType('StackScreen').map(n=>n.props.name),['Legal','Splash','SignIn','SignUp','ForgotPassword']);
+ assert.deepEqual(tree.root.findAllByType('StackScreen').map(n=>n.props.name),['Legal','Splash','SignIn','SignUp','ForgotPassword','VerifyEmail']);
  await act(async()=>tree.unmount());
 });

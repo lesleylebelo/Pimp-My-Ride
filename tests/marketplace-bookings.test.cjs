@@ -8,7 +8,7 @@ const booking = {id: 'booking-1', ownerId: 'owner-1', shopId: 'shop-1', serviceR
 function setup(overrides = {}) {
   const state = {auth: {user: {uid: 'shop-1'}, profile: {role: 'shop'}, offline: false}, data: {booking}, busy: false, error: '', calls: [], reads: [], navigations: [], api: async () => ({id: booking.id}), refresh: async () => ({}), ...overrides};
   const PrimaryButton = loadUI('src/shared/components/PrimaryButton.js').default;
-  const landing = {LandingText: 'Text', LandingShell: ({children}) => React.createElement('View', null, children), LandingButton: PrimaryButton, ownerTabs: [], shopTabs: [], ui: {}, useLandingFeedback: () => ({showFeature() {}})};
+  const landing = {LandingText: 'Text', LandingShell: ({children, onScroll, onLayout, onContentSizeChange}) => React.createElement('View', {onScroll, onLayout, onContentSizeChange}, children), LandingButton: PrimaryButton, ownerTabs: [], shopTabs: [], ui: {}, useLandingFeedback: () => ({showFeature() {}})};
   const screens = loadUI('src/features/marketplace/screens/BookingScreens.js', {
     '../../auth/context/AuthContext': {useAuth: () => state.auth},
     '../components/PhotoGallery': props => React.createElement('PhotoGallery', props),
@@ -30,7 +30,7 @@ async function appointment(tree) {
   await change(tree, 'Appointment time (HH:mm, SAST)', '14:30');
 }
 
-test('bookings list pages, navigates by identifier, resets pagination across accounts and handles empty, offline, loading and retry', async () => {
+test('bookings list loads on scroll, navigates by identifier, resets across accounts and handles empty, offline, loading and retry', async () => {
   let refreshes = 0;
   const {state, screens, navigation} = setup({data: {items: [booking], cursor: 'page-2'}, refresh: async () => {refreshes++; throw Error('Retry unavailable');}});
   const props = {navigation}, tree = await mount(screens.BookingsScreen, props);
@@ -39,16 +39,14 @@ test('bookings list pages, navigates by identifier, resets pagination across acc
   assert.match(text(tree), /Accepted total: R123.45/);
   await act(async () => button(tree, 'View booking').props.onPress());
   assert.deepEqual(state.navigations, [['BookingDetail', {id: booking.id}]]);
-  await act(async () => button(tree, 'Next').props.onPress());
-  assert.equal(state.reads.at(-1).input.cursor, 'page-2');
-  await act(async () => button(tree, 'Previous').props.onPress());
-  assert.equal(state.reads.at(-1).input.cursor, null);
-  await act(async () => button(tree, 'Next').props.onPress());
+  const scroller=tree.root.findAllByType('View').find(node=>node.props.onScroll);
+  await act(async()=>scroller.props.onScroll({nativeEvent:{contentOffset:{y:900},contentSize:{height:1200},layoutMeasurement:{height:500}}}));
+  assert.equal(state.reads.at(-1).input.cursor,'page-2');
+  assert.equal(button(tree,'Next'),undefined);
+  state.data = {items: [], cursor: null};
   state.auth = {...state.auth, user: {uid: 'shop-2'}};
   await act(async () => tree.update(React.createElement(screens.BookingsScreen, props)));
   assert.equal(state.reads.at(-1).input.cursor, null);
-  state.data = {items: [], cursor: null};
-  await act(async () => tree.update(React.createElement(screens.BookingsScreen, props)));
   assert.match(text(tree), /No bookings yet/);
   await act(async () => button(tree, 'Refresh bookings').props.onPress());
   assert.equal(refreshes, 1);
@@ -63,7 +61,7 @@ test('bookings list pages, navigates by identifier, resets pagination across acc
   await act(async () => tree.update(React.createElement(screens.BookingsScreen, props)));
   assert.match(text(tree), /Connect to the internet/);
   assert.equal(button(tree, 'View booking'), undefined);
-  assert.equal(button(tree, 'Next').props.disabled, true);
+  assert.equal(button(tree, 'Next'),undefined);
   await act(async () => tree.unmount());
 });
 

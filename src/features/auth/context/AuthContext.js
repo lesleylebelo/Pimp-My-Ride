@@ -18,15 +18,32 @@ export function AuthProvider({children}) {
  const [state,setState]=useState({user:null,profile:null,initializing:true,error:'',offline:false,cachedAt:null});
  const [working,setWorking]=useState(false);
  const lock=useRef(false),epoch=useRef(0),active=useRef(true),inFlight=useRef(false),online=useRef(true);
+ const blockedUser=useRef(null),verificationRequired=useRef(false);
  const sync=useCallback(async()=>{
   const generation=++epoch.current;
   const u=firebase().auth.currentUser;
   inFlight.current=true;
-  let profile=null,error='',offline=!online.current,cachedAt=null;
+  let profile=null,error=verificationRequired.current?'Please verify your email before signing in.':'',offline=!online.current,cachedAt=null;
+  const rejectUnverified=async()=>{
+   if(generation!==epoch.current || !active.current || firebase().auth.currentUser!==u)return;
+   blockedUser.current=u;verificationRequired.current=true;
+   const guest={user:null,profile:null,error:'Please verify your email before signing in.',offline:!online.current,cachedAt:null,initializing:false};
+   // Clear app access before asynchronous cleanup, including when the device is
+   // offline or Firebase cannot remove an old persisted session.
+   if(generation===epoch.current && active.current)setState(guest);
+   await clearProfileCache(u.uid).catch(()=>{});
+   if(generation!==epoch.current || !active.current || firebase().auth.currentUser!==u)return;
+   await signOut(firebase().auth).catch(()=>{});
+   if(generation===epoch.current && active.current)setState(guest);
+  };
   try {
    if(u){
+    if(!u.emailVerified || blockedUser.current===u){await rejectUnverified();return;}
+    blockedUser.current=null;verificationRequired.current=false;error='';
     if(offline)throw Object.assign(new Error('Offline'),{code:'app/offline'});
     await timeout(reload(u));
+    if(generation!==epoch.current || !active.current || firebase().auth.currentUser!==u)return;
+    if(!u.emailVerified){await rejectUnverified();return;}
     const token=await timeout(getIdTokenResult(u,true));
     const snapshot=await timeout(getDocFromServer(doc(firebase().db,'users',u.uid)));
     profile=snapshot.data()||null;
@@ -37,7 +54,7 @@ export function AuthProvider({children}) {
      if(u.emailVerified && !error)await saveProfileCache(u.uid,profile).catch(()=>{});
      else await clearProfileCache(u.uid).catch(()=>{});
     }
-   }
+   }else blockedUser.current=null;
   }catch(e){
    if(generation!==epoch.current)return;
    if(isNetworkError(e)){
@@ -76,7 +93,7 @@ export function AuthProvider({children}) {
   if(!state.user)return;
   const timer=setInterval(()=>{
    if(AppState.currentState==='active' && online.current && !lock.current && !inFlight.current)void sync();
-  },state.user.emailVerified?60000:5000);
+  },60000);
   return()=>clearInterval(timer);
  },[state.user?.uid,state.user?.emailVerified,sync]);
  useEffect(()=>{

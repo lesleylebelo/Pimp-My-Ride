@@ -35,14 +35,16 @@ async function ready(url){
  })();}
  await waking;
 }
-export async function apiRequest(path,data,{multipart=false,expectedUid}={}){
- await requireConnection();const url=baseURL(),user=firebase().auth.currentUser;
+export async function apiRequest(path,data,{multipart=false,expectedUid,authClient}={}){
+ // Onboarding may use an isolated, memory-only Auth client to save its profile.
+ // All other callers retain the main session and the same account-change checks.
+ await requireConnection();const url=baseURL(),auth=authClient || firebase().auth,user=auth.currentUser;
  if(!user)throw new Error('Please sign in again.');
  if(expectedUid && user.uid!==expectedUid)throw new Error('Your account changed. Please try again.');
  await ready(url);
- if(firebase().auth.currentUser?.uid!==user.uid)throw new Error('Your account changed. Please try again.');
+ if(auth.currentUser?.uid!==user.uid)throw new Error('Your account changed. Please try again.');
  const token=await user.getIdToken();
- if(firebase().auth.currentUser?.uid!==user.uid)throw new Error('Your account changed. Please try again.');
+ if(auth.currentUser?.uid!==user.uid)throw new Error('Your account changed. Please try again.');
  const response=await fetchWithTimeout(`${url}/api/${path}`,{method:'POST',headers:{Authorization:`Bearer ${token}`,...(!multipart?{'Content-Type':'application/json'}:{})},body:multipart?data:JSON.stringify(data)},multipart?60000:45000,multipart?'upload':'request');
  let result;try{result=await response.json();}catch{throw new Error('The server returned an unexpected response. Refresh before trying again.');}
  if(!response.ok){const error=new Error(result.error?.message||'The request failed.');error.code=`api/${result.error?.code||'internal'}`;if(result.error?.retryWithNewRequest===true)error.retryWithNewRequest=true;throw error;}

@@ -54,7 +54,7 @@ export const shopTabs = [
   { label: 'My Shop', icon: 'profile' },
 ];
 
-export function LandingShell({ title, tabs, feature, showFeature, onClose, children, admin = false, activeTab, onTabPress }) {
+export function LandingShell({ title, tabs, feature, showFeature, onClose, children, admin = false, activeTab, onTabPress, onScroll, onLayout, onContentSizeChange }) {
   const [loaded, fontError] = useFonts({ Inter_400Regular, Inter_500Medium });
   const { logout, working, offline, cachedAt } = useAuth();
   const [signOutError, setSignOutError] = useState('');
@@ -77,7 +77,7 @@ export function LandingShell({ title, tabs, feature, showFeature, onClose, child
               <LandingText weight="medium" style={ui.link}>Sign out</LandingText>
             </Pressable>}
           </View>
-          <ScrollView style={ui.scroll} contentContainerStyle={[ui.content, !tabs && { paddingBottom: Math.max(insets.bottom, 24) }]} keyboardShouldPersistTaps="handled">
+          <ScrollView style={ui.scroll} contentContainerStyle={[ui.content, !tabs && { paddingBottom: Math.max(insets.bottom, 24) }]} keyboardShouldPersistTaps="handled" onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} scrollEventThrottle={onScroll ? 16 : undefined}>
             {!!signOutError && <LandingText accessibilityRole="alert" style={ui.error}>{signOutError}</LandingText>}
             {children}
             {admin && <LandingButton title="Sign Out" outline onPress={signOut} disabled={working} />}

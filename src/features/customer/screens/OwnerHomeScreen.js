@@ -1,5 +1,5 @@
-import React, {useMemo, useState} from 'react';
-import {Image, Modal, Pressable, StyleSheet, View} from 'react-native';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
+import {Modal, Pressable, StyleSheet, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import colors from '../../../shared/theme/colors';
 import {radius} from '../../../shared/theme/typography';
@@ -12,27 +12,36 @@ const matches = (shop, query) => Object.values(shop).some(value => String(value 
 
 export default function OwnerHomeScreen({navigation}) {
   const feedback = useLandingFeedback();
-  const shopsPages = usePages();
+  const [cursor, setCursor] = useState(null);
+  const [feedShops, setFeedShops] = useState([]);
+  const requestedCursors = useRef(new Set());
+  const viewportHeight = useRef(0);
+  const contentHeight = useRef(0);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('');
   const [location, setLocation] = useState(null);
-  const [locationOpen, setLocationOpen] = useState(false);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
-  const [expanded, setExpanded] = useState(null);
-  const [liked, setLiked] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const shops = useMarketData('shops', {cursor: shopsPages.cursor});
+  const [detailShop, setDetailShop] = useState(null);
+  const [savedShops, setSavedShops] = useState({});
+  const shops = useMarketData('shops', {cursor});
   const categories = useMarketData('categories');
+  useEffect(() => {
+    if (!shops.data) return;
+    setFeedShops(previous => {
+      const known = new Set(previous.map(shop => shop.id));
+      return [...previous, ...shops.data.items.filter(shop => !known.has(shop.id))];
+    });
+  }, [shops.data]);
   const normalizedQuery = query.trim().toLowerCase();
-  const visibleShops = useMemo(() => (shops.data?.items || []).filter(shop => {
+  const visibleShops = useMemo(() => feedShops.filter(shop => {
     const services = String(shop.services || '').toLowerCase();
     return (!normalizedQuery || matches(shop, normalizedQuery)) &&
       (!category || services.includes(category.toLowerCase())) &&
       (!location || ((!location.city || shop.city === location.city) && (!location.province || shop.province === location.province)));
-  }), [shops.data, normalizedQuery, category, location]);
+  }), [feedShops, normalizedQuery, category, location]);
   const locations = useMemo(() => {
     const seen = new Set();
-    return (shops.data?.items || []).reduce((values, shop) => {
+    return feedShops.reduce((values, shop) => {
       if (!shop.city && !shop.province) return values;
       const key = `${shop.city || ''}|${shop.province || ''}`;
       if (!seen.has(key)) {
@@ -41,100 +50,82 @@ export default function OwnerHomeScreen({navigation}) {
       }
       return values;
     }, []);
-  }, [shops.data]);
-  const provinces = useMemo(() => [...new Set((shops.data?.items || []).map(shop => shop.province).filter(Boolean))], [shops.data]);
-  const cities = useMemo(() => [...new Set((shops.data?.items || []).map(shop => shop.city).filter(Boolean))], [shops.data]);
+  }, [feedShops]);
+  const provinces = useMemo(() => [...new Set(feedShops.map(shop => shop.province).filter(Boolean))], [feedShops]);
+  const cities = useMemo(() => [...new Set(feedShops.map(shop => shop.city).filter(Boolean))], [feedShops]);
   const disabled = shops.busy || categories.busy;
   const soon = feedback.showFeature;
+  const requestNextPage = () => {
+    const nextCursor = shops.data?.cursor;
+    if (nextCursor && !shops.busy && !requestedCursors.current.has(nextCursor)) {
+      requestedCursors.current.add(nextCursor);
+      setCursor(nextCursor);
+    }
+  };
+  const loadNextPage = event => {
+    const {contentOffset, contentSize, layoutMeasurement} = event.nativeEvent;
+    if (contentSize.height - contentOffset.y - layoutMeasurement.height < 260) requestNextPage();
+  };
+  const handleLayout = event => {
+    viewportHeight.current = event.nativeEvent.layout.height;
+    if (contentHeight.current - viewportHeight.current < 260) requestNextPage();
+  };
+  const handleContentSizeChange = (_, height) => {
+    contentHeight.current = height;
+    if (height - viewportHeight.current < 260) requestNextPage();
+  };
+  const saveShop = id => setSavedShops(previous => ({...previous, [id]: !previous[id]}));
+  const retryFeed = () => {void shops.refresh().catch(() => {});};
 
-  return <LandingShell title="Discover" tabs={ownerTabs} activeTab="Discover" {...feedback} onTabPress={label => ownerRoutes[label] ? navigation.navigate(ownerRoutes[label]) : soon(label)}>
-    <LandingButton title="Create service request" onPress={() => navigation.navigate('RequestForm')}/>
-    <View style={styles.feedHeading}>
-      <View>
-        <LandingText weight="medium" style={styles.feedTitle}>Community builds</LandingText>
-        <LandingText style={styles.caption}>Fresh ideas from the scene</LandingText>
-      </View>
-      <Ionicons name="arrow-forward" size={18} color={colors.primary} accessibilityElementsHidden/>
-    </View>
-    <View style={[ui.card, styles.postCard]}>
-      <View style={styles.authorRow}>
-        <View style={styles.avatar}><LandingText weight="medium" style={styles.avatarText}>jt</LandingText></View>
-        <View style={styles.authorCopy}>
-          <LandingText weight="medium" style={styles.authorName}>jordan t.</LandingText>
-          <LandingText style={styles.caption}>nissan skyline · 2h</LandingText>
-        </View>
-        <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} accessibilityElementsHidden/>
-      </View>
-      <Image source={require('../../../../assets/landing/discover.png')} accessibilityLabel="Example community build inspiration" resizeMode="cover" style={styles.buildImage}/>
-      <LandingText weight="medium" style={styles.postTitle}>built for the long way home.</LandingText>
-      <LandingText style={styles.postCopy}>A few thoughtful details can change the whole feel. Sharing this build for your next project inspiration.</LandingText>
-      <View style={styles.engagementRow}>
-        <View style={styles.engagementActions}>
-          <Pressable accessibilityRole="button" accessibilityLabel={liked ? 'Unlike community build' : 'Like community build'} accessibilityState={{selected: liked}} onPress={() => setLiked(value => !value)} style={styles.engagementButton}>
-            <Ionicons name={liked ? 'heart' : 'heart-outline'} size={20} color={liked ? colors.primary : colors.textSecondary}/>
-            <LandingText style={[styles.metric, liked && styles.activeMetric]}>{liked ? '25' : '24'}</LandingText>
-          </Pressable>
-          <View style={styles.engagementButton} accessible accessibilityLabel="12 comments">
-            <Ionicons name="chatbubble-outline" size={19} color={colors.textSecondary}/>
-            <LandingText style={styles.metric}>12</LandingText>
-          </View>
-        </View>
-        <Pressable accessibilityRole="button" accessibilityLabel={saved ? 'Remove saved community build' : 'Save community build'} accessibilityState={{selected: saved}} onPress={() => setSaved(value => !value)} hitSlop={8}>
-          <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={20} color={saved ? colors.primary : colors.textSecondary}/>
-        </Pressable>
-      </View>
-    </View>
-    <View style={styles.workshopHeading}>
-      <LandingText weight="medium" style={styles.feedTitle}>Find your workshop</LandingText>
-      <LandingText style={styles.caption}>Explore verified workshops and their services.</LandingText>
-    </View>
-    <LandingButton title={location ? `${location.city || location.province}⌄` : 'All locations⌄'} outline disabled={shops.busy} onPress={() => setLocationOpen(true)}/>
-    <AppTextInput accessibilityLabel="Search workshops or services" label="Search workshops or services" value={query} onChangeText={setQuery} editable={!shops.busy}/>
+  return <LandingShell title="Discover" tabs={ownerTabs} activeTab="Discover" {...feedback} onScroll={loadNextPage} onLayout={handleLayout} onContentSizeChange={handleContentSizeChange} onTabPress={label => ownerRoutes[label] ? navigation.navigate(ownerRoutes[label]) : soon(label)}>
+    <AppTextInput accessibilityLabel="Search workshops or services" placeholder="Search workshops or services" icon="search-outline" value={query} onChangeText={setQuery} editable={!shops.busy}/>
+    <LandingText style={styles.intro}>Explore workshops and their services</LandingText>
     <LandingText weight="medium">Browse by service</LandingText>
     <View style={styles.categories}>
       <LandingButton title="All" outline={!!category} disabled={categories.busy} onPress={() => setCategory('')} style={styles.category}/>
       {(categories.data?.items || []).map(item => <LandingButton key={item.id} title={item.name} outline={category !== item.name} disabled={categories.busy} onPress={() => setCategory(item.name)} style={styles.category}/>)}
+      <LandingButton title="More filters" outline disabled={disabled} onPress={() => setMoreFiltersOpen(true)} style={styles.category}/>
     </View>
-    <LandingButton title="More filters" outline disabled={disabled} onPress={() => setMoreFiltersOpen(true)}/>
-    <LandingText weight="medium">Workshop showcases</LandingText>
-    {(shops.busy || categories.busy) && <LandingText accessibilityRole="status" style={ui.muted}>Loading approved workshops...</LandingText>}
+    {(shops.busy && !feedShops.length || categories.busy) && <LandingText accessibilityRole="status" style={ui.muted}>Loading approved workshops...</LandingText>}
     {!!(shops.error || categories.error) && <LandingText accessibilityRole="alert" style={ui.error}>{shops.error || categories.error}</LandingText>}
-    {!shops.busy && !shops.error && !visibleShops.length && <LandingText style={ui.muted}>No approved workshops match your search.</LandingText>}
-    {visibleShops.map(shop => {
-      const isExpanded = expanded === shop.id;
-      return <View key={shop.id} style={ui.card}>
-        <LandingButton title={isExpanded ? `Hide ${shop.shopName}` : `View ${shop.shopName}`} outline={!isExpanded} onPress={() => setExpanded(isExpanded ? null : shop.id)} accessibilityHint="Expands shop details on this page"/>
-        <View style={styles.shopHeading}>
-          <LandingText weight="medium" style={styles.shopName}>{shop.shopName}</LandingText>
-          {shop.verified && <View style={styles.verified}><Ionicons name="checkmark-circle-outline" size={16} color={colors.primary}/><LandingText style={styles.verifiedText}>Verified workshop</LandingText></View>}
+    {!!shops.error && <LandingButton title="Retry loading workshops" outline onPress={retryFeed}/>}
+    {!shops.busy && !shops.error && !visibleShops.length && <LandingText style={ui.muted}>{feedShops.length ? 'No workshops match these filters.' : 'No approved workshops are available yet.'}</LandingText>}
+    {visibleShops.map(shop => <View key={shop.id} style={[ui.card, styles.postCard]}>
+      <View style={styles.authorRow}>
+        <View style={styles.avatar}><LandingText weight="medium" style={styles.avatarText}>{initials(shop.shopName)}</LandingText></View>
+        <View style={styles.authorCopy}>
+          <LandingText weight="medium" style={styles.authorName}>{shop.shopName}</LandingText>
+          <LandingText style={styles.caption}>{[shop.city, shop.province].filter(Boolean).join(' · ') || 'Location not provided'}</LandingText>
         </View>
-        <LandingText style={styles.caption}>{[shop.city, shop.province].filter(Boolean).join(' · ') || 'Location not provided'}</LandingText>
-        {isExpanded && <View style={styles.details}>
-          <LandingText weight="semibold">Shop details</LandingText>
-          <LandingText>City: {shop.city || 'Not provided'}</LandingText>
-          <LandingText>Province: {shop.province || 'Not provided'}</LandingText>
-          <LandingText>Services: {shop.services || 'Not provided'}</LandingText>
-          <LandingButton title="Close details" outline onPress={() => setExpanded(null)}/>
-        </View>}
-      </View>;
-    })}
-    <View style={styles.pagination}>
-      <LandingButton title="First" outline disabled={disabled || shopsPages.number === 1} onPress={() => shopsPages.first()}/>
-      <LandingButton title="Previous" outline disabled={disabled || shopsPages.number === 1} onPress={() => shopsPages.previous()}/>
-      <LandingButton title="Next" outline disabled={disabled || !shops.data?.cursor} onPress={() => shopsPages.next(shops.data.cursor)}/>
-    </View>
-    <LandingText style={ui.muted}>Page {shopsPages.number}</LandingText>
-    <Modal visible={locationOpen} transparent animationType="fade" onRequestClose={() => setLocationOpen(false)}>
+      </View>
+      {shop.verified && <View style={styles.verified}><Ionicons name="checkmark-circle-outline" size={16} color={colors.primary}/><LandingText style={styles.verifiedText}>Verified workshop</LandingText></View>}
+      <LandingText weight="medium" style={styles.postTitle}>{shop.services?.split(',')[0]?.trim() || 'Workshop services'}</LandingText>
+      <LandingText style={styles.postCopy}>{shop.services || 'Explore this workshop and its services.'}</LandingText>
+      <View style={styles.cardActions}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`View ${shop.shopName}`} onPress={() => setDetailShop(shop)} style={styles.viewButton}>
+          <LandingText weight="medium" style={styles.viewLabel}>View</LandingText>
+          <Ionicons name="arrow-forward" size={15} color={colors.primary} accessible={false}/>
+        </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={savedShops[shop.id] ? `Unsave ${shop.shopName}` : `Save ${shop.shopName}`} accessibilityState={{selected: !!savedShops[shop.id]}} onPress={() => saveShop(shop.id)} hitSlop={8} style={styles.saveButton}>
+          <Ionicons name={savedShops[shop.id] ? 'bookmark' : 'bookmark-outline'} size={20} color={savedShops[shop.id] ? colors.primary : colors.textSecondary}/>
+          <LandingText style={styles.saveLabel}>{savedShops[shop.id] ? 'Saved' : 'Save'}</LandingText>
+        </Pressable>
+      </View>
+    </View>)}
+    {shops.busy && !!feedShops.length && <LandingText accessibilityRole="status" style={styles.feedStatus}>Loading more workshops...</LandingText>}
+    <Modal visible={!!detailShop} transparent animationType="fade" onRequestClose={() => setDetailShop(null)}>
       <View style={styles.modalBackdrop}>
         <View style={styles.modalCard} accessibilityViewIsModal>
-          <LandingText accessibilityRole="header" weight="medium" style={styles.modalTitle}>Choose location</LandingText>
-          <LandingButton title="All locations" outline={!!location} onPress={() => {setLocation(null); setLocationOpen(false);}}/>
-          {locations.map(item => {
-            const selected = location?.city === item.city && location?.province === item.province;
-            return <LandingButton key={`${item.city}|${item.province}`} title={[item.city, item.province].filter(Boolean).join(' · ')} outline={!selected} onPress={() => {setLocation(item); setLocationOpen(false);}}/>;
-          })}
-          {!locations.length && <LandingText style={ui.muted}>No locations are available on this page.</LandingText>}
-          <LandingButton title="Close" outline onPress={() => setLocationOpen(false)}/>
+          <View style={styles.detailHeader}>
+            <View style={styles.avatar}><LandingText weight="medium" style={styles.avatarText}>{initials(detailShop?.shopName)}</LandingText></View>
+            <LandingText accessibilityRole="header" weight="medium" style={styles.modalTitle}>{detailShop?.shopName}</LandingText>
+          </View>
+          {detailShop?.verified && <View style={styles.verified}><Ionicons name="checkmark-circle-outline" size={16} color={colors.primary}/><LandingText style={styles.verifiedText}>Verified workshop</LandingText></View>}
+          <LandingText style={styles.caption}>Location</LandingText>
+          <LandingText>{[detailShop?.city, detailShop?.province].filter(Boolean).join(' · ') || 'Location not provided'}</LandingText>
+          <LandingText style={styles.caption}>Services</LandingText>
+          <LandingText>{detailShop?.services || 'Services not provided'}</LandingText>
+          <LandingButton title="Close" outline onPress={() => setDetailShop(null)}/>
         </View>
       </View>
     </Modal>
@@ -148,7 +139,7 @@ export default function OwnerHomeScreen({navigation}) {
           <LandingText weight="medium">City</LandingText>
           <LandingButton title="All cities" outline={!!location?.city} onPress={() => setLocation(previous => previous?.province ? {province: previous.province, city: ''} : null)}/>
           {cities.map(city => <LandingButton key={city} title={city} outline={location?.city !== city} onPress={() => {
-            const match = (shops.data?.items || []).find(shop => shop.city === city);
+            const match = feedShops.find(shop => shop.city === city);
             setLocation({city, province: match?.province || ''});
           }}/>)}
           <LandingText weight="medium">Category / service</LandingText>
@@ -161,44 +152,32 @@ export default function OwnerHomeScreen({navigation}) {
   </LandingShell>;
 }
 
-function usePages() {
-  const [history, setHistory] = useState([null]);
-  return {
-    cursor: history[history.length - 1],
-    number: history.length,
-    next: cursor => cursor && setHistory(value => value[value.length - 1] === cursor ? value : [...value, cursor]),
-    previous: () => setHistory(value => value.length > 1 ? value.slice(0, -1) : value),
-    first: () => setHistory([null]),
-  };
+function initials(name = '') {
+  return name.trim().split(/\s+/).slice(0, 2).map(part => part[0] || '').join('').toLowerCase() || 'w';
 }
 
 const styles = StyleSheet.create({
-  feedHeading: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8},
-  feedTitle: {fontSize: 20, lineHeight: 28},
-  postCard: {padding: 14, gap: 12},
+  intro: {color: colors.textSecondary, marginTop: -8},
+  postCard: {padding: 16, gap: 12},
   authorRow: {flexDirection: 'row', alignItems: 'center', gap: 10},
   avatar: {width: 38, height: 38, borderRadius: 19, backgroundColor: colors.brandGreenLight, alignItems: 'center', justifyContent: 'center'},
   avatarText: {fontSize: 14, color: colors.primary},
   authorCopy: {flex: 1, gap: 1},
   authorName: {fontSize: 14},
-  postTitle: {fontSize: 17, lineHeight: 24},
+  postTitle: {fontSize: 17, lineHeight: 24, fontWeight: '600'},
   postCopy: {fontSize: 14, lineHeight: 21, color: colors.textSecondary},
-  engagementRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4},
-  engagementActions: {flexDirection: 'row', alignItems: 'center', gap: 20},
-  engagementButton: {minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 6},
-  metric: {fontSize: 12, color: colors.textSecondary},
-  activeMetric: {color: colors.primary},
-  workshopHeading: {gap: 2, paddingTop: 12},
+  cardActions: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4},
+  viewButton: {minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 6},
+  viewLabel: {color: colors.primary},
+  saveButton: {minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 6},
+  saveLabel: {fontSize: 12, color: colors.textSecondary},
+  feedStatus: {alignSelf: 'center', paddingVertical: 8, color: colors.textSecondary},
   categories: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
   category: {flexGrow: 1, width: undefined, paddingHorizontal: 12, borderRadius: radius.pill},
-  buildImage: {width: '100%', height: 220, borderRadius: 16, backgroundColor: colors.border},
-  shopHeading: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8},
-  shopName: {fontSize: 17, lineHeight: 24},
   verified: {flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: colors.brandGreenLight, borderRadius: radius.pill},
   verifiedText: {fontSize: 12, color: colors.primary},
   caption: {fontSize: 13, lineHeight: 18, color: colors.textSecondary},
-  details: {gap: 8, paddingTop: 4},
-  pagination: {flexDirection: 'row', gap: 8},
+  detailHeader: {flexDirection: 'row', alignItems: 'center', gap: 10},
   modalBackdrop: {flex: 1, justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0,0,0,0.35)'},
   modalCard: {width: '100%', maxWidth: 420, alignSelf: 'center', padding: 24, gap: 12, borderRadius: 20, backgroundColor: colors.white},
   modalTitle: {fontSize: 20, lineHeight: 28},

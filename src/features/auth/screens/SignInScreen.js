@@ -2,7 +2,7 @@ import {useLoginCooldown} from '../hooks/useLoginCooldown';
 import { useAuth } from '../context/AuthContext';
 import { login } from '../services/accounts';
 import { authError } from '../utils/authErrors';
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import LogoMark from "../../../shared/components/LogoMark";
 import AppTextInput from "../../../shared/components/AppTextInput";
 import PrimaryButton from "../../../shared/components/PrimaryButton";
+import OutlineButton from "../../../shared/components/OutlineButton";
 import colors from "../../../shared/theme/colors";
 import { spacing } from "../../../shared/theme/typography";
 import { validateEmailField } from "../utils/validators";
@@ -24,15 +25,17 @@ export default function SignInScreen({ navigation, route }) {
   const { run, offline } = useAuth();
   const cooldown = useLoginCooldown();
   const [submitError, setSubmitError] = useState('');
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(typeof route?.params?.email === 'string' ? route.params.email : '');
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
-
+  const [verificationEmail, setVerificationEmail] = useState('');
+  const submitting = useRef(false);
 
   const handleSignIn = async () => {
-    if (loading || cooldown.seconds !== 0) return;
+    if (submitting.current || offline || cooldown.seconds !== 0) return;
     setSubmitError('');
+    setVerificationEmail('');
     const emailError = validateEmailField(email);
     const passwordError = !password ? "Password is required." : null;
     if (emailError || passwordError) {
@@ -40,10 +43,17 @@ export default function SignInScreen({ navigation, route }) {
       return;
     }
     setErrors({});
+    submitting.current = true;
     setLoading(true);
     try { await run(() => login(email, password)); }
-    catch (error) { setSubmitError(authError(error)); }
-    finally { setLoading(false); }
+    catch (error) {
+      setSubmitError(authError(error));
+      if (error?.code === 'auth/email-not-verified') {
+        setPassword('');
+        setVerificationEmail(email.trim());
+      }
+    }
+    finally { submitting.current = false; setLoading(false); }
   };
 
   return (
@@ -77,7 +87,7 @@ export default function SignInScreen({ navigation, route }) {
             placeholder="example@gmail.com"
             value={email}
             onChangeText={(text) => {
-              setEmail(text);
+              setEmail(text);setVerificationEmail('');
               setErrors(e=>({...e,email:validateEmailField(text)}));setSubmitError('');
             }}
             keyboardType="email-address"
@@ -89,7 +99,7 @@ export default function SignInScreen({ navigation, route }) {
             placeholder="Enter your password"
             value={password}
             onChangeText={(text) => {
-              setPassword(text);
+              setPassword(text);setVerificationEmail('');
               setErrors(e=>({...e,password:text ? null : 'Password is required.'}));setSubmitError('');
             }}
             secureTextEntry
@@ -107,6 +117,12 @@ export default function SignInScreen({ navigation, route }) {
 
           <Text>{offline ? "You are offline. Connect to sign in." : "Your account determines which workspace opens."}</Text>
           <Text accessibilityRole="alert" style={{color:colors.error,marginBottom:12}}>{cooldown.error || submitError}</Text>
+          {!!verificationEmail && <OutlineButton
+            title="Resend verification email"
+            onPress={() => navigation.navigate('VerifyEmail', {email:verificationEmail})}
+            disabled={loading}
+            style={{marginBottom:spacing.md}}
+          />}
           <PrimaryButton
             title={cooldown.seconds > 0 ? `Try again in ${cooldown.seconds}s` : 'Sign in'}
             onPress={handleSignIn}

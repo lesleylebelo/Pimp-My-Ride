@@ -17,6 +17,7 @@ import SplashScreen from "../features/auth/screens/SplashScreen";
 import SignInScreen from "../features/auth/screens/SignInScreen";
 import SignUpScreen from "../features/auth/screens/SignUpScreen";
 import ForgotPasswordScreen from "../features/auth/screens/ForgotPasswordScreen";
+import VerifyEmailScreen from "../features/auth/screens/VerifyEmailScreen";
 import colors from "../shared/theme/colors";
 
 const Stack = createNativeStackNavigator();
@@ -30,23 +31,25 @@ const authenticatedScreens = {
 
 export default function AppNavigation() {
   const {user,profile,error,initializing,working} = useAuth();
-  const authenticatedRoute = getAuthenticatedRoute(user, profile, error);
+  const authenticatedUser = user?.emailVerified ? user : null;
+  const authenticatedRoute = getAuthenticatedRoute(authenticatedUser, profile, error);
   if (initializing) return <SafeAreaProvider><View style={{flex:1,justifyContent:"center",alignItems:"center",backgroundColor:colors.background}}><ActivityIndicator color={colors.primary}/><Text>Please wait…</Text></View></SafeAreaProvider>;
   return (
     <SafeAreaProvider>
       <StatusBar style="auto" />
       <NavigationContainer>
         <Stack.Navigator
-          key={user ? `${user.uid}:${authenticatedRoute}` : "guest"}
-          initialRouteName={user ? authenticatedRoute : "Splash"}
+          key={authenticatedUser ? `${authenticatedUser.uid}:${authenticatedRoute}` : "guest"}
+          initialRouteName={authenticatedUser ? authenticatedRoute : "Splash"}
           screenOptions={{ headerShown: false }}
         >
-          {user ? <Stack.Screen name={authenticatedRoute} component={authenticatedScreens[authenticatedRoute]}/> : <>
+          {authenticatedUser ? <Stack.Screen name={authenticatedRoute} component={authenticatedScreens[authenticatedRoute]}/> : <>
           <Stack.Screen name="Legal" component={LegalScreen}/>
           <Stack.Screen name="Splash" component={SplashScreen} />
           <Stack.Screen name="SignIn" component={SignInScreen} />
           <Stack.Screen name="SignUp" component={SignUpScreen} />
           <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+          <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
           </>}
         </Stack.Navigator>
       </NavigationContainer>

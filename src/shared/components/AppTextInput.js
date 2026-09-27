@@ -19,6 +19,7 @@ export default function AppTextInput({
   helperText,
   style,
   inputStyle,
+  accessibilityLabel = label,
   ...inputProps
 }) {
   const [revealed, setRevealed] = useState(false);
@@ -46,7 +47,7 @@ export default function AppTextInput({
         ) : null}
         <TextInput
           {...inputProps}
-          accessibilityLabel={label}
+          accessibilityLabel={accessibilityLabel}
           autoCorrect={secureTextEntry ? false : undefined}
           value={value}
           onChangeText={onChangeText}
