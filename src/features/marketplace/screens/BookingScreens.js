@@ -6,7 +6,7 @@ import colors from '../../../shared/theme/colors';
 import {useAuth} from '../../auth/context/AuthContext';
 import {marketApi} from '../services/marketApi';
 import {useMarketData} from '../hooks/useMarketData';
-import {Page, Card, Field, Button, Notice, Paging, usePages, formatMoney} from '../components/MarketplaceUI';
+import {Page, Card, Field, Button, Notice, Paging, StatusTag, usePages, formatMoney} from '../components/MarketplaceUI';
 import {appointmentErrors, cancellationError} from '../utils/bookingValidation';
 import PhotoGallery from '../components/PhotoGallery';
 
@@ -21,7 +21,7 @@ function BookingSummary({booking}) {
     <Text>{vehicleLabel(booking.vehicle)}</Text>
     <Text>{booking.shopName}</Text>
     <Text style={styles.muted}>{booking.categoryName}{booking.city ? ` · ${booking.city}` : ''}</Text>
-    <Text weight="semibold" style={styles.status}>{statusLabels[booking.status] || booking.status}</Text>
+    <StatusTag>{statusLabels[booking.status] || booking.status}</StatusTag>
     {booking.appointmentDate && booking.appointmentTime && <Text>Appointment: {booking.appointmentDate} at {booking.appointmentTime} SAST (UTC+02:00)</Text>}
   </>;
 }
@@ -163,7 +163,6 @@ function BookingDetail({navigation, id}) {
 const styles = StyleSheet.create({
   heading: {fontSize: 22, lineHeight: 28, color: colors.primary},
   muted: {color: colors.textSecondary, lineHeight: 21},
-  status: {color: colors.primary},
   lineItem: {flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, paddingVertical: 8, borderBottomWidth: 1, borderColor: colors.border},
   itemDescription: {flex: 1},
 });

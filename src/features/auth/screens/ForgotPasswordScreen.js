@@ -48,7 +48,7 @@ export default function ForgotPasswordScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
-      <AuthNavHeader title="Forgot Password" onBack={handleBack} />
+      <AuthNavHeader title="Forgot password" onBack={handleBack} />
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -64,12 +64,12 @@ export default function ForgotPasswordScreen({ navigation }) {
               size={88}
               style={styles.iconBox}
             />
-            <Text style={styles.title}>Forgot Password?</Text>
+            <Text style={styles.title}>Forgot password?</Text>
             <Text style={styles.subtitle}>{content.subtitle}</Text>
           </View>
 
           <AppTextInput
-            label="Email Address"
+            label="Email address"
             icon="mail-outline"
             placeholder={content.placeholder}
             value={email}
@@ -84,7 +84,7 @@ export default function ForgotPasswordScreen({ navigation }) {
           />
 
           <PrimaryButton
-            title={sent ? "Email requested" : "Send Reset Link"}
+            title={sent ? "Email requested" : "Send reset link"}
             disabled={sent}
             onPress={handleSendResetLink}
             loading={loading}
@@ -95,7 +95,7 @@ export default function ForgotPasswordScreen({ navigation }) {
           <OrDivider />
 
           <OutlineButton
-            title="Back to Sign In"
+            title="Back to sign in"
             icon="arrow-back"
             onPress={handleBack}
           />
@@ -126,7 +126,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 24,
-    fontWeight: "800",
+    fontWeight: "500",
     color: colors.textPrimary,
     textAlign: "center",
     marginBottom: spacing.sm,

@@ -8,7 +8,7 @@ export default function AuthNavHeader({ title, onBack }) {
   return (
     <View style={styles.row}>
       <Pressable onPress={onBack} hitSlop={12} style={styles.side}>
-        <Ionicons name="arrow-back" size={22} color={colors.primary} />
+        <Ionicons name="arrow-back-outline" size={22} color={colors.primary} />
       </Pressable>
       <Text style={styles.title} numberOfLines={1}>
         {title}
@@ -36,7 +36,7 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: "center",
     fontSize: 20,
-    fontWeight: "800",
+    fontWeight: "500",
     color: colors.primary,
   },
 });

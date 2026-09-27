@@ -9,8 +9,8 @@ const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{reso
 const button=(tree,label)=>tree.root.findAllByType('Pressable').find(n=>n.props.accessibilityLabel===label);
 const field=(tree,label)=>tree.root.findAllByType('TextInput').find(n=>n.props.accessibilityLabel===label);
 const text=tree=>tree.root.findAllByType('Text').flatMap(n=>n.props.children).join(' ');
-const change=(tree,value)=>act(async()=>field(tree,'Email Address').props.onChangeText(value));
-const send=tree=>act(async()=>button(tree,'Send Reset Link').props.onPress());
+const change=(tree,value)=>act(async()=>field(tree,'Email address').props.onChangeText(value));
+const send=tree=>act(async()=>button(tree,'Send reset link').props.onPress());
 async function setup({send:sendRequest=async()=>{},connection=async()=>{}}={}){
  const auth={},calls={send:[],navigation:[],connection:0};
  const native=Object.fromEntries(['View','Text','Pressable','TextInput','ScrollView','ActivityIndicator','Image','KeyboardAvoidingView'].map(n=>[n,n]));
@@ -41,9 +41,9 @@ test('forgot password validates email live and before requesting a hosted link',
 test('hosted-link request blocks concurrent taps and another send after confirmation',async()=>{
  const wait=deferred(),s=await setup({send:()=>wait.promise});
  await change(s.tree,'demo@example.test');let pending;
- await act(async()=>{const request=button(s.tree,'Send Reset Link').props.onPress;pending=request();void request();});
- assert.equal(s.calls.send.length,1);assert.equal(button(s.tree,'Send Reset Link').props.disabled,true);
- assert.equal(field(s.tree,'Email Address').props.editable,false);
+ await act(async()=>{const request=button(s.tree,'Send reset link').props.onPress;pending=request();void request();});
+ assert.equal(s.calls.send.length,1);assert.equal(button(s.tree,'Send reset link').props.disabled,true);
+ assert.equal(field(s.tree,'Email address').props.editable,false);
  await act(async()=>{wait.resolve();await pending;});
  assert.equal(button(s.tree,'Email requested').props.disabled,true);
  await act(async()=>button(s.tree,'Email requested').props.onPress());assert.equal(s.calls.send.length,1);
@@ -65,7 +65,7 @@ test('offline request makes no Auth call and can be retried after reconnection',
  let offline=true;const s=await setup({connection:async()=>{if(offline)throw Error('Connect to the internet.');}});
  await change(s.tree,'demo@example.test');await send(s.tree);
  assert.equal(s.calls.send.length,0);assert.match(text(s.tree),/Connect to the internet/);
- assert.equal(!!button(s.tree,'Send Reset Link').props.disabled,false);
+ assert.equal(!!button(s.tree,'Send reset link').props.disabled,false);
  offline=false;await send(s.tree);assert.equal(s.calls.send.length,1);assert.match(text(s.tree),/If an account exists/);
  await s.close();
 });
@@ -75,7 +75,7 @@ test('network and rate-limit errors stay retryable without claiming the email wa
   let fail=true;const s=await setup({send:async()=>{if(fail)throw error(code);}});
   await change(s.tree,'demo@example.test');await send(s.tree);
   assert.match(text(s.tree),code==='auth/network-request-failed'?/internet connection/:/Please wait/);
-  assert.doesNotMatch(text(s.tree),/If an account exists/);assert.equal(field(s.tree,'Email Address').props.value,'demo@example.test');
+  assert.doesNotMatch(text(s.tree),/If an account exists/);assert.equal(field(s.tree,'Email address').props.value,'demo@example.test');
   fail=false;await send(s.tree);assert.equal(s.calls.send.length,2);assert.match(text(s.tree),/If an account exists/);
   await s.close();
  }
@@ -91,7 +91,7 @@ test('editing a confirmed address clears its confirmation and validates the next
 
 test('hosted recovery returns to a clean shared sign-in stack',async()=>{
  const s=await setup();await change(s.tree,'demo@example.test');await send(s.tree);
- await act(async()=>button(s.tree,'Back to Sign In').props.onPress());
+ await act(async()=>button(s.tree,'Back to sign in').props.onPress());
  assert.deepEqual(s.calls.navigation,[['reset',{index:0,routes:[{name:'SignIn'}]}]]);await s.close();
 });
 

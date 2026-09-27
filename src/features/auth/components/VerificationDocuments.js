@@ -6,6 +6,7 @@ import DocumentPickerField from './DocumentPickerField';
 import {listDocuments, uploadDocument} from '../services/accounts';
 import {DOCUMENT_KEYS} from '../utils/registration';
 import {authError} from '../utils/authErrors';
+import colors from '../../../shared/theme/colors';
 
 const labels = {cipcCert:'CIPC certificate',proofOfAddress:'Proof of address',ownerId:'Representative ID'};
 
@@ -75,13 +76,13 @@ function DocumentsForAccount({uid, offline, canUpload, disabled, onBusyChange, r
  }
 
  return <View style={{gap:16}}>
-  <Text style={{fontSize:20,fontWeight:'700'}}>Verification documents</Text>
+  <Text style={{fontSize:20,fontWeight:'500'}}>Verification documents</Text>
   <Text>PDF, JPG or PNG, up to 5 MB each. Use fictional sample documents for this academic demo.</Text>
   {offline ? <Text>Connect to view current document status or upload files.</Text> : <>
    {loading && <Text accessibilityRole="status">Checking saved documents...</Text>}
    {!!loadError && <Text accessibilityRole="alert">Could not refresh saved documents: {loadError} An upload marked successful below is already saved.</Text>}
-   {DOCUMENT_KEYS.map(kind => <View key={kind} testID={`document-${kind}`} style={{gap:8,padding:14,backgroundColor:'#FFFFFF',borderRadius:12}}>
-    <Text style={{fontWeight:'700'}}>{labels[kind]}</Text>
+   {DOCUMENT_KEYS.map(kind => <View key={kind} testID={`document-${kind}`} style={{gap:8,padding:16,backgroundColor:colors.surfaceCard,borderWidth:1,borderColor:colors.border,borderRadius:12}}>
+    <Text style={{fontWeight:'500'}}>{labels[kind]}</Text>
     <Text>{saved[kind] ? `Saved: ${saved[kind].name}` : loading || loadError ? 'Saved status not yet confirmed.' : 'No document uploaded yet.'}</Text>
     {saved[kind] && <Text>{Math.ceil(saved[kind].size / 1024)} KB{saved[kind].uploadedAt ? ` • Uploaded ${new Date(saved[kind].uploadedAt).toLocaleString()}` : ''}</Text>}
     {canUpload && <>

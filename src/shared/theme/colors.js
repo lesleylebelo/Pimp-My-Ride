@@ -1,24 +1,40 @@
-// Colours sampled directly from the Figma prototype exports.
-// Primary green: rgb(14,59,44) -> #0E3B2C
-// Page background: rgb(242,242,242) -> #F2F2F2
+export const theme = {
+  colors: {
+    brandGreen: '#14382c',
+    brandGreenHover: '#0f2a21',
+    brandGreenLight: '#edf5f1',
+    goldAccent: '#c99a2e',
+    goldAccentHover: '#b58826',
+    goldAccentLight: '#fdf8eb',
+    surfaceCard: '#ffffff',
+    surfaceCanvas: '#f8f9fa',
+    border: '#e2e8f0',
+    textPrimary: '#0f172a',
+    textSecondary: '#64748b',
+    textMuted: '#94a3b8',
+    error: '#c0392b',
+    errorSurface: '#fbeae8',
+    success: '#1f7a4d',
+    successSurface: '#e8f5ec',
+  },
+  radius: {
+    button: '8px',
+    card: '12px',
+    pill: '9999px',
+  },
+};
 
 export const colors = {
-  primary: "#0E3B2C", // deep forest green - header/buttons/active states
-  primaryPressed: "#0B2E22",
-  background: "#F2F2F2", // light page background
-  white: "#FFFFFF",
-  black: "#000000",
-  textPrimary: "#111111",
-  textSecondary: "#6B6B6B",
-  placeholder: "#9B9B9B",
-  border: "#E2E2E2",
-  divider: "#CFCFCF",
-  disabledSurface: "#EDEDED",
-  link: "#0E3B2C",
-  error: "#C0392B",
-  errorSurface: "#FBEAE8",
-  success: "#1F7A4D",
-  successSurface: "#E8F5EC",
+  ...theme.colors,
+  primary: theme.colors.brandGreen,
+  primaryPressed: theme.colors.brandGreenHover,
+  background: theme.colors.surfaceCanvas,
+  white: theme.colors.surfaceCard,
+  black: '#000000',
+  placeholder: theme.colors.textMuted,
+  divider: theme.colors.border,
+  disabledSurface: theme.colors.surfaceCanvas,
+  link: theme.colors.brandGreen,
 };
 
 export default colors;

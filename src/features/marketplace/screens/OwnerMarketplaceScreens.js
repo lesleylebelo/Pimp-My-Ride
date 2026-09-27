@@ -5,7 +5,7 @@ import ConfirmationButton from '../../../shared/components/ConfirmationButton';
 import {useAuth} from '../../auth/context/AuthContext';
 import {marketApi} from '../services/marketApi';
 import {useMarketData} from '../hooks/useMarketData';
-import {Page, Card, Field, Button, Notice, Paging, usePages, formatMoney, QuoteCard} from '../components/MarketplaceUI';
+import {Page, Card, Field, Button, Notice, Paging, StatusTag, usePages, formatMoney, QuoteCard} from '../components/MarketplaceUI';
 import {vehicleErrors, requestErrors, parseMoney} from '../utils/validation';
 import PhotoGallery from '../components/PhotoGallery';
 
@@ -86,7 +86,7 @@ function VehicleDraft({route, navigation}) {
       if (result) navigation.goBack();
     } catch (_) { /* Keep the draft and display the mutation error. */ }
   }
-  return <Page title={vehicle ? 'Edit vehicle' : 'Add vehicle'} navigation={navigation}>
+  return <Page title={vehicle ? 'Edit vehicle' : 'Add vehicle'} navigation={navigation} showTabs={false}>
     <Text>Vehicle registration stays private to your account. Shops receive the make, model, year and colour with a request.</Text>
     <Card>{[['make', 'Make', 80], ['model', 'Model', 80], ['year', 'Year', 4], ['colour', 'Colour', 80], ['registration', 'Registration number', 20]].map(([key, label, maxLength]) => <Field key={key} label={label} value={form[key]} onChangeText={value => edit(key, value)} onBlur={() => setTouched(previous => ({...previous, [key]: true}))} error={(submitted || touched[key]) ? errors[key] : null} editable={!disabled} maxLength={maxLength} keyboardType={key === 'year' ? 'number-pad' : 'default'} autoCapitalize={key === 'registration' ? 'characters' : 'words'}/>)}</Card>
     <Notice busy={mutation.saving} error={mutation.error}/>
@@ -104,7 +104,8 @@ export function OwnerRequestsScreen({navigation}) {
     {(data?.items || []).map(request => <Card key={request.id}>
       <Text weight="semibold" style={styles.heading}>{request.title}</Text>
       <Text>{request.categoryName} · {request.city}</Text>
-      <Text>{requestStatus(request.status)} · {request.visibility === 'direct' ? 'Direct request' : 'Open request'}</Text>
+      <StatusTag>{requestStatus(request.status)}</StatusTag>
+      <Text>{request.visibility === 'direct' ? 'Direct request' : 'Open request'}</Text>
       <Text>{formatMoney(request.budgetMinCents)} – {formatMoney(request.budgetMaxCents)}</Text>
       <Button title={`View ${request.title}`} disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('OwnerRequest', {id: request.id});}}/>
     </Card>)}
@@ -205,7 +206,7 @@ export function OwnerRequestScreen({route, navigation}) {
   return <Page title={request?.title || 'Service request'} navigation={navigation}>
     <Notice busy={busy || mutation.saving} error={mutation.error || error}/>
     {request && <><Card>
-      <Text weight="semibold" style={styles.heading}>{requestStatus(request.status)}</Text>
+      <StatusTag>{requestStatus(request.status)}</StatusTag>
       <Text>{request.categoryName} · {request.city}</Text>
       {request.vehicle && <Text>{vehicleName(request.vehicle)} · {request.vehicle.colour}</Text>}
       <Text>{request.description}</Text>
@@ -220,7 +221,7 @@ export function OwnerRequestScreen({route, navigation}) {
       {!!request.photoIds?.length && <PhotoGallery target="request" id={id}/>}
       <Text weight="semibold" style={styles.heading}>Private quotations</Text>
       <Text>Compare quoted work, prices and validity. An accepted offer creates a booking awaiting the shop's confirmation.</Text>
-      {request.status === 'open' && <Button title="Compare and select" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('QuoteComparison', {id});}}/>}
+      {request.status === 'open' && <Button title="Compare quotes" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('QuoteComparison', {id});}}/>}
       {(data.quotes || []).map(quote => <QuoteCard key={quote.id} quote={quote}/>)}
       {!busy && !data.quotes?.length && <Text>No quotations on this page.</Text>}
       <Paging pages={pages} nextCursor={data.quotesCursor} busy={disabled}/>

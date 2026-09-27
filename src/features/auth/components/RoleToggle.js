@@ -7,12 +7,12 @@ export default function RoleToggle({ role, onChange }) {
   return (
     <View style={styles.container}>
       <Segment
-        label="Vehicle Owner"
+        label="Vehicle owner"
         active={role === "owner"}
         onPress={() => onChange("owner")}
       />
       <Segment
-        label="Custom Shop"
+        label="Custom shop"
         active={role === "shop"}
         onPress={() => onChange("shop")}
       />
@@ -35,7 +35,9 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     backgroundColor: colors.white,
-    borderRadius: radius.lg,
+    borderRadius: radius.button,
+    borderWidth: 1,
+    borderColor: colors.border,
     overflow: "hidden",
   },
   segment: {
@@ -46,11 +48,11 @@ const styles = StyleSheet.create({
   },
   segmentActive: {
     backgroundColor: colors.primary,
-    borderRadius: radius.lg,
+    borderRadius: radius.button,
   },
   label: {
     fontSize: typography.label.fontSize,
-    fontWeight: "700",
+    fontWeight: "500",
     color: colors.textPrimary,
   },
   labelActive: {

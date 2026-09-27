@@ -33,8 +33,11 @@ export default function PrimaryButton({ title, onPress, style, textStyle, disabl
 const styles = StyleSheet.create({
   button: {
     backgroundColor: colors.primary,
-    borderRadius: radius.lg,
-    paddingVertical: 18,
+    borderRadius: radius.button,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    minHeight: 48,
+    paddingVertical: 12,
     alignItems: "center",
     justifyContent: "center",
     width: "100%",

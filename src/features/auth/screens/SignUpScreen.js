@@ -94,12 +94,12 @@ export default function SignUpScreen({ navigation, route }) {
     finally {setLoading(false);}
   };
 
-  const headerTitle = "Create Account";
+  const headerTitle = "Create account";
   const headerSubtitle =
     step === 1
       ? role === "owner"
         ? "Sign up to manage your garage"
-        : "Account Details"
+        : "Account details"
       : null;
 
   return (
@@ -116,7 +116,7 @@ export default function SignUpScreen({ navigation, route }) {
 
           <View style={styles.body} pointerEvents={loading ? "none" : "auto"}>
             {step > 1 && <Pressable onPress={goBack}><Text style={styles.termsLink}>Back</Text></Pressable>}
-            {step === 2 && <Text style={styles.stepHeading}>Shop Details</Text>}
+            {step === 2 && <Text style={styles.stepHeading}>Shop details</Text>}
 
             {step === 1 && (
               <RoleToggle role={role} onChange={handleRoleChange} />
@@ -148,7 +148,7 @@ export default function SignUpScreen({ navigation, route }) {
 
             <PrimaryButton
               title={
-                role === "owner" ? "Create Account" : step === 2 ? "Create Shop Account" : "Next"
+                role === "owner" ? "Create account" : step === 2 ? "Create shop account" : "Next"
               }
               loading={loading}
               disabled={offline}
@@ -160,7 +160,7 @@ export default function SignUpScreen({ navigation, route }) {
               <View style={styles.footerRow}>
                 <Text style={styles.footerText}>Already have an account? </Text>
                 <Pressable onPress={() => navigation.navigate("SignIn", { role })}>
-                  <Text style={styles.footerLink}>Sign In</Text>
+                  <Text style={styles.footerLink}>Sign in</Text>
                 </Pressable>
               </View>
             )}
@@ -175,14 +175,14 @@ function OwnerFields({ form, setField, errors }) {
   return (
     <>
       <AppTextInput
-        label="Full Name"
+        label="Full name"
         placeholder="Enter your full name"
         value={form.fullName}
         onChangeText={setField("fullName")}
         error={errors.fullName}
       />
       <AppTextInput
-        label="Email Address"
+        label="Email address"
         placeholder="example@gmail.com"
         value={form.email}
         onChangeText={setField("email")}
@@ -191,7 +191,7 @@ function OwnerFields({ form, setField, errors }) {
         autoCapitalize="none"
       />
       <AppTextInput
-        label="Phone Number"
+        label="Phone number"
         placeholder="+27 XX XXX XXX"
         value={form.phone}
         onChangeText={setField("phone")}
@@ -209,7 +209,7 @@ function OwnerFields({ form, setField, errors }) {
         secureTextEntry
       />
       <AppTextInput
-        label="Confirm Password"
+        label="Confirm password"
         placeholder="Re-enter password"
         value={form.confirmPassword}
         onChangeText={setField("confirmPassword")}
@@ -226,14 +226,14 @@ function ShopAccountFields({ form, setField, errors }) {
   return (
     <>
       <AppTextInput
-        label="Owner/Representative"
+        label="Owner/representative"
         placeholder="Enter your full name"
         value={form.fullName}
         onChangeText={setField("fullName")}
         error={errors.fullName}
       />
       <AppTextInput
-        label="Email Address"
+        label="Email address"
         placeholder="example@gmail.com"
         value={form.email}
         onChangeText={setField("email")}
@@ -242,7 +242,7 @@ function ShopAccountFields({ form, setField, errors }) {
         autoCapitalize="none"
       />
       <AppTextInput
-        label="Phone Number"
+        label="Phone number"
         placeholder="+27 XX XXX XXX"
         value={form.phone}
         onChangeText={setField("phone")}
@@ -260,7 +260,7 @@ function ShopAccountFields({ form, setField, errors }) {
         secureTextEntry
       />
       <AppTextInput
-        label="Confirm Password"
+        label="Confirm password"
         placeholder="Re-enter password"
         value={form.confirmPassword}
         onChangeText={setField("confirmPassword")}
@@ -277,21 +277,21 @@ function ShopDetailsFields({ form, setField, errors }) {
   return (
     <>
       <AppTextInput
-        label="Shop Name"
+        label="Shop name"
         placeholder="Enter your shop name"
         value={form.shopName}
         onChangeText={setField("shopName")}
         error={errors.shopName}
       />
       <AppTextInput
-        label="Business Registration Number"
+        label="Business registration number"
         placeholder="Enter your business registration number"
         value={form.regNumber}
         onChangeText={setField("regNumber")}
         error={errors.regNumber}
       />
       <AppTextInput
-        label="Physical Address"
+        label="Physical address"
         placeholder="Enter your physical address"
         value={form.address}
         onChangeText={setField("address")}
@@ -333,10 +333,16 @@ const styles = StyleSheet.create({
   },
   body: {
     padding: spacing.lg,
+    margin: spacing.lg,
+    marginTop: 0,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    backgroundColor: colors.white,
   },
   stepHeading: {
     fontSize: 26,
-    fontWeight: "800",
+    fontWeight: "500",
     color: colors.textPrimary,
     textAlign: "center",
     marginBottom: spacing.lg,
@@ -349,7 +355,7 @@ const styles = StyleSheet.create({
   },
   termsLink: {
     color: colors.primary,
-    fontWeight: "700",
+    fontWeight: "500",
   },
   footerRow: {
     flexDirection: "row",
@@ -362,7 +368,7 @@ const styles = StyleSheet.create({
   },
   footerLink: {
     color: colors.primary,
-    fontWeight: "700",
+    fontWeight: "500",
     fontSize: 14,
   },
 });

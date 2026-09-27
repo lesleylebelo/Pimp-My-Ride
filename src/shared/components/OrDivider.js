@@ -7,7 +7,7 @@ export default function OrDivider({ style }) {
   return (
     <View style={[styles.row, style]}>
       <View style={styles.line} />
-      <Text style={styles.text}>OR</Text>
+      <Text style={styles.text}>or</Text>
       <View style={styles.line} />
     </View>
   );
@@ -27,8 +27,7 @@ const styles = StyleSheet.create({
   text: {
     marginHorizontal: spacing.md,
     fontSize: 13,
-    fontWeight: "600",
+    fontWeight: "400",
     color: colors.textSecondary,
-    letterSpacing: 1,
   },
 });

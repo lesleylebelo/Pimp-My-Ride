@@ -10,7 +10,7 @@ export default function AuthHeader({ title, subtitle, icon, iconSet = "ionicons"
     <View style={styles.container}>
       {icon ? (
         <View style={styles.iconBadge}>
-          <IconComponent name={icon} size={32} color={colors.white} />
+          <IconComponent name={icon} size={32} color={colors.primary} />
         </View>
       ) : null}
       <Text style={styles.title}>{title}</Text>
@@ -21,9 +21,9 @@ export default function AuthHeader({ title, subtitle, icon, iconSet = "ionicons"
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: colors.primary,
-    minHeight: 150,
-    paddingTop: 56,
+    backgroundColor: colors.background,
+    minHeight: 132,
+    paddingTop: 32,
     paddingBottom: spacing.lg,
     paddingHorizontal: spacing.lg,
     alignItems: "center",
@@ -31,24 +31,24 @@ const styles = StyleSheet.create({
   iconBadge: {
     width: 72,
     height: 72,
-    borderRadius: radius.lg,
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.55)",
-    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.brandGreenLight,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: spacing.md,
   },
   title: {
     fontSize: 28,
-    fontWeight: "800",
-    color: colors.white,
+    fontWeight: "500",
+    color: colors.textPrimary,
     textAlign: "center",
   },
   subtitle: {
     fontSize: 15,
-    fontWeight: "600",
-    color: colors.white,
+    fontWeight: "400",
+    color: colors.textSecondary,
     marginTop: spacing.sm,
     textAlign: "center",
   },

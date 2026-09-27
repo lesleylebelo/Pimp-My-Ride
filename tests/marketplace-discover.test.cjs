@@ -24,6 +24,7 @@ function setup() {
   const screens = loadUI('src/features/customer/screens/OwnerHomeScreen.js', {
     '../../../shared/components/landing/LandingUI': landing,
     '../../marketplace/components/MarketplaceUI': {ownerRoutes: {Discover: 'Discover'}},
+    '../../../../assets/landing/workshop-logo.png': 'workshop-logo',
     '../../marketplace/hooks/useMarketData': {
       useMarketData: op => op === 'shops'
         ? {data: {items: shops, cursor: null}, busy: false, error: ''}
@@ -36,6 +37,17 @@ function setup() {
 const button = (tree, title) => tree.root.findAllByType('Pressable').find(node => node.props.accessibilityLabel === title);
 const text = tree => tree.root.findAllByType('Text').map(node => String(node.props.children || '')).join('\n');
 const input = tree => tree.root.findAllByType('TextInput').find(node => node.props.accessibilityLabel === 'Search workshops or services');
+
+test('discover presents community build inspiration beside verified workshop showcases', async () => {
+  const {screens, navigation} = setup();
+  let tree;
+  await act(async () => { tree = Renderer.create(React.createElement(screens.default, {navigation})); });
+  assert.match(text(tree), /Community builds/);
+  assert.ok(tree.root.findAllByType('Image').some(node => node.props.accessibilityLabel === 'Example community build inspiration'));
+  assert.match(text(tree), /Workshop showcases/);
+  assert.match(text(tree), /Verified workshop/);
+  await act(async () => tree.unmount());
+});
 
 test('location sheet filters shops and combines with search and category filters', async () => {
   const {screens, navigation} = setup();

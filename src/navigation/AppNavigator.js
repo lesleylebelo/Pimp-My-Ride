@@ -17,6 +17,7 @@ import SplashScreen from "../features/auth/screens/SplashScreen";
 import SignInScreen from "../features/auth/screens/SignInScreen";
 import SignUpScreen from "../features/auth/screens/SignUpScreen";
 import ForgotPasswordScreen from "../features/auth/screens/ForgotPasswordScreen";
+import colors from "../shared/theme/colors";
 
 const Stack = createNativeStackNavigator();
 const authenticatedScreens = {
@@ -30,7 +31,7 @@ const authenticatedScreens = {
 export default function AppNavigation() {
   const {user,profile,error,initializing,working} = useAuth();
   const authenticatedRoute = getAuthenticatedRoute(user, profile, error);
-  if (initializing) return <SafeAreaProvider><View style={{flex:1,justifyContent:"center",alignItems:"center"}}><ActivityIndicator color="#0E3B2C"/><Text>Please wait…</Text></View></SafeAreaProvider>;
+  if (initializing) return <SafeAreaProvider><View style={{flex:1,justifyContent:"center",alignItems:"center",backgroundColor:colors.background}}><ActivityIndicator color={colors.primary}/><Text>Please wait…</Text></View></SafeAreaProvider>;
   return (
     <SafeAreaProvider>
       <StatusBar style="auto" />
@@ -49,7 +50,7 @@ export default function AppNavigation() {
           </>}
         </Stack.Navigator>
       </NavigationContainer>
-      {working && <View style={{position:"absolute",top:0,bottom:0,left:0,right:0,backgroundColor:"#ffffffcc",alignItems:"center",justifyContent:"center"}}><ActivityIndicator color="#0E3B2C"/><Text>Please wait…</Text></View>}
+      {working && <View style={{position:"absolute",top:0,bottom:0,left:0,right:0,backgroundColor:"#ffffffcc",alignItems:"center",justifyContent:"center"}}><ActivityIndicator color={colors.primary}/><Text>Please wait…</Text></View>}
       <BackendStatus/>
     </SafeAreaProvider>
   );

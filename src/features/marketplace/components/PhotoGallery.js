@@ -123,7 +123,7 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
   if (next !== p.selectedIds) { permission.current.selectedIds = next; p.onSelectionChange(next); }
  }
  const photoCard = (item,slot) => <Card key={slot || item.id} testID={`photo-${slot || item.id}`}>
-  <Text style={{fontWeight:'700'}}>{slot ? `Photo ${slot}` : item.name || 'Request photo'}</Text>
+  <Text style={{fontWeight:'500'}}>{slot ? `Photo ${slot}` : item.name || 'Request photo'}</Text>
   <Text>{item ? `Saved: ${item.name}` : loading || error || !fresh ? 'Saved status not confirmed.' : 'No photo uploaded.'}</Text>
   {!!item && <>
    <Text>{Math.ceil(item.size/1024)} KB{item.uploadedAt ? ` · Uploaded ${new Date(item.uploadedAt).toLocaleDateString()}` : ''}</Text>
@@ -146,7 +146,7 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
   {!!messages[slot] && <Text accessibilityRole="status">{messages[slot]}</Text>}
  </Card>;
  return <View style={{gap:12}}>
-  <Text style={{fontSize:20,fontWeight:'700'}}>{target === 'vehicle' ? 'Vehicle photos' : 'Request photos'}</Text>
+  <Text style={{fontSize:20,fontWeight:'500'}}>{target === 'vehicle' ? 'Vehicle photos' : 'Request photos'}</Text>
   {editable && <Text>Up to {PHOTO_LIMIT} photos. JPEG or PNG, up to 5 MB each. Choose photos from your device, then confirm the upload.</Text>}
   {!uid ? <Text>Sign in to view photos.</Text> : offline ? <Text>Connect to view or manage photos.</Text> : focused && <>
    <Notice busy={loading || busy} error={error}/>

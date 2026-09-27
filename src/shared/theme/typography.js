@@ -8,20 +8,22 @@ export const spacing = {
 };
 
 export const radius = {
-  sm: 10,
-  md: 16,
-  lg: 20,
-  pill: 999,
+  sm: 8,
+  md: 12,
+  lg: 12,
+  button: 8,
+  card: 12,
+  pill: 9999,
 };
 
 export const typography = {
   h1: {
     fontSize: 30,
-    fontWeight: "800",
+    fontWeight: "500",
   },
   h2: {
     fontSize: 24,
-    fontWeight: "800",
+    fontWeight: "500",
   },
   body: {
     fontSize: 15,
@@ -29,11 +31,11 @@ export const typography = {
   },
   label: {
     fontSize: 15,
-    fontWeight: "600",
+    fontWeight: "500",
   },
   button: {
     fontSize: 16,
-    fontWeight: "700",
+    fontWeight: "500",
   },
   caption: {
     fontSize: 13,

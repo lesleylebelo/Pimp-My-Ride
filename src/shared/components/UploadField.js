@@ -26,9 +26,9 @@ export default function UploadField({label, fileName, onPress}) {
 
 const styles = StyleSheet.create({
   wrapper: {marginBottom: spacing.md},
-  label: {fontSize: 13, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.sm},
+  label: {fontSize: 13, fontWeight: '500', color: colors.textPrimary, marginBottom: spacing.sm},
   field: {
-    minHeight: 56, paddingHorizontal: spacing.md, borderRadius: 12, borderWidth: 1,
+    minHeight: 48, paddingHorizontal: spacing.md, borderRadius: 8, borderWidth: 1,
     borderColor: colors.border, backgroundColor: colors.white, flexDirection: 'row',
     alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm,
   },
@@ -36,5 +36,5 @@ const styles = StyleSheet.create({
   disabled: {opacity: 0.55},
   filename: {flex: 1, color: colors.textPrimary},
   placeholder: {color: colors.textSecondary},
-  action: {color: colors.primary, fontWeight: '700'},
+  action: {color: colors.primary, fontWeight: '500'},
 });

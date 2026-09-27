@@ -13,14 +13,14 @@ export default function LogoMark({ size = 72, iconSize, variant = "onDark" }) {
           width: size,
           height: size,
           borderRadius: size * 0.28,
-          backgroundColor: onDark ? colors.white : colors.primary,
+          backgroundColor: onDark ? colors.white : colors.brandGreenLight,
         },
       ]}
     >
       <Ionicons
         name="car-sport-outline"
         size={iconSize || size * 0.5}
-        color={onDark ? colors.primary : colors.white}
+        color={colors.primary}
       />
     </View>
   );
