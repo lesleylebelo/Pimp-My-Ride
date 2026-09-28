@@ -139,6 +139,14 @@ the owner-authorized `categories` operation on `/api/marketplace`; clients still
 cannot read categories directly. For the new marketplace release, publish its
 vehicle/request indexes first and wait for readiness, then backend and client.
 See MARKETPLACE_MILESTONE.md for the complete scope and prerequisite test data.
+The shop request feed now uses aggregate `quotationCount` values and a batched
+shop-quotation lookup. Publish the `quotations` composite index in
+`firestore.indexes.json`, wait for readiness, then run
+`npm run backfill:quotation-counts -- PROJECT_ID` with trusted Admin credentials
+before releasing the updated marketplace backend/client. The migration counts
+all non-withdrawn quotations; future submissions and withdrawals update the
+request count transactionally. Request/profile reads remain backend-only and
+Firestore client rules must not be loosened to expose customer fields.
 The booking extension in BOOKING_MILESTONE.md needs its backend operations before
 the corresponding client release. Bookings retain deny-by-default direct access
 and use standard participant-field indexes; no new secret, composite index,

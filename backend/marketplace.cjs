@@ -17,6 +17,11 @@ const mutations=new Set(['vehicleSave','vehicleArchive','requestCreate','request
 function eligible(profile,role){return profile?.role===role&&D.active(profile)&&!profile.statusOperation&&!profile.provisioningOperation&&(role!=='shop'||(profile.verificationStatus==='approved'&&!profile.reviewOperation));}
 function requireRole(profile,role){if(!eligible(profile,role))D.fail(role==='shop'?'An active, approved shop account is required.':'An active vehicle owner account is required.','permission-denied');}
 function requestFor(value,role){const result={...value};if(Array.isArray(result.photos))result.photos=result.photos.map(photo=>P.safePhoto(photo,photo.id));if(role==='shop'){delete result.ownerId;delete result.vehicleId;delete result.acceptedQuoteId;delete result.bookingId;}return result;}
+function customerDisplayName(profile){
+ const name=typeof profile?.fullName==='string'?profile.fullName.trim(): '';
+ const safe=name.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,'').replace(/(?:\+?\d[\d\s().-]{7,}\d)/g,'').replace(/\s+/g,' ').trim();
+ return safe||'Customer';
+}
 function createMarketplace({db,auth,actor}){
  const audit=(tx,uid,action,target,details={})=>tx.create(db.collection('auditLogs').doc(),{actor:uid,action:`marketplace.${action}`,target,details,createdAt:stamp()});
  async function current(tx,uid,role){const profile=(await tx.get(db.doc(`users/${uid}`))).data();requireRole(profile,role);return profile;}
@@ -33,14 +38,14 @@ function createMarketplace({db,auth,actor}){
  }
  async function visibleRequest(snapshot,a){
   if(!snapshot.exists)D.fail('Service request not found.','not-found');const value=snapshot.data();
-  if(a.profile.role==='owner'){ownRequest(snapshot,a.uid);return value;}
+  if(a.profile.role==='owner'){ownRequest(snapshot,a.uid);return {value,customerName:null};}
   if(value.visibility!=='open'&&!(value.visibility==='direct'&&value.shopId===a.uid))D.fail('Service request not found.','not-found');
   const [ownerDoc,vehicleDoc,categoryDoc]=await Promise.all([
    db.doc(`users/${value.ownerId}`).get(),db.doc(`vehicles/${value.vehicleId}`).get(),db.doc(`serviceCategories/${value.categoryId}`).get(),
   ]);
   const owner=ownerDoc.data(),vehicle=vehicleDoc.data();
   if(!eligible(owner,'owner')||!vehicle||vehicle.ownerId!==value.ownerId||vehicle.archived||!categoryDoc.exists||categoryDoc.data().archived!==false||!await authEligible(value.ownerId))D.fail('Service request is unavailable.','not-found');
-  return value;
+  return {value,customerName:customerDisplayName(owner)};
  }
  return async function marketplace(request){
   const a=await actor(request),input=request.data||{},op=input.op;
@@ -72,18 +77,28 @@ function createMarketplace({db,auth,actor}){
    else if(input.feed==='open')query=query.where('visibility','==','open').where('status','==','open');
    else if(input.feed==='direct')query=query.where('visibility','==','direct').where('shopId','==',a.uid).where('status','==','open');
    else D.fail('Choose open or direct requests.','permission-denied');
-   const result=await page(query,input.cursor),items=await Promise.all(result.docs.map(async doc=>{try{await visibleRequest(doc,a);return requestFor(row(doc),role);}catch(error){if(error.code!=='not-found')throw error;return null;}}));
-   return {items:items.filter(Boolean),cursor:result.cursor};
+   const result=await page(query,input.cursor),visible=await Promise.all(result.docs.map(async doc=>{try{return {doc,...await visibleRequest(doc,a)};}catch(error){if(error.code!=='not-found')throw error;return null;}}));
+   const rows=visible.filter(Boolean);
+   let quotedRequestIds=new Set();
+   if(role==='shop'&&input.feed==='open'&&rows.length){
+    const quoted=await db.collection('quotations').where('shopId','==',a.uid).where('serviceRequestId','in',rows.map(item=>item.doc.id)).get();
+    quotedRequestIds=new Set(quoted.docs.map(doc=>doc.data().serviceRequestId));
+   }
+   const items=rows.map(({doc,value,customerName})=>({
+    ...requestFor({...row(doc),...(role==='shop'?{customerName}: {})},role),
+    ...(role==='shop'&&input.feed==='open'?{quotedByMe:quotedRequestIds.has(doc.id)}:{})
+   }));
+   return {items,cursor:result.cursor};
   }
   if(op==='request'){
-   const id=D.id(input.id),snapshot=await db.doc(`serviceRequests/${id}`).get(),value=await visibleRequest(snapshot,a);
+   const id=D.id(input.id),snapshot=await db.doc(`serviceRequests/${id}`).get(),visible=await visibleRequest(snapshot,a),value=visible.value;
    if(role==='owner'){
     const result=await page(db.collection('quotations').where('serviceRequestId','==',id),input.quotesCursor);
     return {request:requestFor({id,...serialize(value)},role),quotes:result.docs.map(row),quotesCursor:result.cursor};
    }
    if(input.quotesCursor)D.fail('Shop quotation paging is unavailable.');
    const own=await db.doc(`quotations/${quoteId(id,a.uid)}`).get();
-   return {request:requestFor({id,...serialize(value)},role),quotes:own.exists?[row(own)]:[],quotesCursor:null};
+   return {request:requestFor({id,...serialize(value)},role),customerName:visible.customerName,quotes:own.exists?[row(own)]:[],quotesCursor:null};
   }
   if(op==='quotes'){
    const result=await page(db.collection('quotations').where('shopId','==',a.uid),input.cursor);
@@ -149,7 +164,7 @@ function createMarketplace({db,auth,actor}){
     if(!category||category.archived!==false)D.fail('Choose an active service category.','failed-precondition');
     if(changes.shopId){const shop=(await tx.get(db.doc(`users/${changes.shopId}`))).data();if(!eligible(shop,'shop'))D.fail('Choose an active, approved shop.','failed-precondition');await assertAuth(changes.shopId);}
     const photos=await P.snapshotRequestPhotos(tx,db,vehicle,a.uid,vehicleRef.id,photoIds);
-    tx.create(ref,{...changes,photoIds,photos,ownerId:a.uid,vehicleId:vehicleRef.id,vehicle:M.vehicleSnapshot(vehicle),categoryName:category.name,status:'open',version:1,createdAt:stamp(),updatedAt:stamp()});
+    tx.create(ref,{...changes,photoIds,photos,ownerId:a.uid,vehicleId:vehicleRef.id,vehicle:M.vehicleSnapshot(vehicle),categoryName:category.name,quotationCount:0,status:'open',version:1,createdAt:stamp(),updatedAt:stamp()});
     audit(tx,a.uid,op,ref.id,{visibility:changes.visibility});return {id:ref.id};
    });
   }
@@ -171,6 +186,8 @@ function createMarketplace({db,auth,actor}){
     await assertAuth(value.ownerId);
     const vehicle=vehicleDoc.data();if(!vehicle||vehicle.ownerId!==value.ownerId||vehicle.archived)D.fail('This vehicle is no longer available.','failed-precondition');
     if(!categoryDoc.exists||categoryDoc.data().archived!==false)D.fail('This service category is no longer available.','failed-precondition');
+    const quotationCount=Number.isSafeInteger(value.quotationCount)&&value.quotationCount>=0?value.quotationCount:0;
+    tx.update(requestRef,{quotationCount:quotationCount+1,updatedAt:stamp()});
     tx.create(ref,{...changes,serviceRequestId,shopId:a.uid,shopName:shop.shop?.shopName||'Shop',requestTitle:value.title,vehicle:value.vehicle,status:'submitted',validUntil:Timestamp.fromMillis(Date.now()+changes.validForDays*86400000),createdAt:stamp(),updatedAt:stamp()});
     audit(tx,a.uid,op,ref.id,{serviceRequestId});return {id:ref.id};
    });
@@ -180,7 +197,11 @@ function createMarketplace({db,auth,actor}){
    return receipt.atomic(async tx=>{await current(tx,a.uid,'shop');const doc=await tx.get(ref),value=doc.data();
     if(!doc.exists||value.shopId!==a.uid)D.fail('Quotation not found.','not-found');
     if(value.status!=='submitted')D.fail('Only a submitted quotation can be withdrawn.','failed-precondition');
-   tx.update(ref,{status:'withdrawn',withdrawnAt:stamp(),updatedAt:stamp()});audit(tx,a.uid,op,ref.id,{serviceRequestId:value.serviceRequestId});return {id:ref.id};});
+    const requestRef=db.doc(`serviceRequests/${D.id(value.serviceRequestId)}`),requestDoc=await tx.get(requestRef),request=requestDoc.data();
+    if(!requestDoc.exists)D.fail('Service request not found.','not-found');
+    const quotationCount=Number.isSafeInteger(request.quotationCount)&&request.quotationCount>=0?request.quotationCount:0;
+    tx.update(requestRef,{quotationCount:Math.max(0,quotationCount-1),updatedAt:stamp()});
+    tx.update(ref,{status:'withdrawn',withdrawnAt:stamp(),updatedAt:stamp()});audit(tx,a.uid,op,ref.id,{serviceRequestId:value.serviceRequestId});return {id:ref.id};});
   }
   if(op==='quoteAccept'){
    const quoteRef=db.doc(`quotations/${D.id(input.id)}`);

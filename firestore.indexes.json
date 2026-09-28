@@ -45,6 +45,14 @@
         {"fieldPath": "status", "order": "ASCENDING"},
         {"fieldPath": "__name__", "order": "ASCENDING"}
       ]
+    },
+    {
+      "collectionGroup": "quotations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "shopId", "order": "ASCENDING"},
+        {"fieldPath": "serviceRequestId", "order": "ASCENDING"}
+      ]
     }
   ],
   "fieldOverrides": [{
