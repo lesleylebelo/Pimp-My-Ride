@@ -27,6 +27,10 @@ function setup() {
   };
   const screens = loadUI('src/features/customer/screens/OwnerHomeScreen.js', {
     '../../../shared/components/landing/LandingUI': landing,
+    '../../../shared/components/landing/FeedControls': {
+      FeedSearchInput: props => React.createElement('TextInput', props),
+      FeedServicePill: ({title, selected, onPress, disabled}) => React.createElement('Pressable', {accessibilityLabel: title, accessibilityState: {selected}, onPress, disabled}, React.createElement('Text', null, title)),
+    },
     '../../marketplace/components/MarketplaceUI': {ownerRoutes: {Discover: 'Discover'}},
     '../../marketplace/hooks/useMarketData': {
       useMarketData: (op, input = {}) => {

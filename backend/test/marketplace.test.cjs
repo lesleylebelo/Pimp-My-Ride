@@ -18,8 +18,8 @@ function queryable(db){
  db.collection=function collection(path){
   const base=original(path);
   function query(filters=[],cursor='',maximum=Infinity){return {
-   ...base,where:(key,operator,value)=>{assert.equal(operator,'==');return query([...filters,[key,value]],cursor,maximum);},orderBy:()=>query(filters,cursor,maximum),startAfter:id=>query(filters,id,maximum),limit:n=>query(filters,cursor,n),
-   get:async()=>{db.queries.push({path,filters,cursor,maximum});const docs=[...db.rows.entries()].filter(([p,value])=>p.startsWith(path+'/')&&p.slice(path.length+1).indexOf('/')===-1&&p.split('/').pop()>cursor&&filters.every(([key,expected])=>value[key]===expected)).sort(([a],[b])=>a<b?-1:a>b?1:0).slice(0,maximum).map(([p])=>({id:p.split('/').pop(),exists:true,data:()=>db.rows.get(p)}));return {docs};},
+   ...base,where:(key,operator,value)=>{assert.ok(operator==='=='||operator==='in');return query([...filters,[key,operator,value]],cursor,maximum);},orderBy:()=>query(filters,cursor,maximum),startAfter:id=>query(filters,id,maximum),limit:n=>query(filters,cursor,n),
+   get:async()=>{db.queries.push({path,filters,cursor,maximum});const docs=[...db.rows.entries()].filter(([p,value])=>p.startsWith(path+'/')&&p.slice(path.length+1).indexOf('/')===-1&&p.split('/').pop()>cursor&&filters.every(([key,operator,expected])=>operator==='in'?expected.includes(value[key]):value[key]===expected)).sort(([a],[b])=>a<b?-1:a>b?1:0).slice(0,maximum).map(([p])=>({id:p.split('/').pop(),exists:true,data:()=>db.rows.get(p)}));return {docs};},
   };}
   return query();
  };
@@ -104,9 +104,9 @@ test('direct requests require an approved, active and verified target shop',asyn
 test('request snapshots omit registration and customer details, and shop detail never exposes competitor quotations',async()=>{
  const f=fixture(),id=await created(f);await f.write('shop','quoteSubmit',{serviceRequestId:id,...quoteData});await f.write('competitor','quoteSubmit',{serviceRequestId:id,...quoteData});
  const owner=await f.read('owner','request',{id}),shop=await f.read('shop','request',{id});
- assert.equal(owner.quotes.length,2);assert.equal(shop.quotes.length,1);assert.equal(shop.quotes[0].shopId,'shop');
+ assert.equal(owner.quotes.length,2);assert.equal(shop.quotes.length,1);assert.equal(shop.quotes[0].shopId,'shop');assert.equal(shop.customerName,'Private customer name');
  assert.equal(shop.request.ownerId,undefined);assert.equal(shop.request.vehicleId,undefined);assert.deepEqual(shop.request.vehicle,{make:'Toyota',model:'Corolla',year:2020,colour:'Blue'});
- assert.ok(!JSON.stringify(shop).includes('PRIVATE-REG'));assert.ok(!JSON.stringify(shop).includes('Private customer name'));assert.equal(shop.quotes[0].totalCents,100000);assert.equal(shop.quotes[0].currency,'ZAR');
+ assert.ok(!JSON.stringify(shop).includes('PRIVATE-REG'));assert.equal(shop.quotes[0].totalCents,100000);assert.equal(shop.quotes[0].currency,'ZAR');
  await assert.rejects(()=>f.read('other','request',{id}),{code:'not-found'});
 });
 test('direct request privacy is enforced for detail, feeds and quotation submission',async()=>{
@@ -128,6 +128,33 @@ test('quotation retries return one quote; distinct keys cannot create duplicates
  assert.equal(f.db.rows.get('quotations/'+first.id).status,'withdrawn');
  await assert.rejects(()=>f.write('shop','quoteSubmit',data,'new-after-withdraw'),{code:'already-exists'});
  assert.equal(audits(f).filter(([,v])=>v.action==='marketplace.quoteSubmit').length,1);
+});
+test('open request feed exposes safe customer names, accurate quote counts and current-shop quote state in one batch',async()=>{
+ const f=fixture({'users/owner':{role:'owner',fullName:'  Lesley Lebelo. ',phone:'private phone',email:'lesley@example.invalid'},'users/competitor':{role:'shop',verificationStatus:'approved',shop:{shopName:'Other Shop'}}});
+ const first=await created(f),second=await created(f,{title:'Second request'}),third=await created(f,{title:'Competitor-only quote'});
+ const submitted=await f.write('shop','quoteSubmit',{serviceRequestId:first,...quoteData});
+ await f.write('competitor','quoteSubmit',{serviceRequestId:first,...quoteData});
+ await f.write('shop','quoteSubmit',{serviceRequestId:second,...quoteData});
+ await f.write('competitor','quoteSubmit',{serviceRequestId:third,...quoteData});
+ const feed=await f.read('shop','requests',{feed:'open'});
+ const one=feed.items.find(item=>item.id===first),two=feed.items.find(item=>item.id===second),three=feed.items.find(item=>item.id===third);
+ assert.equal(one.customerName,'Lesley Lebelo.');assert.equal(one.quotationCount,2);assert.equal(one.quotedByMe,true);
+ assert.equal(two.quotationCount,1);assert.equal(two.quotedByMe,true);
+ assert.equal(three.quotationCount,1);assert.equal(three.quotedByMe,false);
+ assert.ok(!JSON.stringify(feed).includes('private phone'));assert.ok(!JSON.stringify(feed).includes('lesley@example.invalid'));
+ assert.ok(!JSON.stringify(feed).includes('Other Shop'));assert.ok(!JSON.stringify(feed).includes('Trusted Motors'));assert.ok(!JSON.stringify(feed).includes('100000'));
+ assert.equal(f.db.queries.filter(query=>query.path==='quotations').length,1);
+ assert.deepEqual(f.db.queries.find(query=>query.path==='quotations').filters,[['shopId','==','shop'],['serviceRequestId','in',[first,second,third]]]);
+ await f.write('shop','quoteWithdraw',{id:submitted.id});
+ const withdrawn=await f.read('shop','requests',{feed:'open'});
+ assert.equal(withdrawn.items.find(item=>item.id===first).quotationCount,1);
+ assert.equal(withdrawn.items.find(item=>item.id===first).quotedByMe,true);
+});
+test('missing customer profile names and contact-like strings are redacted from shop request cards',async()=>{
+ const f=fixture({'users/owner':{role:'owner',fullName:'owner@example.invalid 0821234567'}});
+ await created(f);
+ const item=(await f.read('shop','requests',{feed:'open'})).items[0];
+ assert.equal(item.customerName,'Customer');assert.ok(!JSON.stringify(item).includes('owner@example.invalid'));assert.ok(!JSON.stringify(item).includes('0821234567'));
 });
 test('closing a request denies new quotations and cannot be performed by another customer',async()=>{
  const f=fixture(),id=await created(f);await assert.rejects(()=>f.write('other','requestClose',{id}),{code:'not-found'});

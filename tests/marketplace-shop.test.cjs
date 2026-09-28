@@ -10,10 +10,19 @@ function setup(overrides = {}) {
   const state = {auth: {user: {uid: 'shop-1'}, profile: {role: 'shop'}, offline: false}, data: {request, quotes: []}, busy: false, error: '', calls: [], reads: [], navigations: [], api: async () => ({id: 'quote-1'}), refresh: async () => ({}), ...overrides};
   const PrimaryButton = loadUI('src/shared/components/PrimaryButton.js').default;
   const landing = {LandingText: 'Text', LandingShell: ({children, onScroll, onLayout, onContentSizeChange}) => React.createElement('View', {onScroll, onLayout, onContentSizeChange}, children), LandingButton: PrimaryButton, ownerTabs: [], shopTabs: [], ui: {}, useLandingFeedback: () => ({showFeature() {}})};
+  const marketplace = loadUI('src/features/marketplace/components/MarketplaceUI.js', {
+    '../../../shared/components/landing/LandingUI': landing,
+    '../../auth/context/AuthContext': {useAuth: () => state.auth},
+  });
   const screens = loadUI('src/features/marketplace/screens/ShopMarketplaceScreens.js', {
     '../../auth/context/AuthContext': {useAuth: () => state.auth},
     '../components/PhotoGallery': props => React.createElement('PhotoGallery', props),
+    '../components/MarketplaceUI': marketplace,
     '../../../shared/components/landing/LandingUI': landing,
+    '../../../shared/components/landing/FeedControls': {
+      FeedSearchInput: props => React.createElement('TextInput', props),
+      FeedServicePill: ({title, selected, onPress, disabled}) => React.createElement('Pressable', {accessibilityLabel: title, accessibilityState: {selected}, onPress, disabled}, React.createElement('Text', null, title)),
+    },
     '../hooks/useMarketData': {useMarketData: (op, input) => { state.reads.push({op, input}); const data = op === 'requests' && state.readRequests ? state.readRequests(input) : state.data; return {data, busy: state.busy, error: state.error, refresh: (...args) => state.refresh(...args)}; }},
     '../services/marketApi': {marketApi: async (op, input) => { state.calls.push({op, input}); return state.api(op, input); }},
   });
@@ -21,6 +30,7 @@ function setup(overrides = {}) {
   return {state, screens, navigation};
 }
 const button = (tree, title) => tree.root.findAllByType('Pressable').find(node => node.findAllByType('Text').some(text => text.props.children === title));
+const action = (tree, prefix) => tree.root.findAllByType('Pressable').find(node => String(node.props.accessibilityLabel || '').startsWith(prefix));
 const input = (tree, label) => tree.root.findAllByType('TextInput').find(node => node.props.accessibilityLabel === label);
 const text = tree => tree.root.findAllByType('Text').map(node => Array.isArray(node.props.children) ? node.props.children.join('') : node.props.children).join('\n');
 async function change(tree, label, value) { await act(async () => input(tree, label).props.onChangeText(value)); }
@@ -36,7 +46,7 @@ test('shop feeds send the correct audience and navigate with a request identifie
     const {state, screens, navigation} = setup({data: {items: [request], cursor: 'next-page'}});
     const tree = await mount(screens[screen], {navigation});
     assert.deepEqual(state.reads.at(-1), {op: 'requests', input: {feed, cursor: null}});
-    await act(async () => button(tree, 'View request').props.onPress());
+    await act(async () => (feed === 'open' ? action(tree, 'View request:') : button(tree, 'View request')).props.onPress());
     assert.deepEqual(state.navigations, [['ShopRequest', {id: request.id}]]);
     assert.equal(button(tree, 'Next'), undefined);
     const scroller = tree.root.findAllByType('View').find(node => node.props.onScroll);
@@ -73,8 +83,61 @@ test('Find Jobs uses one request-card feed and loads the next cursor on scroll',
 test('Find Jobs View request action opens the matching request detail', async () => {
   const {state, screens, navigation} = setup({data: {items: [request], cursor: null}});
   const tree = await mount(screens.ShopJobsScreen, {navigation});
-  await act(async () => button(tree, 'View request').props.onPress());
+  await act(async () => action(tree, 'View request:').props.onPress());
   assert.deepEqual(state.navigations, [['ShopRequest', {id: request.id}]]);
+  await act(async () => tree.unmount());
+});
+
+test('Find Jobs provides customer-style search, one selected category, More filters, and searchable request cards', async () => {
+  const first = {...request, id: 'one', customerName: 'Lesley Lebelo.', quotationCount: 3, quotedByMe: true};
+  const second = {...request, id: 'two', title: 'Install lights', categoryName: 'Lighting', city: 'Mbombela', customerName: 'Customer', quotationCount: 0, quotedByMe: false};
+  const {screens, navigation} = setup({data: {items: [first, second], cursor: null}});
+  const tree = await mount(screens.ShopJobsScreen, {navigation});
+  assert.equal(input(tree, 'Search requests, vehicles or services').props.placeholder, 'Search requests, vehicles or services');
+  assert.match(text(tree), /Browse open customer requests for work your shop can complete\./);
+  assert.match(text(tree), /Browse by service/);
+  assert.equal(button(tree, 'All').props.accessibilityState.selected, true);
+  assert.equal(button(tree, 'Tuning').props.accessibilityState.selected, false);
+  assert.match(text(tree), /Lesley Lebelo\./);
+  assert.match(text(tree), /LL/);
+  assert.match(text(tree), /3 quotes/);
+  assert.match(text(tree), /No quotes yet/);
+  assert.match(text(tree), /View your quote/);
+  assert.match(text(tree), /Quoted/);
+  assert.doesNotMatch(text(tree), /0821234567|lesley@example/);
+  assert.deepEqual(screens.filterJobRequests([first, second], {category: 'Lighting'}).map(item => item.id), ['two']);
+  assert.deepEqual(screens.filterJobRequests([first, second], {query: 'mbombela'}).map(item => item.id), ['two']);
+  assert.deepEqual(screens.filterJobRequests([first, second], {category: 'Lighting', query: 'lesley'}), []);
+  assert.deepEqual(screens.filterJobRequests([first, second], {notQuoted: true}).map(item => item.id), ['two']);
+  await act(async () => button(tree, 'Lighting').props.onPress());
+  assert.equal(button(tree, 'Lighting').props.accessibilityState.selected, true);
+  assert.match(text(tree), /Install lights/);
+  await act(async () => button(tree, 'All').props.onPress());
+  await act(async () => { input(tree, 'Search requests, vehicles or services').props.onChangeText('mbombela'); await new Promise(resolve => setTimeout(resolve, 220)); });
+  assert.equal(input(tree, 'Search requests, vehicles or services').props.value, 'mbombela');
+  await act(async () => button(tree, 'More filters').props.onPress());
+  assert.match(text(tree), /Not yet quoted by me/);
+  assert.match(text(tree), /Minimum budget \(R\)/);
+  await act(async () => tree.unmount());
+});
+
+test('Find Jobs combines search and service filters against request data', async () => {
+  const first = {...request, id: 'one', customerName: 'Lesley Lebelo.', quotedByMe: false};
+  const second = {...request, id: 'two', title: 'Fit exhaust', categoryName: 'Exhaust', customerName: 'Customer', quotedByMe: true};
+  const {screens, navigation} = setup({data: {items: [first, second], cursor: null}});
+  const tree = await mount(screens.ShopJobsScreen, {navigation});
+  await act(async () => button(tree, 'Exhaust').props.onPress());
+  assert.equal(button(tree, 'Exhaust').props.accessibilityState.selected, true);
+  await act(async () => { input(tree, 'Search requests, vehicles or services').props.onChangeText('Lesley'); await new Promise(resolve => setTimeout(resolve, 220)); });
+  assert.deepEqual(screens.filterJobRequests([first, second], {category: 'Exhaust', query: 'lesley'}), []);
+  assert.match(text(tree), /Browse by service/);
+  await act(async () => tree.unmount());
+});
+
+test('Find Jobs shows an empty state when no open requests are available', async () => {
+  const {screens, navigation} = setup({data: {items: [], cursor: null}});
+  const tree = await mount(screens.ShopJobsScreen, {navigation});
+  assert.match(text(tree), /No open requests are available/);
   await act(async () => tree.unmount());
 });
 

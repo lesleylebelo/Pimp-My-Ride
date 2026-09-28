@@ -6,7 +6,7 @@ import {radius} from '../../../shared/theme/typography';
 import {ownerRoutes} from '../../marketplace/components/MarketplaceUI';
 import {useMarketData} from '../../marketplace/hooks/useMarketData';
 import {LandingButton, LandingShell, LandingText, ownerTabs, ui, useLandingFeedback} from '../../../shared/components/landing/LandingUI';
-import AppTextInput from '../../../shared/components/AppTextInput';
+import {FeedSearchInput, FeedServicePill} from '../../../shared/components/landing/FeedControls';
 
 const matches = (shop, query) => Object.values(shop).some(value => String(value || '').toLowerCase().includes(query));
 
@@ -78,13 +78,13 @@ export default function OwnerHomeScreen({navigation}) {
   const retryFeed = () => {void shops.refresh().catch(() => {});};
 
   return <LandingShell title="Discover" tabs={ownerTabs} activeTab="Discover" {...feedback} onScroll={loadNextPage} onLayout={handleLayout} onContentSizeChange={handleContentSizeChange} onTabPress={label => ownerRoutes[label] ? navigation.navigate(ownerRoutes[label]) : soon(label)}>
-    <AppTextInput accessibilityLabel="Search workshops or services" placeholder="Search workshops or services" icon="search-outline" value={query} onChangeText={setQuery} editable={!shops.busy}/>
+    <FeedSearchInput accessibilityLabel="Search workshops or services" placeholder="Search workshops or services" value={query} onChangeText={setQuery} editable={!shops.busy}/>
     <LandingText style={styles.intro}>Explore workshops and their services</LandingText>
     <LandingText weight="medium">Browse by service</LandingText>
     <View style={styles.categories}>
-      <LandingButton title="All" outline={!!category} disabled={categories.busy} onPress={() => setCategory('')} style={styles.category}/>
-      {(categories.data?.items || []).map(item => <LandingButton key={item.id} title={item.name} outline={category !== item.name} disabled={categories.busy} onPress={() => setCategory(item.name)} style={styles.category}/>)}
-      <LandingButton title="More filters" outline disabled={disabled} onPress={() => setMoreFiltersOpen(true)} style={styles.category}/>
+      <FeedServicePill title="All" selected={!category} disabled={categories.busy} onPress={() => setCategory('')}/>
+      {(categories.data?.items || []).map(item => <FeedServicePill key={item.id} title={item.name} selected={category === item.name} disabled={categories.busy} onPress={() => setCategory(item.name)}/>)}
+      <FeedServicePill title="More filters" selected={false} disabled={disabled} onPress={() => setMoreFiltersOpen(true)}/>
     </View>
     {(shops.busy && !feedShops.length || categories.busy) && <LandingText accessibilityRole="status" style={ui.muted}>Loading approved workshops...</LandingText>}
     {!!(shops.error || categories.error) && <LandingText accessibilityRole="alert" style={ui.error}>{shops.error || categories.error}</LandingText>}
@@ -173,7 +173,6 @@ const styles = StyleSheet.create({
   saveLabel: {fontSize: 12, color: colors.textSecondary},
   feedStatus: {alignSelf: 'center', paddingVertical: 8, color: colors.textSecondary},
   categories: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
-  category: {flexGrow: 1, width: undefined, paddingHorizontal: 12, borderRadius: radius.pill},
   verified: {flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: colors.brandGreenLight, borderRadius: radius.pill},
   verifiedText: {fontSize: 12, color: colors.primary},
   caption: {fontSize: 13, lineHeight: 18, color: colors.textSecondary},
