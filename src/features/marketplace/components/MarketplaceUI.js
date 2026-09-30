@@ -5,11 +5,11 @@ import {LandingShell,LandingButton,ownerTabs,shopTabs,ui,useLandingFeedback} fro
 import AppTextInput from '../../../shared/components/AppTextInput';
 export const ownerRoutes={Discover:'Discover',Garage:'Garage','My Requests':'OwnerRequests',Bookings:'Bookings',Profile:'OwnerAccount'};
 export const shopRoutes={'Find Jobs':'ShopJobs',Requests:'ShopRequests',Quotes:'ShopQuotes',Bookings:'Bookings','My Shop':'ShopAccount'};
-export function Page({title,navigation,children,showTabs=true,onScroll,onLayout,onContentSizeChange}){
+export function Page({title,navigation,children,showTabs=true,onScroll,onLayout,onContentSizeChange,floatingAction}){
  const {profile}=useAuth(),shop=profile?.role==='shop',routes=shop?shopRoutes:ownerRoutes,feedback=useLandingFeedback();
  const state=navigation?.getState?.(),route=state?.routes?.[state.index]?.name;
  const activeTab=Object.keys(routes).find(k=>routes[k]===route)||(route==='BookingDetail'?'Bookings':shop?(route==='QuoteForm'?'Quotes':'Find Jobs'):['RequestForm','OwnerRequest','QuoteComparison'].includes(route)?'My Requests':'Garage');
- return <LandingShell title={title} tabs={showTabs?(shop?shopTabs:ownerTabs):undefined} activeTab={activeTab} {...feedback} onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} onTabPress={label=>routes[label]?navigation?.navigate(routes[label]):feedback.showFeature(label)}>
+ return <LandingShell title={title} tabs={showTabs?(shop?shopTabs:ownerTabs):undefined} activeTab={activeTab} {...feedback} onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} floatingAction={floatingAction} onTabPress={label=>routes[label]?navigation?.navigate(routes[label]):feedback.showFeature(label)}>
   {navigation?.canGoBack?.()&&<LandingButton title="Back" outline onPress={()=>navigation.goBack()}/>}
   {children}
  </LandingShell>;

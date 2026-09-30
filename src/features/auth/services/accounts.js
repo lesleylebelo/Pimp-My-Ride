@@ -70,7 +70,7 @@ export async function register(form, role) {
    }
    await saveProfile(form,role,user,auth);
    if(!user.emailVerified)await sendVerification(user);
-   return;
+   return {emailVerified:user.emailVerified};
  }
  try{await saveProfile(form,role,user,auth);}
  catch(error){
@@ -82,6 +82,7 @@ export async function register(form, role) {
   throw error;
  }
  await sendVerification(user);
+ return {emailVerified:false};
  });
 }
 

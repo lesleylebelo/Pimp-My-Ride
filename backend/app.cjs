@@ -35,6 +35,7 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
  const action=(fn)=>async(req,res,next)=>{try{if(!req.body||Array.isArray(req.body)||typeof req.body!=='object')throw new ApiError('invalid-argument','Expected a JSON object.');res.json({data:await fn({auth:req.identity,data:req.body})});}catch(e){next(e);}};
  app.post('/api/admin',action(services.adminApi));
  app.post('/api/marketplace',action(services.marketplace));
+ app.post('/api/posts',action(services.postsApi));
  app.post('/api/photos',action(services.photosApi));
  app.post('/api/session',action(services.sessionEvent));
  app.post('/api/profile',action(services.completeProfile));
@@ -75,6 +76,7 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
    await services.checkPhotoUpload(req.photoRequest);next();
   }catch(e){next(e);}
  },uploadSlot,upload,uploadAction(req=>services.uploadPhoto({...req.photoRequest,file:req.file})));
+ app.post('/api/posts/images',uploadLimit,uploadSlot,upload,uploadAction(req=>services.uploadPostImage({auth:req.identity,file:req.file})));
  app.use((req,res)=>res.status(404).json({error:{code:'not-found',message:'Endpoint not found.'}}));
  app.use((e,req,res,next)=>{
   let code=e instanceof ApiError?e.code:'internal',message=e instanceof ApiError?e.message:'The server could not complete this action. Refresh before retrying.';

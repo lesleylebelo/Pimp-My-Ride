@@ -2,6 +2,44 @@ rules_version = '2';
 service cloud.firestore {
  match /databases/{database}/documents {
   function own(uid) {return request.auth != null && request.auth.uid == uid;}
+   function verified() {return request.auth != null && request.auth.token.email_verified == true;}
+   function activeUser(uid) {
+    let profile=get(/databases/$(database)/documents/users/$(uid)).data;
+    return profile.role in ['owner','shop'] && (!('accountStatus' in profile) || profile.accountStatus == 'active');
+   }
+   function verifiedShop(uid) {
+    let profile=get(/databases/$(database)/documents/users/$(uid)).data;
+    return activeUser(uid) && profile.role == 'shop' && profile.verificationStatus == 'approved'
+     && !('statusOperation' in profile) && !('reviewOperation' in profile) && !('provisioningOperation' in profile);
+   }
+    function adminUser() {
+     let profile=request.auth == null ? {} : get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+     return verified() && request.auth.token.admin == true && profile.role == 'admin'
+      && (!('accountStatus' in profile) || profile.accountStatus == 'active')
+      && !('statusOperation' in profile) && !('provisioningOperation' in profile);
+   }
+   function validPost(postId) {
+    return request.resource.data.keys().hasOnly([
+     'authorId','authorRole','type','title','description','images','category','projectStatus',
+     'vehicle','city','province','authorName','authorAvatar','createdAt','updatedAt','status'
+    ])
+    && request.resource.data.authorId == request.auth.uid
+    && request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 80
+    && request.resource.data.description is string && request.resource.data.description.size() > 0 && request.resource.data.description.size() <= 1000
+    && request.resource.data.images is list && request.resource.data.images.size() <= 6
+    && request.resource.data.category in ['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other']
+    && request.resource.data.vehicle is string && request.resource.data.vehicle.size() <= 120
+    && request.resource.data.authorName is string && request.resource.data.authorName.size() <= 100
+    && request.resource.data.authorAvatar == null
+    && request.resource.data.city is string && request.resource.data.province is string
+    && request.resource.data.status == 'published'
+    && request.resource.data.createdAt is timestamp && request.resource.data.updatedAt is timestamp
+    && ((request.resource.data.authorRole == 'shop' && request.resource.data.type == 'showcase'
+       && request.resource.data.projectStatus in ['In progress','Completed'] && verifiedShop(request.auth.uid))
+     || (request.resource.data.authorRole == 'customer' && request.resource.data.type == 'build'
+       && !('projectStatus' in request.resource.data) && activeUser(request.auth.uid)
+       && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'owner'));
+   }
   // Own onboarding profile remains readable while unverified/restricted so the
   // app can show status and recover setup. It grants no privileged operations.
   // All sensitive metadata/catalogue reads go through revoked-token-aware API.
@@ -12,6 +50,29 @@ service cloud.firestore {
     allow read: if false;
     allow write: if false;
    }
+   match /savedPosts/{postId} {
+    allow get, list: if own(uid) && verified() && activeUser(uid);
+    allow create: if own(uid) && verified() && activeUser(uid)
+     && request.resource.data.keys().hasOnly(['postId','createdAt'])
+     && request.resource.data.postId == postId && request.resource.data.createdAt is timestamp
+     && get(/databases/$(database)/documents/posts/$(postId)).data.status == 'published';
+    allow delete: if own(uid) && verified() && activeUser(uid);
+    allow update: if false;
+   }
+  }
+  match /posts/{postId} {
+   allow get, list: if verified() && activeUser(request.auth.uid) && resource.data.status == 'published';
+   allow create: if verified() && validPost(postId);
+   allow update: if verified() && resource.data.authorId == request.auth.uid
+    && resource.data.status == 'published' && validPost(postId)
+    && request.resource.data.authorId == resource.data.authorId
+    && request.resource.data.authorRole == resource.data.authorRole
+    && request.resource.data.type == resource.data.type
+    && request.resource.data.createdAt == resource.data.createdAt;
+   allow delete: if verified() && resource.data.authorId == request.auth.uid;
+   allow update: if adminUser()
+    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','updatedAt'])
+    && request.resource.data.status == 'removed';
   }
   match /serviceCategories/{id} {
    allow read: if false;

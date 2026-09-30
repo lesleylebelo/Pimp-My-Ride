@@ -13,3 +13,53 @@ test('catalogue access requires the backend and clients never modify it',async()
 test('marketplace records cannot be read or forged through direct Firestore clients, including administrators',async()=>{
  for(const role of ['owner','shop','admin']){await seed(role,role);const db=ctx(role,true,role==='admin').firestore();for(const name of ['vehicles','serviceRequests','quotations','bookings','marketplacePhotos','storagePhotosUploadAttempts']){await assertFails(getDocs(collection(db,name)));await assertFails(getDoc(doc(db,name,'x')));await assertFails(setDoc(doc(db,name,'x'),{ownerId:role,shopId:role,status:'open'}));}}
 });
+
+async function seedModerationPost(){
+ await env.withSecurityRulesDisabled(c=>setDoc(doc(c.firestore(),'posts','moderation-fixture'),{
+  authorId:'post-owner',authorRole:'customer',type:'build',title:'Synthetic build',description:'Emulator-only post',
+  images:[],category:'Other',vehicle:'Synthetic vehicle',city:'Test city',province:'Test province',
+  authorName:'Test owner',authorAvatar:null,createdAt:new Date(1000),updatedAt:new Date(1000),status:'published',
+ }));
+}
+const moderate=db=>updateDoc(doc(db,'posts','moderation-fixture'),{status:'removed',updatedAt:new Date(2000)});
+
+test('trusted administrators cannot moderate posts before verifying their email',async()=>{
+ await seed('admin','admin');await seedModerationPost();
+ await assertFails(moderate(ctx('admin',false,true).firestore()));
+});
+
+test('suspended and archived administrators cannot moderate posts even with verified email and trusted claims',async()=>{
+ await seedModerationPost();
+ for(const status of ['suspended','archived']){
+  await seed('admin','admin',status);
+  await assertFails(moderate(ctx('admin',true,true).firestore()));
+ }
+});
+
+test('verified active administrators can moderate posts, including legacy profiles without an account status',async()=>{
+ for(const profile of [{role:'admin',accountStatus:'active'},{role:'admin'}]){
+  await env.withSecurityRulesDisabled(c=>setDoc(doc(c.firestore(),'users','admin'),profile));
+  await seedModerationPost();
+  await assertSucceeds(moderate(ctx('admin',true,true).firestore()));
+ }
+});
+
+test('post moderation requires both the trusted admin claim and the stored admin role',async()=>{
+ await seedModerationPost();
+ await seed('role-only','admin');
+ await assertFails(moderate(ctx('role-only',true,false).firestore()));
+ await seed('claim-only','owner');
+ await assertFails(moderate(ctx('claim-only',true,true).firestore()));
+ await assertFails(moderate(ctx('missing-profile',true,true).firestore()));
+ await assertFails(moderate(env.unauthenticatedContext().firestore()));
+});
+
+test('administrators with a pending status or provisioning operation cannot moderate posts',async()=>{
+ await seedModerationPost();
+ for(const operation of ['statusOperation','provisioningOperation']){
+  await env.withSecurityRulesDisabled(c=>setDoc(doc(c.firestore(),'users','admin'),{
+   role:'admin',accountStatus:'active',[operation]:'pending-operation',
+  }));
+  await assertFails(moderate(ctx('admin',true,true).firestore()));
+ }
+});

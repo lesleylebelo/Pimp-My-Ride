@@ -50,3 +50,31 @@ export async function apiRequest(path,data,{multipart=false,expectedUid,authClie
  if(!response.ok){const error=new Error(result.error?.message||'The request failed.');error.code=`api/${result.error?.code||'internal'}`;if(result.error?.retryWithNewRequest===true)error.retryWithNewRequest=true;throw error;}
  return result.data;
 }
+
+export async function uploadRequest(path,body,{expectedUid,onProgress}={}){
+ await requireConnection();
+ const url=baseURL(),auth=firebase().auth,user=auth.currentUser;
+ if(!user)throw new Error('Please sign in again.');
+ if(expectedUid&&user.uid!==expectedUid)throw new Error('Your account changed. Please try again.');
+ await ready(url);
+ const token=await user.getIdToken();
+ if(auth.currentUser?.uid!==user.uid)throw new Error('Your account changed. Please try again.');
+ return new Promise((resolve,reject)=>{
+  const xhr=new XMLHttpRequest();
+  xhr.open('POST',`${url}/api/${path}`);
+  xhr.timeout=60000;
+  xhr.setRequestHeader('Authorization',`Bearer ${token}`);
+  xhr.upload.onprogress=event=>{if(event.lengthComputable)onProgress?.(Math.round(event.loaded/event.total*100));};
+  xhr.onerror=()=>reject(new Error('Cannot reach the server. Check your connection and try again.'));
+  xhr.ontimeout=()=>reject(new Error('The upload is taking too long. Refresh before trying again.'));
+  xhr.onload=()=>{
+   let result;
+   try{result=JSON.parse(xhr.responseText);}
+   catch(_){reject(new Error('The server returned an unexpected response. Refresh before trying again.'));return;}
+   if(auth.currentUser?.uid!==user.uid){reject(new Error('Your account changed. Please try again.'));return;}
+   if(xhr.status<200||xhr.status>=300){const error=new Error(result.error?.message||'The upload failed.');error.code=`api/${result.error?.code||'internal'}`;reject(error);return;}
+   resolve(result.data);
+  };
+  xhr.send(body);
+ });
+}

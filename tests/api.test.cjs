@@ -67,3 +67,45 @@ test('account change during token refresh prevents sending the previous token',a
  assert.equal(s.calls.length,1);
  assert.ok(s.calls[0].url.endsWith('/health'));
 });
+
+test('profile creation uses only the isolated client token while the app remains signed out',async()=>{
+ const s=setup(async url=>({ok:true,json:async()=>url.endsWith('/health')?{ok:true}:{data:{saved:true}}}));
+ s.auth.currentUser=null;
+ const authClient={currentUser:{uid:'new-account',getIdToken:async()=> 'isolated-token'}};
+ assert.deepEqual(await s.apiRequest('profile',{fullName:'Demo'},{authClient,expectedUid:'new-account'}),{saved:true});
+ assert.equal(s.auth.currentUser,null);
+ assert.equal(s.calls[0].options.headers,undefined);
+ assert.equal(s.calls[1].options.headers.Authorization,'Bearer isolated-token');
+});
+
+test('an isolated account mismatch is rejected before any backend request',async()=>{
+ const s=setup(async()=>assert.fail('A mismatched isolated user must not contact the backend.'));
+ const authClient={currentUser:{uid:'different-account',getIdToken:async()=>assert.fail('No token should be requested.')}};
+ await assert.rejects(()=>s.apiRequest('profile',{}, {authClient,expectedUid:'new-account'}),/account changed/);
+ assert.equal(s.calls.length,0);
+});
+
+test('an isolated client never falls back to the signed-in app user',async()=>{
+ const s=setup(async()=>assert.fail('An empty isolated client must not use the main account.'));
+ await assert.rejects(()=>s.apiRequest('profile',{}, {authClient:{currentUser:null}}),/Please sign in again/);
+ assert.equal(s.calls.length,0);
+ assert.equal(s.auth.currentUser.uid,'u');
+});
+
+test('an isolated account change during backend wake prevents profile creation',async()=>{
+ const authClient={currentUser:{uid:'new-account',getIdToken:async()=>assert.fail('No token should be requested after the account changes.')}};
+ const s=setup(async()=>{authClient.currentUser={uid:'different-account'};return {ok:true,json:async()=>({ok:true})};});
+ await assert.rejects(()=>s.apiRequest('profile',{}, {authClient,expectedUid:'new-account'}),/account changed/);
+ assert.equal(s.calls.length,1);
+ assert.ok(s.calls[0].url.endsWith('/health'));
+ assert.equal(s.auth.currentUser.uid,'u');
+});
+
+test('an isolated account change during token retrieval prevents sending its old token',async()=>{
+ const s=setup(async()=>({ok:true,json:async()=>({ok:true})}));
+ const authClient={currentUser:{uid:'new-account',getIdToken:async()=>{authClient.currentUser=null;return 'old-isolated-token';}}};
+ await assert.rejects(()=>s.apiRequest('profile',{}, {authClient,expectedUid:'new-account'}),/account changed/);
+ assert.equal(s.calls.length,1);
+ assert.ok(s.calls[0].url.endsWith('/health'));
+ assert.equal(s.auth.currentUser.uid,'u');
+});

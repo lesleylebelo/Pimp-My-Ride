@@ -54,7 +54,7 @@ export const shopTabs = [
   { label: 'My Shop', icon: 'profile' },
 ];
 
-export function LandingShell({ title, tabs, feature, showFeature, onClose, children, admin = false, activeTab, onTabPress, onScroll, onLayout, onContentSizeChange }) {
+export function LandingShell({ title, tabs, feature, showFeature, onClose, children, admin = false, activeTab, onTabPress, onScroll, onLayout, onContentSizeChange, floatingAction }) {
   const [loaded, fontError] = useFonts({ Inter_400Regular, Inter_500Medium });
   const { logout, working, offline, cachedAt } = useAuth();
   const [signOutError, setSignOutError] = useState('');
@@ -90,6 +90,7 @@ export function LandingShell({ title, tabs, feature, showFeature, onClose, child
               <LandingText weight="medium" style={[ui.navLabel, (activeTab ? tab.label===activeTab : index===0) && ui.green]}>{tab.label}</LandingText>
             </Pressable>)}
           </View>}
+          {floatingAction}
         </View>
         <Modal visible={!!feature} transparent animationType="fade" onRequestClose={onClose}>
           <View style={ui.modalBackdrop}>

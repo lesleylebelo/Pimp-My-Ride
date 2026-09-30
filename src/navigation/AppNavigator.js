@@ -40,7 +40,7 @@ export default function AppNavigation() {
       <NavigationContainer>
         <Stack.Navigator
           key={authenticatedUser ? `${authenticatedUser.uid}:${authenticatedRoute}` : "guest"}
-          initialRouteName={authenticatedUser ? authenticatedRoute : "Splash"}
+          initialRouteName={authenticatedUser ? authenticatedRoute : "SignIn"}
           screenOptions={{ headerShown: false }}
         >
           {authenticatedUser ? <Stack.Screen name={authenticatedRoute} component={authenticatedScreens[authenticatedRoute]}/> : <>
