@@ -7,7 +7,8 @@ const {createDocuments}=require('./documents.cjs');
 const {createPresence}=require('./presence.cjs');
 const {createMarketplace}=require('./marketplace.cjs');
 const {createPhotos}=require('./photos.cjs');
-function createServices({db,auth,storage,photoStorage}){
+const {createPosts}=require('./posts.cjs');
+function createServices({db,auth,storage,photoStorage,postStorage=photoStorage}){
 const reviews=createReviews({db,auth,storage});
 const stamp=()=>FieldValue.serverTimestamp();
 const audit=(actor,action,target,details={})=>({actor,action,target,details,createdAt:stamp()});
@@ -26,6 +27,12 @@ function serialize(value){if(value instanceof Timestamp)return value.toMillis();
 function rows(snapshot){return snapshot.docs.map(d=>({id:d.id,...serialize(d.data())}));}
 async function adminApi(request){
  const a=await actor(request,true),input=request.data||{},op=input.op;
+ if(op==='posts'){
+  let query=db.collection('posts').orderBy('createdAt','desc').orderBy(FieldPath.documentId(),'desc');
+  if(input.cursor){const cursor=await db.doc(`posts/${D.id(input.cursor)}`).get();if(!cursor.exists)D.fail('Post list changed. Refresh the list.','failed-precondition');query=query.startAfter(cursor);}
+  const snapshot=await query.limit(21).get();
+  return {items:snapshot.docs.slice(0,20).map(doc=>({id:doc.id,...serialize(doc.data())})),cursor:snapshot.size>20?snapshot.docs[19].id:null};
+ }
  if(op==='dashboard'){
   const counts=await Promise.all([db.collection('users'),db.collection('users').where('role','==','shop').where('verificationStatus','==','pending'),db.collection('users').where('accountStatus','==','suspended'),db.collection('serviceCategories').where('archived','==',false)].map(q=>q.count().get()));
   return {accounts:counts[0].data().count,pending:counts[1].data().count,suspended:counts[2].data().count,categories:counts[3].data().count};
@@ -62,6 +69,15 @@ async function adminApi(request){
  recent(request);
  if(op==='reviewRecover')return reviews.recover({actor:a.uid,operationId:input.operationId,reason:input.reason});
  const receipt=mutation(db,a.uid,op,input);
+ if(op==='postRemove'){
+  const postId=D.id(input.id),reason=D.text(input.reason,'Reason',500),ref=db.doc(`posts/${postId}`);
+  return receipt.atomic(async tx=>{
+   const post=(await tx.get(ref)).data();if(!post||post.status!=='published')D.fail('Published post not found.','not-found');
+   tx.update(ref,{status:'removed',moderationReason:reason,updatedAt:stamp()});
+   tx.create(db.collection('auditLogs').doc(),audit(a.uid,'post.remove',postId,{reason}));
+   return {id:postId};
+  });
+ }
  if(op==='categorySave'||op==='categoryArchive'){
   const ref=input.id?db.doc(`serviceCategories/${D.id(input.id)}`):db.collection('serviceCategories').doc();
   const changes=op==='categorySave'?D.category(input):{archived:input.archived===true};
@@ -153,6 +169,7 @@ async function completeProfile(request){
 const {listDocuments,checkUpload,uploadDocument}=createDocuments({db,storage,actor});
 const marketplace=createMarketplace({db,auth,actor});
 const {photosApi,checkPhotoUpload,uploadPhoto}=createPhotos({db,auth,storage:photoStorage,actor});
-return {adminApi,sessionEvent,completeProfile,listDocuments,checkUpload,uploadDocument,marketplace,photosApi,checkPhotoUpload,uploadPhoto};
+const {postsApi,uploadPostImage}=createPosts({db,auth,actor,storage:postStorage});
+return {adminApi,sessionEvent,completeProfile,listDocuments,checkUpload,uploadDocument,marketplace,photosApi,checkPhotoUpload,uploadPhoto,postsApi,uploadPostImage};
 }
 module.exports={createServices};

@@ -94,8 +94,11 @@ export default function SignUpScreen({ navigation, route }) {
       navigation.replace('VerifyEmail',{email:form.email.trim(),emailSent});
     };
     try {
-      await run(()=>register(form,role));
-      showVerification(true);
+      const result = await run(()=>register(form,role));
+      if (result?.emailVerified) {
+        setForm(previous=>({...previous,password:'',confirmPassword:''}));
+        navigation.reset({index:0,routes:[{name:'SignIn',params:{email:form.email.trim()}}]});
+      } else showVerification(true);
     }
     catch(error) {
       const message=authError(error);setSubmitError(message);

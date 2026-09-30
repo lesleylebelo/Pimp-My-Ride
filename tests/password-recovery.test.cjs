@@ -112,6 +112,7 @@ test('guest navigation exposes email recovery without custom password-reset rout
   'react-native-safe-area-context':{SafeAreaProvider:'SafeAreaProvider'},'expo-status-bar':{StatusBar:'StatusBar'},
  }).default;
  let tree;await act(async()=>{tree=Renderer.create(React.createElement(Navigator));});
+ assert.equal(tree.root.findByType('StackNavigator').props.initialRouteName,'SignIn');
  assert.deepEqual(tree.root.findAllByType('StackScreen').map(n=>n.props.name),['Legal','Splash','SignIn','SignUp','ForgotPassword','VerifyEmail']);
  await act(async()=>tree.unmount());
 });

@@ -3,10 +3,10 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),babel=require('@babel/core'),React=require('react'),Renderer=require('react-test-renderer');
 global.IS_REACT_ACT_ENVIRONMENT=true;
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
-async function setup({role='owner',verified=true,admin=false,cached=null,initialOffline=false,signOutError=null,cacheClearError=null,refreshedVerified=verified}={}){
+async function setup({role='owner',verified=true,admin=false,cached=null,initialOffline=false,signOutError=null,cacheClearError=null,refreshedVerified=verified,signedOut=false}={}){
  let authListener,networkListener,appListener,profileListener,poll,context;
  const user={uid:'u1',email:'demo@example.com',emailVerified:verified};
- const auth={currentUser:user};let profile={role,verificationStatus:role==='shop'?'pending':undefined};
+ const auth={currentUser:signedOut?null:user};let profile={role,verificationStatus:role==='shop'?'pending':undefined};
  let claims={admin};let reloadError=null;let nextVerified=refreshedVerified;const cleared=[],states=[];let stopped=0;
  const calls={reload:0,tokens:0,profile:0,cacheRead:0,cacheSave:0,signOut:0};
  const app={currentState:'active',addEventListener:(_,fn)=>{appListener=fn;return {remove(){stopped++;}};}};
@@ -71,6 +71,21 @@ test('reload that discovers an unverified email signs out before profile or toke
 test('a later verified sign-in can enter after the old unverified session has been cleared',async()=>{
  const s=await setup({verified:false});s.verify();await s.act(()=>s.restore({...s.user,emailVerified:true}));
  assert.equal(s.state.user.emailVerified,true);assert.equal(s.state.profile.role,'owner');assert.equal(s.state.error,'');await s.close();
+});
+test('account operations never publish a transient unverified Firebase user to app state',async()=>{
+ for(const signOutError of [null,Error('Synthetic storage failure')]){
+  const s=await setup({signedOut:true,verified:false,signOutError});
+  await s.act(()=>s.state.run(async()=>{
+   s.restore(s.user);await flush();
+   assert.equal(s.state.user,null);assert.equal(s.state.profile,null);
+   s.resume();await flush();
+   assert.equal(s.calls.reload,0);assert.equal(s.calls.tokens,0);assert.equal(s.calls.profile,0);
+  }));
+  assert.equal(s.state.user,null);assert.equal(s.state.profile,null);assert.equal(s.state.working,false);
+  assert.equal(s.calls.reload,0);assert.equal(s.calls.tokens,0);assert.equal(s.calls.profile,0);assert.equal(s.calls.cacheRead,0);
+  assert.ok(s.states.every(value=>value.user===null&&value.profile===null));
+  assert.match(s.state.error,/verify your email before signing in/i);await s.close();
+ }
 });
 test('admin requires fresh claims and loses landing access offline',async()=>{const denied=await setup({role:'admin'});assert.equal(denied.state.profile,null);assert.match(denied.state.error,/authorization/);await denied.close();const s=await setup({role:'admin',admin:true});assert.equal(s.state.profile.role,'admin');await s.act(s.offline);assert.equal(s.state.profile,null);assert.equal(s.state.offline,true);await s.close();});
 test('customer restores cached offline landing and clears it on logout',async()=>{const s=await setup({cached:{profile:{role:'owner'},savedAt:Date.now()}});await s.act(s.offline);assert.equal(s.state.profile.role,'owner');assert.ok(s.state.cachedAt);await s.act(()=>s.state.logout());assert.equal(s.state.user,null);assert.ok(s.cleared.includes('u1'));await s.close();});

@@ -145,3 +145,22 @@ test('an existing app session is never overwritten by another account operation'
  for(const action of [()=>s.login('demo@example.com','password'),()=>s.register(ownerForm,'owner'),()=>s.resendVerification('demo@example.com','password')])await assert.rejects(action,/Sign out before/);
  assert.equal(s.auth.currentUser,existing);assert.equal(s.sessions.length,0);assert.deepEqual(s.calls,[]);
 });
+
+test('recovering a verified account without a profile saves the profile and returns to sign-in without another verification email',async()=>{
+ const s=setup(null,{}, {createError:Object.assign(new Error('exists'),{code:'auth/email-already-in-use'}),existingVerified:true});
+ assert.deepEqual(await s.register(ownerForm,'owner'),{emailVerified:true});
+ const data=s.calls.find(c=>c[0]==='profile')[1];
+ assert.equal(data.fullName,ownerForm.fullName);assert.equal(data.phone,ownerForm.phone);assert.equal(data.role,'owner');assert.equal(data.agreed,true);
+ assert.equal(s.auth.currentUser,null);assert.equal(s.sessions[0].auth.currentUser,null);
+ assert.ok(!s.calls.some(c=>['verify','promote'].includes(c[0])));
+ assert.deepEqual(s.calls.map(c=>c[0]),['create','login','read-profile','profile','logout']);
+});
+
+test('an app account appearing during credential validation is not overwritten',async()=>{
+ const entered=deferred(),finish=deferred(),s=setup({role:'owner'},{},{onReadProfile:async()=>{entered.resolve();await finish.promise;}});
+ const login=s.login('demo@example.com','password');await entered.promise;
+ const other={uid:'another-verified-account',emailVerified:true};s.auth.currentUser=other;
+ finish.resolve();await assert.rejects(()=>login,/Your account changed/);
+ assert.equal(s.auth.currentUser,other);assert.equal(s.sessions[0].auth.currentUser,null);
+ assert.ok(!s.calls.some(c=>c[0]==='promote'));
+});

@@ -7,7 +7,7 @@ const act = Renderer.act;
 const request = {id: 'request-1', title: 'Restore paint', description: 'Repaint the bonnet', categoryName: 'Paint', city: 'Pretoria', vehicle: {make: 'Ford', model: 'Fiesta', year: 2015, colour: 'Blue'}, status: 'open', visibility: 'open', budgetMinCents: 10000, budgetMaxCents: 50000};
 const quote = {id: 'quote-1', serviceRequestId: request.id, requestTitle: request.title, shopName: 'Test shop', scope: 'Prepare and repaint', items: [{description: 'Labour', amountCents: 10000}], totalCents: 10000, completionDays: 7, validUntil: Date.now() + 86400000, status: 'submitted'};
 function setup(overrides = {}) {
-  const state = {auth: {user: {uid: 'shop-1'}, profile: {role: 'shop'}, offline: false}, data: {request, quotes: []}, busy: false, error: '', calls: [], reads: [], navigations: [], api: async () => ({id: 'quote-1'}), refresh: async () => ({}), ...overrides};
+  const state = {auth: {user: {uid: 'shop-1'}, profile: {role: 'shop'}, offline: false}, data: {request, quotes: []}, posts: [], busy: false, error: '', calls: [], reads: [], navigations: [], api: async () => ({id: 'quote-1'}), refresh: async () => ({}), ...overrides};
   const PrimaryButton = loadUI('src/shared/components/PrimaryButton.js').default;
   const landing = {LandingText: 'Text', LandingShell: ({children, onScroll, onLayout, onContentSizeChange}) => React.createElement('View', {onScroll, onLayout, onContentSizeChange}, children), LandingButton: PrimaryButton, ownerTabs: [], shopTabs: [], ui: {}, useLandingFeedback: () => ({showFeature() {}})};
   const marketplace = loadUI('src/features/marketplace/components/MarketplaceUI.js', {
@@ -17,10 +17,13 @@ function setup(overrides = {}) {
   const screens = loadUI('src/features/marketplace/screens/ShopMarketplaceScreens.js', {
     '../../auth/context/AuthContext': {useAuth: () => state.auth},
     '../components/PhotoGallery': props => React.createElement('PhotoGallery', props),
+    '../components/PostCard': {PostCard: props => React.createElement('PostCard', props, React.createElement('Text', null, props.post.title))},
+    '../hooks/usePostsFeed': {usePostsFeed: () => ({items: state.posts, busy: false, error: '', refresh: async () => {}, loadNext() {}})},
     '../components/MarketplaceUI': marketplace,
     '../../../shared/components/landing/LandingUI': landing,
     '../../../shared/components/landing/FeedControls': {
       FeedSearchInput: props => React.createElement('TextInput', props),
+      FeedSourceSelector: props => React.createElement('FeedSourceSelector', props),
       FeedServicePill: ({title, selected, onPress, disabled}) => React.createElement('Pressable', {accessibilityLabel: title, accessibilityState: {selected}, onPress, disabled}, React.createElement('Text', null, title)),
     },
     '../hooks/useMarketData': {useMarketData: (op, input) => { state.reads.push({op, input}); const data = op === 'requests' && state.readRequests ? state.readRequests(input) : state.data; return {data, busy: state.busy, error: state.error, refresh: (...args) => state.refresh(...args)}; }},
@@ -40,6 +43,31 @@ async function validQuote(tree) {
   await change(tree, 'Item 1 description', 'Materials and labour');
   await change(tree, 'Item 1 amount (R)', '123.45');
 }
+
+test('merged shop feed sorts requests and showcases newest first and preserves navigation', async () => {
+  const older = {...request, id:'older', title:'Older request', createdAt:1700000000000};
+  const newer = {...request, id:'newer', title:'Newer request', createdAt:'2023-11-16T02:00:00.000Z'};
+  const post = {id:'showcase', authorId:'other-shop', title:'Middle showcase', createdAt:{toMillis:()=>1700050000000}};
+  const {state, screens, navigation} = setup({data:{items:[older,newer],cursor:null},posts:[post]});
+  const tree = await mount(screens.ShopJobsScreen,{navigation});
+  const titles = tree.root.findAllByType('Text').map(node=>node.props.children).filter(value=>[older.title,newer.title,post.title].includes(value));
+  assert.deepEqual(titles,[newer.title,post.title,older.title]);
+  await act(async()=>action(tree,'View request: Newer request').props.onPress());
+  await act(async()=>tree.root.findByType('PostCard').props.onOpen());
+  assert.deepEqual(state.navigations,[['ShopRequest',{id:newer.id}],['PostDetail',{id:post.id}]]);
+  await act(async()=>tree.unmount());
+});
+
+test('merged shop feed keeps missing and invalid dates behind dated items without crashing', async () => {
+  const undated = {...request,id:'undated',title:'Undated request'};
+  const invalid = {...request,id:'invalid',title:'Invalid date request',createdAt:'not-a-date'};
+  const post = {id:'showcase',authorId:'other-shop',title:'Dated showcase',createdAt:1700050000000};
+  const {screens,navigation} = setup({data:{items:[undated,invalid],cursor:null},posts:[post]});
+  const tree = await mount(screens.ShopJobsScreen,{navigation});
+  const titles = tree.root.findAllByType('Text').map(node=>node.props.children).filter(value=>[undated.title,invalid.title,post.title].includes(value));
+  assert.deepEqual(titles,[post.title,undated.title,invalid.title]);
+  await act(async()=>tree.unmount());
+});
 
 test('shop feeds send the correct audience and navigate with a request identifier', async () => {
   for (const [screen, feed] of [['ShopJobsScreen', 'open'], ['ShopRequestsScreen', 'direct']]) {

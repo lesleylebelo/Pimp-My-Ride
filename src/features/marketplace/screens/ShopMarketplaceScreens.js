@@ -2,7 +2,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {Modal, Pressable, ScrollView, StyleSheet, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
-import {FeedSearchInput, FeedServicePill} from '../../../shared/components/landing/FeedControls';
+import {FeedSearchInput, FeedServicePill, FeedSourceSelector} from '../../../shared/components/landing/FeedControls';
 import {useAuth} from '../../auth/context/AuthContext';
 import ConfirmationButton from '../../../shared/components/ConfirmationButton';
 import colors from '../../../shared/theme/colors';
@@ -11,6 +11,8 @@ import {useMarketData} from '../hooks/useMarketData';
 import {Page, Card, Field, Button, Notice, useInfiniteCursor, formatMoney, QuoteCard} from '../components/MarketplaceUI';
 import {parseMoney, quoteErrors} from '../utils/validation';
 import PhotoGallery from '../components/PhotoGallery';
+import {usePostsFeed} from '../hooks/usePostsFeed';
+import {PostCard,postTime} from '../components/PostCard';
 
 const offlineMessage = 'Connect to the internet to view requests and manage quotations.';
 const errorMessage = error => error?.message || 'Unable to complete this action. Please retry.';
@@ -62,10 +64,13 @@ function RequestsFeed({navigation, feed}) {
   const [minimumBudget, setMinimumBudget] = useState('');
   const [maximumBudget, setMaximumBudget] = useState('');
   const [notQuoted, setNotQuoted] = useState(false);
+  const [source,setSource]=useState('all');
   const isJobsFeed = feed === 'open';
   const {data, busy, error, refresh} = useMarketData('requests', {feed, cursor});
   const requestFeed=useInfiniteCursor(data,busy,setCursor);
   const feedRequests=requestFeed.items;
+  const posts=usePostsFeed({view:'feed',source:'shops'});
+  const {user,profile}=useAuth();
   const categories = ['Tuning', 'Performance', 'Other', 'Exhaust', 'Lighting', 'Body Kit', 'Wheels', 'Interior', 'Wrap & Paint'];
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim().toLowerCase()), 180);
@@ -74,6 +79,15 @@ function RequestsFeed({navigation, feed}) {
   const minimumCents = minimumBudget.trim() ? parseMoney(minimumBudget) : null;
   const maximumCents = maximumBudget.trim() ? parseMoney(maximumBudget) : null;
   const matchingRequests = filterJobRequests(feedRequests, {query: debouncedSearch, category, location, minimumCents, maximumCents, notQuoted});
+  const matchingPosts=posts.items.filter(post=>{
+   const haystack=[post.title,post.description,post.vehicle,post.category,post.city,post.province,post.authorName].join(' ').toLowerCase();
+   return post.authorId!==user?.uid&&(source==='all'||source==='shops')&&(!debouncedSearch||haystack.includes(debouncedSearch))&&
+    (category==='All'||post.category?.toLowerCase()===category.toLowerCase())&&(!location||post.city?.toLowerCase()===location.toLowerCase());
+  });
+  const feedItems=[
+   ...(source==='all'||source==='customers'?matchingRequests.map(request=>({kind:'request',id:`request:${request.id}`,createdAt:request.createdAt,value:request})):[]),
+   ...matchingPosts.map(post=>({kind:'post',id:`post:${post.id}`,createdAt:post.createdAt,value:post})),
+  ].sort((left,right)=>timestamp(right.createdAt)-timestamp(left.createdAt));
   const locations = [...new Set(feedRequests.map(request => request.city).filter(Boolean))].sort();
   const hasFilters = !!search || category !== 'All' || !!location || !!minimumBudget || !!maximumBudget || notQuoted;
   const clearFilters = () => {
@@ -84,10 +98,13 @@ function RequestsFeed({navigation, feed}) {
     setMinimumBudget('');
     setMaximumBudget('');
     setNotQuoted(false);
+    setSource('all');
     setFiltersOpen(false);
   };
   const disabled = busy || offline;
   const retry = () => {void refresh().catch(() => {});};
+  const onScroll=event=>{requestFeed.onScroll(event);const {contentOffset,contentSize,layoutMeasurement}=event.nativeEvent;if(contentSize.height-contentOffset.y-layoutMeasurement.height<260)posts.loadNext();};
+  const onContentSizeChange=(width,height)=>{requestFeed.onContentSizeChange(width,height);if(height<650)posts.loadNext();};
 
   if (!isJobsFeed) return <Page title="Direct requests" navigation={navigation} onScroll={requestFeed.onScroll} onLayout={requestFeed.onLayout} onContentSizeChange={requestFeed.onContentSizeChange}>
     <Text style={styles.muted}>Customers have invited your shop to quote on these requests.</Text>
@@ -101,8 +118,10 @@ function RequestsFeed({navigation, feed}) {
     {busy && !!feedRequests.length && <Text style={styles.loadMore}>Loading more requests...</Text>}
   </Page>;
 
-  return <Page title="Find Jobs" navigation={navigation} onScroll={requestFeed.onScroll} onLayout={requestFeed.onLayout} onContentSizeChange={requestFeed.onContentSizeChange}>
+  return <Page title="Find Jobs" navigation={navigation} onScroll={onScroll} onLayout={requestFeed.onLayout} onContentSizeChange={onContentSizeChange}
+   floatingAction={<Pressable accessibilityRole="button" accessibilityLabel="New showcase" onPress={()=>navigation.navigate('PostForm',{type:'showcase'})} style={styles.floating}><Ionicons name="add" size={28} color={colors.white}/></Pressable>}>
     <FeedSearchInput accessibilityLabel="Search requests, vehicles or services" placeholder="Search requests, vehicles or services" value={search} onChangeText={setSearch}/>
+    <FeedSourceSelector options={[{label:'All',value:'all'},{label:'Customers',value:'customers'},{label:'Shops',value:'shops'}]} storageKey="feed-source:shop" value={source} onChange={setSource}/>
     <Text style={styles.feedIntro}>Browse open customer requests for work your shop can complete.</Text>
     <Text style={styles.filterHeading}>Browse by service</Text>
     <View style={styles.categories}>
@@ -110,14 +129,20 @@ function RequestsFeed({navigation, feed}) {
       {categories.map(item => <FeedServicePill key={item} title={item} selected={category === item} onPress={() => setCategory(item)}/>)}
       <FeedServicePill title="More filters" selected={false} onPress={() => setFiltersOpen(true)}/>
     </View>
-    <Notice busy={busy && !feedRequests.length} error={offline ? offlineMessage : error}/>
+    <Notice busy={(busy&&!feedRequests.length||posts.busy&&!posts.items.length)} error={offline ? offlineMessage : error||posts.error}/>
     {!!error && <Button title="Retry loading requests" outline onPress={retry}/>}
-    {!busy && !error && !matchingRequests.length && <View style={styles.emptyState}>
-      <Text style={styles.emptyTitle}>{feedRequests.length ? 'No requests match your search' : 'No open requests are available'}</Text>
+    {!busy && !posts.busy && !error && !posts.error && !feedItems.length && <View style={styles.emptyState}>
+      <Text style={styles.emptyTitle}>{feedRequests.length||posts.items.length ? 'No posts match your search' : 'No requests match your search'}</Text>
       {hasFilters && <Button title="Clear filters" outline onPress={clearFilters}/>}
     </View>}
     <View style={styles.requestCards}>
-    {matchingRequests.map(request => <Card key={request.id} style={styles.jobCard}>
+    {feedItems.map(item=>item.kind==='post'?<View key={item.id} style={styles.feedCard}>
+      <Text style={styles.feedLabel}>Showcase</Text>
+      <PostCard post={item.value} onOpen={()=>navigation.navigate('PostDetail',{id:item.value.id})}/>
+    </View>:<View key={item.id} style={styles.feedCard}>
+    <Text style={styles.feedLabel}>Service request</Text>
+    <Card style={styles.jobCard}>
+      {(()=>{const request=item.value;return <>
       <View style={styles.jobAuthor}>
         <View style={styles.avatar}><Text style={styles.avatarText}>{initials(request.customerName)}</Text></View>
         <View style={styles.jobAuthorCopy}>
@@ -140,9 +165,11 @@ function RequestsFeed({navigation, feed}) {
         </Pressable>
         <Text style={styles.quoteCount}>{request.quotationCount ? `${request.quotationCount} ${request.quotationCount === 1 ? 'quote' : 'quotes'}` : 'No quotes yet'}</Text>
       </View>
-    </Card>)}
+      </>;})()}
+    </Card>
+    </View>)}
     </View>
-    {busy && !!feedRequests.length && <Text accessibilityRole="status" style={styles.loadMore}>Loading more requests...</Text>}
+    {(busy||posts.busy)&&!!(feedRequests.length||posts.items.length)&&<Text accessibilityRole="status" style={styles.loadMore}>Loading more posts...</Text>}
     <Modal visible={filtersOpen} transparent animationType="fade" onRequestClose={() => setFiltersOpen(false)}>
       <View style={styles.modalBackdrop}>
         <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent} keyboardShouldPersistTaps="handled">
@@ -169,6 +196,13 @@ function RequestsFeed({navigation, feed}) {
 
 export function ShopJobsScreen(props) { return <RequestsFeed {...props} feed="open"/>; }
 export function ShopRequestsScreen(props) { return <RequestsFeed {...props} feed="direct"/>; }
+
+function timestamp(value) {
+  if (value == null) return 0;
+  const milliseconds = typeof value?.toMillis === 'function' ? value.toMillis()
+    : typeof value === 'number' ? value : new Date(value).getTime();
+  return Number.isFinite(milliseconds) ? milliseconds : 0;
+}
 
 function postedLabel(value) {
   const timestamp = typeof value?.toMillis === 'function' ? value.toMillis() : new Date(value).getTime();
