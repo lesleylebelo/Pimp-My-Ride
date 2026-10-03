@@ -132,7 +132,7 @@ function RequestsFeed({navigation, feed}) {
     <Notice busy={(busy&&!feedRequests.length||posts.busy&&!posts.items.length)} error={offline ? offlineMessage : error||posts.error}/>
     {!!error && <Button title="Retry loading requests" outline onPress={retry}/>}
     {!busy && !posts.busy && !error && !posts.error && !feedItems.length && <View style={styles.emptyState}>
-      <Text style={styles.emptyTitle}>{feedRequests.length||posts.items.length ? 'No posts match your search' : 'No requests match your search'}</Text>
+      <Text style={styles.emptyTitle}>{hasFilters ? 'No requests match your search' : 'No open requests are available'}</Text>
       {hasFilters && <Button title="Clear filters" outline onPress={clearFilters}/>}
     </View>}
     <View style={styles.requestCards}>
