@@ -3,11 +3,12 @@ const http=require('node:http');
 const {createApp}=require('../app.cjs');const {ApiError}=require('../errors.cjs');
 function setup(){
  const calls=[];const auth={verifyIdToken:async(token,revoked)=>{calls.push(['verify',token,revoked]);if(token!=='good')throw Error('invalid');return {uid:'real-user',email_verified:true};}};
- const services={adminApi:async r=>{calls.push(['admin',r]);return {ok:true};},sessionEvent:async()=>({ok:true}),completeProfile:async()=>({ok:true}),checkUpload:async()=>{},uploadDocument:async r=>{calls.push(['upload',r]);return {ok:true};}};
+ const services={adminApi:async r=>{calls.push(['admin',r]);return {ok:true};},postsList:async()=>({items:[],cursor:null}),postDetail:async()=>({post:{}}),sessionEvent:async()=>({ok:true}),completeProfile:async()=>({ok:true}),checkUpload:async()=>{},uploadDocument:async r=>{calls.push(['upload',r]);return {ok:true};}};
  return {app:createApp({auth,services}),calls,services};
 }
 test('health is public; all API routes require a valid, nonrevoked Firebase token',async()=>{
  const s=setup();await request(s.app).get('/health').expect(200);
+ await request(s.app).get('/api/posts').set('Authorization','Bearer good').expect(200);
  await request(s.app).post('/api/admin').send({op:'dashboard'}).expect(401);
  await request(s.app).post('/api/admin').set('Authorization','Bearer bad').send({}).expect(401);
  await request(s.app).post('/api/admin').set('Authorization','Bearer good').send({op:'dashboard',auth:{uid:'forged'}}).expect(200);
@@ -17,6 +18,22 @@ test('malformed JSON and unexpected errors do not expose credentials',async()=>{
  const s=setup();await request(s.app).post('/api/admin').set('Authorization','Bearer good').set('Content-Type','application/json').send('{').expect(400);
  s.services.adminApi=async()=>{throw Error('private secret');};const other=createApp({auth:{verifyIdToken:async()=>({uid:'u'})},services:s.services});
  const result=await request(other).post('/api/admin').set('Authorization','Bearer good').send({}).expect(500);assert.ok(!result.text.includes('private secret'));
+});
+test('unexpected posts failures log the original message and stack but return only the generic error',async()=>{
+ const failure=Object.assign(Error('Firestore unavailable'),{code:9});
+ const s=setup(),app=createApp({auth:{verifyIdToken:async()=>({uid:'real-user'})},services:{...s.services,postsApi:async()=>{throw failure;}}});
+ const errors=[],original=console.error;console.error=(...args)=>errors.push(args);
+ let response;
+ try{response=await request(app).post('/api/posts').set('Authorization','Bearer good').send({op:'feed',source:'all'});}
+ finally{console.error=original;}
+ assert.equal(response.status,500);
+ assert.deepEqual(response.body,{error:{code:'internal',message:'The server could not complete this action. Refresh before retrying.'}});
+ assert.equal(errors.length,1);
+ const log=errors[0].join(' ');
+ assert.match(log,/error\.code=9/);
+ assert.match(log,/error\.message=Firestore unavailable/);
+ assert.match(log,/error\.stack=Error: Firestore unavailable/);
+ assert.match(log,/http\.test\.cjs/);
 });
 test('only a trusted API error can mark a definitively finished review for a new explicit request',async()=>{
  const s=setup();const error=Object.assign(new ApiError('failed-precondition','Review finished.'),{retryWithNewRequest:true});

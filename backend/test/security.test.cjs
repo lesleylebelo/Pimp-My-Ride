@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),request=require('supertest');
-const {createApp}=require('../app.cjs'),{corsOrigins}=require('../config.cjs'),{createServices}=require('../services.cjs');
+const {createApp}=require('../app.cjs'),{corsOrigins,storageConfig,validateEmulatorHost}=require('../config.cjs'),{createServices}=require('../services.cjs');
 const {memoryDb}=require('./helpers/memory-db.cjs');
 test('CORS supports explicit origins, preflight without authentication, errors and native requests',async()=>{
  let verifies=0;const app=createApp({allowedOrigins:corsOrigins('https://demo.example,http://localhost:8082'),auth:{verifyIdToken:async()=>{verifies++;return {uid:'u'};}},services:{adminApi:async()=>({ok:true}),sessionEvent:async()=>({}),completeProfile:async()=>({})}});
@@ -8,6 +8,24 @@ test('CORS supports explicit origins, preflight without authentication, errors a
  const error=await request(app).post('/api/admin').set('Origin','https://demo.example').send({});assert.equal(error.status,401);assert.equal(error.headers['access-control-allow-origin'],'https://demo.example');
  await request(app).post('/api/admin').set('Authorization','Bearer native').send({}).expect(200);
  assert.throws(()=>corsOrigins('*'));assert.throws(()=>corsOrigins('https://demo.example/path'));assert.deepEqual(corsOrigins(undefined,true),[]);
+});
+test('storage credentials and endpoint are required and validated at startup',()=>{
+ assert.throws(()=>storageConfig({}),/SUPABASE_URL/);
+ assert.throws(()=>storageConfig({SUPABASE_URL:'https://storage.example'}),/SUPABASE_SECRET_KEY/);
+ assert.throws(()=>storageConfig({SUPABASE_URL:'not a URL',SUPABASE_SECRET_KEY:'secret'}),/valid HTTPS URL/);
+ assert.throws(()=>storageConfig({SUPABASE_URL:'http://storage.example',SUPABASE_SECRET_KEY:'secret'}),/HTTPS endpoint/);
+ assert.throws(()=>storageConfig({SUPABASE_URL:'https://user:pass@storage.example',SUPABASE_SECRET_KEY:'secret'}),/HTTPS endpoint/);
+ assert.throws(()=>storageConfig({SUPABASE_URL:'https://storage.example',SUPABASE_SECRET_KEY:'secret',SUPABASE_POSTS_BUCKET:'invalid/name'}),/Invalid postsBucket/);
+ assert.deepEqual(storageConfig({SUPABASE_URL:'https://storage.example/',SUPABASE_SECRET_KEY:'secret'}),{url:'https://storage.example',key:'secret',bucket:'verification',photoBucket:'marketplace-photos',postsBucket:'public-posts'});
+ assert.doesNotThrow(()=>storageConfig({NODE_ENV:'development',SUPABASE_URL:'http://localhost:54321',SUPABASE_SECRET_KEY:'secret'}));
+ assert.throws(()=>storageConfig({NODE_ENV:'production',SUPABASE_URL:'http://localhost:54321',SUPABASE_SECRET_KEY:'secret'}),/HTTPS endpoint/);
+});
+test('optional Firebase emulator endpoints reject invalid host and port values',()=>{
+ assert.doesNotThrow(()=>validateEmulatorHost('FIRESTORE_EMULATOR_HOST','localhost:8080'));
+ assert.doesNotThrow(()=>validateEmulatorHost('FIREBASE_AUTH_EMULATOR_HOST','[::1]:9099'));
+ assert.doesNotThrow(()=>validateEmulatorHost('FIRESTORE_EMULATOR_HOST',undefined));
+ assert.throws(()=>validateEmulatorHost('FIRESTORE_EMULATOR_HOST','http://localhost:8080'),/host and port/);
+ assert.throws(()=>validateEmulatorHost('FIRESTORE_EMULATOR_HOST','localhost:65536'),/host and port/);
 });
 function fixture({role='admin',status='active',verified=true,claims=true,revoked=false}={}){
  const db=memoryDb({'users/u':{role,accountStatus:status,fullName:'Demo',verificationStatus:'pending'}});

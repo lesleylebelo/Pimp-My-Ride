@@ -5,15 +5,11 @@ const {loadUI} = require('./helpers/load-ui.cjs');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const {act} = Renderer;
 
-const shops = [
-  {id: 'shop-one', shopName: 'Powerpipes AutoART', city: 'Johannesburg', province: 'Gauteng', services: 'Body Kit, Paint', verified: true},
-  {id: 'shop-two', shopName: 'Cape Customs', city: 'Cape Town', province: 'Western Cape', services: 'Paint', verified: true},
-  {id: 'shop-three', shopName: 'Durban Tuning', city: 'Durban', province: 'KwaZulu-Natal', services: 'Tuning', verified: true},
+const posts = [
+  {id: 'post-one', authorName: 'Powerpipes AutoART', authorRole: 'shop', type: 'showcase', title: 'Body kit conversion', category: 'Body Kit', serviceCategory: 'Body Kit', city: 'Johannesburg', province: 'Gauteng', createdAt: Date.now()},
+  {id: 'post-two', authorName: 'Cape Customs', authorRole: 'shop', type: 'showcase', title: 'Custom wrap', category: 'Wrap & Paint', serviceCategory: 'Wrap & Paint', city: 'Cape Town', province: 'Western Cape', createdAt: Date.now()},
+  {id: 'post-three', authorName: 'Durban Tuning', authorRole: 'shop', type: 'showcase', title: 'Stage 2 tuning', category: 'Tuning', serviceCategory: 'Tuning', city: 'Durban', province: 'KwaZulu-Natal', createdAt: Date.now()},
 ];
-const categories = [{id: 'body-kit', name: 'Body Kit'}, {id: 'paint', name: 'Paint'}, {id: 'tuning', name: 'Tuning'}];
-const firstShopPage = {data: {items: shops.slice(0, 2), cursor: 'shop-page-2'}, busy: false, error: ''};
-const secondShopPage = {data: {items: shops.slice(2), cursor: null}, busy: false, error: ''};
-const categoryPage = {data: {items: categories, cursor: null}, busy: false, error: ''};
 
 function setup() {
   const PrimaryButton = ({title, children, ...props}) => React.createElement('Pressable', {accessibilityLabel: title, ...props}, children || React.createElement('Text', null, title));
@@ -25,21 +21,29 @@ function setup() {
     ui: {muted: {}, error: {}},
     useLandingFeedback: () => ({showFeature() {}, onClose() {}}),
   };
+  const feedCalls = [];
   const screens = loadUI('src/features/customer/screens/OwnerHomeScreen.js', {
     '../../../shared/components/landing/LandingUI': landing,
     '../../../shared/components/landing/FeedControls': {
       FeedSearchInput: props => React.createElement('TextInput', props),
       FeedServicePill: ({title, selected, onPress, disabled}) => React.createElement('Pressable', {accessibilityLabel: title, accessibilityState: {selected}, onPress, disabled}, React.createElement('Text', null, title)),
     },
-    '../../marketplace/components/MarketplaceUI': {ownerRoutes: {Discover: 'Discover'}},
-    '../../marketplace/hooks/useMarketData': {
-      useMarketData: (op, input = {}) => {
-        if (op === 'categories') return categoryPage;
-        return input.cursor === 'shop-page-2' ? secondShopPage : firstShopPage;
-      },
+    '../../auth/context/AuthContext': {useAuth: () => ({user: {uid: 'customer-one'}})},
+    '../../marketplace/hooks/usePostsFeed': {usePostsFeed: options => {
+      feedCalls.push(options);
+      const [items, setItems] = React.useState(posts.slice(0, 2));
+      return {items, busy: false, refreshing: false, error: '', refresh: async () => {}, loadNext: () => setItems(posts)};
+    }},
+    '../../marketplace/components/PostCard': {
+      PostCard: ({post, onOpen}) => React.createElement('View', null,
+        React.createElement('Text', null, post.authorName),
+        React.createElement('Text', null, post.title),
+        React.createElement('Pressable', {accessibilityLabel: `View ${post.title}`, onPress: onOpen}, React.createElement('Text', null, 'View')),
+      ),
     },
+    '../../marketplace/components/MarketplaceUI': {ownerRoutes: {Discover: 'Discover'}},
   });
-  return {screens, navigation: {navigate() {}}};
+  return {screens, feedCalls, navigation: {navigate(...args) { this.lastNavigation = args; }}};
 }
 
 const button = (tree, title) => tree.root.findAllByType('Pressable').find(node => node.props.accessibilityLabel === title);
@@ -48,67 +52,68 @@ const input = tree => tree.root.findAllByType('TextInput').find(node => node.pro
 const scrollContainer = tree => tree.root.findAllByType('View').find(node => node.props.onScroll);
 
 async function mount() {
-  const {screens, navigation} = setup();
+  const setupResult = setup();
   let tree;
-  await act(async () => { tree = Renderer.create(React.createElement(screens.default, {navigation})); });
-  return tree;
+  await act(async () => { tree = Renderer.create(React.createElement(setupResult.screens.default, {navigation: setupResult.navigation})); });
+  return {...setupResult, tree};
 }
 
-test('discover has one feed below search and service filters with consistent workshop cards', async () => {
-  const tree = await mount();
+test('Discover displays showcase posts and starts with the All service filter', async () => {
+  const {tree, feedCalls} = await mount();
   assert.ok(input(tree));
   assert.equal(input(tree).props.placeholder, 'Search workshops or services');
-  assert.match(text(tree), /Explore workshops and their services/);
   assert.match(text(tree), /Browse by service/);
   assert.match(text(tree), /Powerpipes AutoART/);
   assert.match(text(tree), /Cape Customs/);
-  assert.match(text(tree), /Verified workshop/);
-  assert.doesNotMatch(text(tree), /Create service request|Community builds|Fresh ideas from the scene|Workshop showcases|First|Page 1|Like community|comments/);
-  assert.equal(tree.root.findAllByType('Image').length, 0);
+  assert.equal(button(tree, 'All').props.accessibilityState.selected, true);
+  assert.equal(feedCalls.at(-1).service, 'All');
+  assert.equal(feedCalls.at(-1).q, '');
   await act(async () => tree.unmount());
 });
 
-test('View opens workshop details and each workshop can be saved independently', async () => {
-  const tree = await mount();
-  await act(async () => button(tree, 'View Powerpipes AutoART').props.onPress());
-  assert.match(text(tree), /Johannesburg/);
-  assert.match(text(tree), /Services/);
-  assert.match(text(tree), /Body Kit, Paint/);
-  await act(async () => button(tree, 'Close').props.onPress());
-
-  await act(async () => button(tree, 'Save Powerpipes AutoART').props.onPress());
-  await act(async () => button(tree, 'Save Cape Customs').props.onPress());
-  assert.equal(button(tree, 'Unsave Powerpipes AutoART').props.accessibilityState.selected, true);
-  assert.equal(button(tree, 'Unsave Cape Customs').props.accessibilityState.selected, true);
+test('Tapping a post navigates to its showcase detail screen', async () => {
+  const {tree, navigation} = await mount();
+  await act(async () => button(tree, 'View Body kit conversion').props.onPress());
+  assert.deepEqual(navigation.lastNavigation, ['PostDetail', {id: 'post-one'}]);
   await act(async () => tree.unmount());
 });
 
-test('search, service, and location filters apply to the same feed', async () => {
-  const tree = await mount();
+test('Search, service, and location filters narrow the same posts feed', async () => {
+  const {tree, feedCalls} = await mount();
   await act(async () => input(tree).props.onChangeText('power'));
+  await act(async () => new Promise(resolve => setTimeout(resolve, 220)));
   assert.match(text(tree), /Powerpipes AutoART/);
   assert.doesNotMatch(text(tree), /Cape Customs/);
+  assert.equal(feedCalls.at(-1).q, 'power');
+
   await act(async () => input(tree).props.onChangeText(''));
-  await act(async () => button(tree, 'Paint').props.onPress());
-  assert.match(text(tree), /Powerpipes AutoART/);
+  await act(async () => new Promise(resolve => setTimeout(resolve, 220)));
+  await act(async () => button(tree, 'Wrap & Paint').props.onPress());
   assert.match(text(tree), /Cape Customs/);
-  assert.doesNotMatch(text(tree), /Durban Tuning/);
+  assert.doesNotMatch(text(tree), /Powerpipes AutoART/);
+  assert.equal(feedCalls.at(-1).service, 'Wrap & Paint');
+
   await act(async () => button(tree, 'More filters').props.onPress());
-  await act(async () => button(tree, 'Gauteng').props.onPress());
-  assert.match(text(tree), /Powerpipes AutoART/);
-  assert.doesNotMatch(text(tree), /Cape Customs/);
+  await act(async () => button(tree, 'Cape Town').props.onPress());
+  assert.match(text(tree), /Cape Customs/);
+  assert.doesNotMatch(text(tree), /Powerpipes AutoART/);
   await act(async () => tree.unmount());
 });
 
-test('feed loads the next workshop page when scrolled near the bottom without pagination controls', async () => {
-  const tree = await mount();
+test('Feed requests another page only when scrolling near the bottom', async () => {
+  const {tree} = await mount();
   const scroller = scrollContainer(tree);
+  await act(async () => scroller.props.onScroll({nativeEvent: {
+    contentOffset: {y: 0},
+    contentSize: {height: 1200},
+    layoutMeasurement: {height: 500},
+  }}));
+  assert.doesNotMatch(text(tree), /Durban Tuning/);
   await act(async () => scroller.props.onScroll({nativeEvent: {
     contentOffset: {y: 900},
     contentSize: {height: 1200},
     layoutMeasurement: {height: 500},
   }}));
   assert.match(text(tree), /Durban Tuning/);
-  assert.doesNotMatch(text(tree), /Previous|Next|Page \d/);
   await act(async () => tree.unmount());
 });

@@ -7,6 +7,7 @@ import {QuoteComparisonScreen} from './screens/QuoteComparisonScreen';
 import VehiclePhotosScreen from './screens/VehiclePhotosScreen';
 import {GarageScreen,VehicleFormScreen,OwnerRequestsScreen,RequestFormScreen,OwnerRequestScreen} from './screens/OwnerMarketplaceScreens';
 import {useTheme} from '../../shared/theme/ThemeContext';
+import {PostDetailScreen,ShopProfileScreen} from './screens/PostScreens';
 
 const Stack = createNativeStackNavigator();
 
@@ -23,6 +24,8 @@ export default function OwnerNavigator(){
   return (
     <Stack.Navigator initialRouteName="Discover" screenOptions={{headerShown: false, ...headerTheme}}>
       <Stack.Screen name="Discover" component={OwnerHomeScreen}/>
+      <Stack.Screen name="PostDetail" component={PostDetailScreen}/>
+      <Stack.Screen name="ShopProfile" component={ShopProfileScreen}/>
       <Stack.Screen name="Garage" component={GarageScreen}/>
       <Stack.Screen name="VehicleForm" component={VehicleFormScreen} options={{presentation:'modal'}}/>
       <Stack.Screen name="OwnerRequests" component={OwnerRequestsScreen}/>

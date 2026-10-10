@@ -5,12 +5,12 @@ const multer=require('multer');
 const {ApiError}=require('./errors.cjs');
 const cors = require('cors');
 const {corsOrigins}=require('./config.cjs');
-const STATUS={'invalid-argument':400,'unauthenticated':401,'permission-denied':403,'not-found':404,'already-exists':409,'failed-precondition':409,'resource-exhausted':429,'unavailable':503,'internal':500};
+const STATUS={'invalid-argument':400,validation_error:400,unauthenticated:401,unauthorized:401,'permission-denied':403,forbidden:403,'not-found':404,not_found:404,'already-exists':409,'failed-precondition':409,'resource-exhausted':429,'unavailable':503,'internal':500};
 function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',trustProxy);app.use(helmet());
  app.use(cors({
   origin: allowedOrigins,
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Authorization', 'Content-Type'],
 }));
  app.use((req,res,next)=>{res.set('Cache-Control','no-store');next();});
@@ -33,9 +33,14 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
  app.use('/api',(req,res,next)=>req.path==='/session'?heartbeats(req,res,next):perUser(req,res,next));
  app.use('/api',express.json({limit:'32kb'}));
  const action=(fn)=>async(req,res,next)=>{try{if(!req.body||Array.isArray(req.body)||typeof req.body!=='object')throw new ApiError('invalid-argument','Expected a JSON object.');res.json({data:await fn({auth:req.identity,data:req.body})});}catch(e){next(e);}};
+ const postAction=(fn,status=200)=>async(req,res,next)=>{try{if(['POST','PATCH'].includes(req.method)&&(!req.body||Array.isArray(req.body)||typeof req.body!=='object'))throw new ApiError('validation_error','Expected a JSON object.');res.status(status).json({data:await fn({auth:req.identity,data:req.body||{},query:req.query,id:req.params.id})});}catch(e){next(e);}};
+ app.get('/api/posts',postAction(services.postsList));
+ app.get('/api/posts/:id',postAction(services.postDetail));
+ app.patch('/api/posts/:id',postAction(services.updateShowcase));
+ app.delete('/api/posts/:id',postAction(services.deleteShowcase));
  app.post('/api/admin',action(services.adminApi));
  app.post('/api/marketplace',action(services.marketplace));
- app.post('/api/posts',action(services.postsApi));
+ app.post('/api/posts',(req,res,next)=>req.body?.op?action(services.postsApi)(req,res,next):postAction(services.createShowcase,201)(req,res,next));
  app.post('/api/photos',action(services.photosApi));
  app.post('/api/session',action(services.sessionEvent));
  app.post('/api/profile',action(services.completeProfile));
@@ -80,11 +85,17 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
  app.use((req,res)=>res.status(404).json({error:{code:'not-found',message:'Endpoint not found.'}}));
  app.use((e,req,res,next)=>{
   let code=e instanceof ApiError?e.code:'internal',message=e instanceof ApiError?e.message:'The server could not complete this action. Refresh before retrying.';
+  const restPosts=req.path==='/api/posts'||req.path.startsWith('/api/posts/');
+  if(restPosts)code=({'invalid-argument':'validation_error','unauthenticated':'unauthorized','permission-denied':'forbidden','not-found':'not_found'})[code]||code;
   if(e instanceof multer.MulterError){code='invalid-argument';message='Upload one file up to 5 MB.';}
   if(e.type==='entity.parse.failed'){code='invalid-argument';message='Invalid JSON request.';}
   if(e.type==='entity.too.large'){code='invalid-argument';message='Request is too large.';}
-  if(code==='internal')console.error('API operation failed:',String(e.code||e.name||'unknown')); // Never log tokens, bodies or signed URLs.
-  res.status(STATUS[code]||500).json({error:{code,message,...(e instanceof ApiError&&e.retryWithNewRequest===true?{retryWithNewRequest:true}:{})}});
+  const status=STATUS[code]||500;
+  if(code==='internal'){
+   const redact=value=>String(value||'').replace(/([?&](?:token|signature|x-amz-signature|x-amz-credential)=)[^&\s]+/gi,'$1[redacted]');
+   console.error(`API operation failed: method=${req.method} path=${req.path} status=${status} error.code=${redact(e.code||'unknown')} error.message=${redact(e.message||e)}\nerror.stack=${redact(e.stack||'(no stack available)')}`); // Never log request bodies or signed URL credentials.
+  }
+  res.status(status).json({error:{code,message,...(e instanceof ApiError&&e.fields?{fields:e.fields}:{}),...(e instanceof ApiError&&e.retryWithNewRequest===true?{retryWithNewRequest:true}:{})}});
  });
  return app;
 }

@@ -7,4 +7,26 @@ function corsOrigins(value,production=false) {
  }
  return [...new Set(origins)];
 }
-module.exports={corsOrigins};
+function storageConfig(env=process.env) {
+ const urlValue=typeof env.SUPABASE_URL==='string'?env.SUPABASE_URL.trim():'';
+ const key=typeof env.SUPABASE_SECRET_KEY==='string'?env.SUPABASE_SECRET_KEY.trim():'';
+ if(!urlValue)throw Error('Set SUPABASE_URL.');
+ if(!key)throw Error('Set SUPABASE_SECRET_KEY.');
+ let url;try{url=new URL(urlValue);}catch{throw Error('SUPABASE_URL must be a valid HTTPS URL.');}
+ const localHttp=env.NODE_ENV!=='production'&&url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname);
+ if((url.protocol!=='https:'&&!localHttp)||url.username||url.password||url.search||url.hash)throw Error('SUPABASE_URL must be an HTTPS endpoint without credentials, query parameters or fragments.');
+ const buckets={
+  bucket:env.SUPABASE_BUCKET||'verification',
+  photoBucket:env.SUPABASE_PHOTO_BUCKET||'marketplace-photos',
+  postsBucket:env.SUPABASE_POSTS_BUCKET||'public-posts',
+ };
+ for(const [name,bucket] of Object.entries(buckets))if(typeof bucket!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/.test(bucket))throw Error(`Invalid ${name} configuration.`);
+ return {url:urlValue.replace(/\/+$/,''),key,...buckets};
+}
+function validateEmulatorHost(name,value) {
+ if(value===undefined)return;
+ const match=/^(?:\[([0-9a-fA-F:.]+)\]|([A-Za-z0-9.-]+)):([0-9]{1,5})$/.exec(value);
+ const port=match?Number(match[3]):0;
+ if(!match||port<1||port>65535)throw Error(`${name} must be a host and port, such as localhost:8080.`);
+}
+module.exports={corsOrigins,storageConfig,validateEmulatorHost};

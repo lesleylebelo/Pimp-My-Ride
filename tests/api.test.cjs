@@ -1,10 +1,10 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('fs'),babel=require('@babel/core');
 function setup(fetcher,{dev=false,base='https://api.example.test'}={}){
- const auth={currentUser:{uid:'u',getIdToken:async()=> 'firebase-token'}},calls=[],warnings=[];
+ const auth={currentUser:{uid:'u',getIdToken:async()=> 'firebase-token'}},calls=[],warnings=[],errors=[];
  const mocks={'./firebase':{firebase:()=>({auth})},'./network':{requireConnection:async()=>{}}};
  const code=babel.transformSync(fs.readFileSync('src/shared/services/api.js','utf8'),{configFile:false,babelrc:false,plugins:[require.resolve('@babel/plugin-transform-modules-commonjs')]}).code;
- const mod={exports:{}};new Function('require','module','exports','process','fetch','__DEV__','console',code)(n=>mocks[n],mod,mod.exports,{env:{EXPO_PUBLIC_API_URL:base}},async(url,options)=>{calls.push({url,options});return fetcher(url,options,auth);},dev,{warn:(...args)=>warnings.push(args)});
- return {...mod.exports,calls,auth,warnings};
+ const mod={exports:{}};new Function('require','module','exports','process','fetch','__DEV__','console',code)(n=>mocks[n],mod,mod.exports,{env:{EXPO_PUBLIC_API_URL:base}},async(url,options)=>{calls.push({url,options});const response=await fetcher(url,options,auth);if(typeof response.text!=='function'&&response.json){const body=await response.json();return {...response,text:async()=>JSON.stringify(body)};}return response;},dev,{warn:(...args)=>warnings.push(args),error:(...args)=>errors.push(args)});
+ return {...mod.exports,calls,auth,warnings,errors};
 }
 
 test('health connection failures identify the stage without sending a token or exposing error contents',async()=>{
@@ -40,6 +40,14 @@ test('backend wakes before sending the Firebase token; normal responses are unwr
  const s=setup(async url=>({ok:true,json:async()=>url.endsWith('/health')?{ok:true}:{data:{ok:true}}}));
  assert.deepEqual(await s.apiRequest('admin',{op:'dashboard'}),{ok:true});assert.equal(s.calls.length,2);
  assert.equal(s.calls[0].options.headers,undefined);assert.equal(s.calls[1].options.headers.Authorization,'Bearer firebase-token');assert.equal(JSON.parse(s.calls[1].options.body).op,'dashboard');
+});
+test('REST posts requests preserve method, encode filters and send JSON only for mutations',async()=>{
+ const s=setup(async(url,options)=>({ok:true,json:async()=>url.endsWith('/health')?{ok:true}:{data:{id:'post-1'}},text:async()=>url.endsWith('/health')?JSON.stringify({ok:true}):JSON.stringify({data:{id:'post-1'}})}));
+ assert.deepEqual(await s.apiMethodRequest('posts',{method:'GET',expectedUid:'u',query:{service:'Body Kit',q:'paint & tune',limit:20}}),{id:'post-1'});
+ assert.equal(s.calls[1].url,'https://api.example.test/api/posts?service=Body%20Kit&q=paint%20%26%20tune&limit=20');
+ assert.equal(s.calls[1].options.method,'GET');assert.equal(s.calls[1].options.body,undefined);
+ await s.apiMethodRequest('posts/post-1',{method:'PATCH',data:{title:'Updated'},expectedUid:'u'});
+ assert.equal(s.calls[2].options.method,'PATCH');assert.deepEqual(JSON.parse(s.calls[2].options.body),{title:'Updated'});
 });
 test('account change during wake prevents sending a request for the previous user',async()=>{
  const s=setup(async(url,options,auth)=>{auth.currentUser={uid:'other'};return {ok:true,json:async()=>({ok:true})};});
@@ -90,6 +98,39 @@ test('an isolated client never falls back to the signed-in app user',async()=>{
  await assert.rejects(()=>s.apiRequest('profile',{}, {authClient:{currentUser:null}}),/Please sign in again/);
  assert.equal(s.calls.length,0);
  assert.equal(s.auth.currentUser.uid,'u');
+});
+
+test('HTTP failures log status, response body and request URL and guide the user to reauthenticate',async()=>{
+ const body={error:{code:'unauthenticated',message:'Your session expired.'}};
+ const s=setup(async url=>url.endsWith('/health')?{ok:true,json:async()=>({ok:true})}:{ok:false,status:401,json:async()=>body});
+ await assert.rejects(()=>s.apiRequest('posts',{op:'feed'}),error=>{
+  assert.equal(error.status,401);
+  assert.equal(error.code,'api/unauthenticated');
+  assert.equal(error.message,'Your session expired. Please sign out and sign in again.');
+  assert.deepEqual(error.responseBody,body.error);
+  return true;
+ });
+ assert.deepEqual(s.errors,[['[PimpMyRide API request failed]',{status:401,responseBody:JSON.stringify(body),requestUrl:'https://api.example.test/api/posts'}]]);
+});
+
+test('server failures are distinguished and response envelopes are validated',async()=>{
+ const body={error:{code:'internal',message:'The server could not complete this action.'}};
+ const failed=setup(async url=>url.endsWith('/health')?{ok:true,json:async()=>({ok:true})}:{ok:false,status:500,json:async()=>body});
+ await assert.rejects(()=>failed.apiRequest('marketplace',{op:'requests'}),error=>{
+  assert.equal(error.status,500);
+  assert.equal(error.message,'The server could not complete this request (HTTP 500). Please try again shortly.');
+  return true;
+ });
+ assert.deepEqual(failed.errors[0],['[PimpMyRide API request failed]',{status:500,responseBody:JSON.stringify(body),requestUrl:'https://api.example.test/api/marketplace'}]);
+ const invalid=setup(async url=>url.endsWith('/health')?{ok:true,json:async()=>({ok:true})}:{ok:true,status:200,json:async()=>({items:[]})});
+ await assert.rejects(()=>invalid.apiRequest('posts',{op:'feed'}),{code:'api/unexpected-response',status:200});
+ assert.deepEqual(invalid.errors[0][1],{status:200,responseBody:'{"items":[]}',requestUrl:'https://api.example.test/api/posts'});
+});
+
+test('successful feed responses larger than diagnostic log limits remain intact',async()=>{
+ const data={items:Array.from({length:30},(_,index)=>({id:`post-${index}`,description:'A'.repeat(300)})),cursor:'next'};
+ const s=setup(async url=>url.endsWith('/health')?{ok:true,json:async()=>({ok:true})}:{ok:true,status:200,json:async()=>({data})});
+ assert.deepEqual(await s.apiRequest('posts',{op:'feed'}),data);
 });
 
 test('an isolated account change during backend wake prevents profile creation',async()=>{

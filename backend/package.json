@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node server.cjs",
-    "test": "node --test test/http.test.cjs test/storage.test.cjs test/reviews.test.cjs test/security.test.cjs test/cleanup.test.cjs test/documents.test.cjs test/reliability.test.cjs test/trusted-admin-operations.test.cjs test/marketplace.test.cjs test/photos.test.cjs test/photo-cleanup.test.cjs"
+    "test": "node --test test/http.test.cjs test/storage.test.cjs test/reviews.test.cjs test/security.test.cjs test/cleanup.test.cjs test/documents.test.cjs test/reliability.test.cjs test/trusted-admin-operations.test.cjs test/marketplace.test.cjs test/photos.test.cjs test/photo-cleanup.test.cjs test/posts.test.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.0.0",
