@@ -23,7 +23,8 @@
     "plugins": [
       "expo-status-bar",
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-asset"
     ]
   }
 }

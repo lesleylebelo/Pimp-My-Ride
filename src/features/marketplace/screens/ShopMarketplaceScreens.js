@@ -71,7 +71,17 @@ function RequestsFeed({navigation, feed}) {
   const feedRequests=requestFeed.items;
   const posts=usePostsFeed({view:'feed',source:'shops'});
   const {user,profile}=useAuth();
-  const categories = ['Tuning', 'Performance', 'Other', 'Exhaust', 'Lighting', 'Body Kit', 'Wheels', 'Interior', 'Wrap & Paint'];
+  const categories = [
+  { label: 'Tuning', icon: 'speedometer-outline' },
+  { label: 'Performance', icon: 'flash-outline' },
+  { label: 'Other', icon: 'ellipsis-horizontal' },
+  { label: 'Exhaust', icon: 'cloud-outline' },
+  { label: 'Lighting', icon: 'bulb-outline' },
+  { label: 'Body Kit', icon: 'construct-outline' },
+  { label: 'Wheels', icon: 'ellipse-outline' },
+  { label: 'Interior', icon: 'home-outline' },
+  { label: 'Wrap & Paint', icon: 'color-palette-outline' },
+];
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim().toLowerCase()), 180);
     return () => clearTimeout(timer);
@@ -125,9 +135,9 @@ function RequestsFeed({navigation, feed}) {
     <Text style={styles.feedIntro}>Browse open customer requests for work your shop can complete.</Text>
     <Text style={styles.filterHeading}>Browse by service</Text>
     <View style={styles.categories}>
-      <FeedServicePill title="All" selected={category === 'All'} onPress={() => setCategory('All')}/>
-      {categories.map(item => <FeedServicePill key={item} title={item} selected={category === item} onPress={() => setCategory(item)}/>)}
-      <FeedServicePill title="More filters" selected={false} onPress={() => setFiltersOpen(true)}/>
+      <FeedServicePill title="All" icon="apps-outline" selected={category === 'All'} onPress={() => setCategory('All')}/>
+{categories.map(item => <FeedServicePill key={item.label} title={item.label} icon={item.icon} selected={category === item.label} onPress={() => setCategory(item.label)}/>)}
+<FeedServicePill title="More filters" icon="options-outline" selected={false} onPress={() => setFiltersOpen(true)}/>
     </View>
     <Notice busy={(busy&&!feedRequests.length||posts.busy&&!posts.items.length)} error={offline ? offlineMessage : error||posts.error}/>
     {!!error && <Button title="Retry loading requests" outline onPress={retry}/>}
@@ -384,8 +394,9 @@ const styles = StyleSheet.create({
   jobCustomer: {fontSize: 14, fontWeight: '500', color: colors.textPrimary},
   jobCategory: {alignSelf: 'flex-start', fontSize: 12, color: colors.textSecondary, backgroundColor: colors.background, paddingHorizontal: 9, paddingVertical: 3, borderRadius: 999},
   badges: {flexDirection: 'row', alignItems: 'center', gap: 5},
-  openStatus: {fontSize: 12, color: colors.success, backgroundColor: colors.successSurface, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999},
-  quotedStatus: {fontSize: 12, color: colors.primary, backgroundColor: colors.brandGreenLight, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999},
+  openStatus: {fontSize: 12, color: colors.accent, backgroundColor: colors.accentSurface, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, fontWeight: '600'},
+  quotedStatus: {fontSize: 12, color: colors.primaryText, backgroundColor: colors.primary, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, fontWeight: '600'},
+  
   jobTitle: {fontSize: 18, lineHeight: 25, fontWeight: '600', color: colors.textPrimary},
   jobVehicle: {fontSize: 13, color: colors.textSecondary},
   jobDescription: {fontSize: 14, lineHeight: 21, color: colors.textPrimary},
