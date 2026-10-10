@@ -3,21 +3,19 @@ import {Pressable, StyleSheet, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
 import ConfirmationButton from '../../../shared/components/ConfirmationButton';
-import colors from '../../../shared/theme/colors';
 import {useAuth} from '../../auth/context/AuthContext';
 import {marketApi} from '../services/marketApi';
 import {useMarketData} from '../hooks/useMarketData';
 import {Page, Card, Field, Button, Notice, StatusTag, useInfiniteCursor, formatMoney, QuoteCard} from '../components/MarketplaceUI';
-import {ui} from '../../../shared/components/landing/LandingUI';
-import {vehicleErrors, requestErrors, parseMoney} from '../utils/validation';
 import PhotoGallery from '../components/PhotoGallery';
+import {vehicleErrors, requestErrors, parseMoney} from '../utils/validation';
+import {useTheme} from '../../../shared/theme/ThemeContext';
 
 const hasErrors = errors => Object.values(errors).some(Boolean);
 const vehicleName = vehicle => `${vehicle.make} ${vehicle.model} (${vehicle.year})`;
 const when = value => value ? new Date(value).toLocaleDateString() : 'Not specified';
 const requestStatus = status => status === 'open' ? 'Open for quotations' : status === 'booked' ? 'Quotation accepted' : 'Closed request';
 
-// No form drafts or marketplace records are persisted on this device.
 function useMutation() {
   const {offline, user} = useAuth();
   const [saving, setSaving] = useState(false), [error, setError] = useState('');
@@ -43,6 +41,8 @@ function useMutation() {
 }
 
 export function GarageScreen({navigation}) {
+  const {theme}=useTheme();
+  const styles=makeStyles(theme);
   const [archived, setArchived] = useState(false), [cursor, setCursor] = useState(null);
   const [message, setMessage] = useState('');
   const {data, busy, error, refresh} = useMarketData('vehicles', {cursor, archived});
@@ -55,7 +55,7 @@ export function GarageScreen({navigation}) {
       await refresh().catch(() => {});
     }
   }
-  return <Page title="My garage" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
+  return <Page title="My Garage" subtitle="Manage your vehicles in one place" navigation={navigation}>
     <Text>Add your vehicles, then choose one when requesting a service.</Text>
     <Button title="Add vehicle" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm');}}/>
     <View style={styles.row}>{[false, true].map(value => <Button key={String(value)} title={value ? 'Archived vehicles' : 'Active vehicles'} outline={archived !== value} disabled={disabled} onPress={() => {if (!disabled) {feed.reset();setArchived(value);setCursor(null);}}}/>)}</View>
@@ -67,16 +67,18 @@ export function GarageScreen({navigation}) {
       <Button title={`Photos for ${vehicle.make} ${vehicle.model}`} outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehiclePhotos', {id: vehicle.id});}}/>
       {!archived && <><Button title={`Edit ${vehicle.make} ${vehicle.model}`} outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm', {vehicle});}}/>
         <Button title={`Request service for ${vehicle.make} ${vehicle.model}`} disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('RequestForm', {vehicleId: vehicle.id, vehicle});}}/></>}
-      <ConfirmationButton title={archived ? `Restore ${vehicle.make} ${vehicle.model}` : `Remove ${vehicle.make} ${vehicle.model}`} message={archived ? 'Restore this vehicle to your active garage. Its open requests can become visible to shops again.' : 'Remove this vehicle from your active garage. It will not be deleted permanently; past service requests, quotations, and bookings will be preserved.'} disabled={disabled} onConfirm={() => archive(vehicle)}/>
+      <ConfirmationButton title={archived ? `Restore ${vehicle.make} ${vehicle.model}` : `Remove ${vehicle.make} ${vehicle.model}`} message={archived ? 'Restore this vehicle to your active garage. Its open requests can become visible to shops again.' : 'Remove this vehicle from your active garage. It will not be deleted permanently; past service requests, quotations, and bookings will be preserved.'} disabled={disabled} danger={!archived} onConfirm={() => archive(vehicle)}/>
     </Card>)}
-    {data && !busy && !feed.items.length && <Text>{archived ? 'No archived vehicles.' : 'Your garage is empty. Add your first vehicle to get started.'}</Text>}
+    {data && !busy && !feed.items.length && <Text style={styles.muted}>{archived ? 'No archived vehicles.' : 'Your garage is empty. Add your first vehicle to get started.'}</Text>}
     <Button title="Refresh vehicles" outline disabled={disabled} onPress={() => {if (!disabled) void refresh().catch(() => {});}}/>
-    {busy && !!feed.items.length && <Text style={ui.muted}>Loading more vehicles...</Text>}
+    {busy && !!feed.items.length && <Text style={styles.muted}>Loading more vehicles...</Text>}
   </Page>;
 }
 
 export function VehicleFormScreen(props){const {user}=useAuth();return <VehicleDraft key={`${user?.uid}:${props.route.params?.vehicle?.id||'new'}`} {...props}/>;}
 function VehicleDraft({route, navigation}) {
+  const {theme}=useTheme();
+  const styles=makeStyles(theme);
   const vehicle = route.params?.vehicle;
   const [form, setForm] = useState(() => ({make: vehicle?.make || '', model: vehicle?.model || '', year: vehicle?.year ? String(vehicle.year) : '', colour: vehicle?.colour || '', registration: vehicle?.registration || ''}));
   const [touched, setTouched] = useState({}), [submitted, setSubmitted] = useState(false);
@@ -88,9 +90,9 @@ function VehicleDraft({route, navigation}) {
     try {
       const result = await mutation.run('vehicleSave', {...form, year: Number(form.year), ...(vehicle ? {id: vehicle.id, version: vehicle.version} : {})});
       if (result) navigation.goBack();
-    } catch (_) { /* Keep the draft and display the mutation error. */ }
+    } catch (_) {}
   }
-  return <Page title={vehicle ? 'Edit vehicle' : 'Add vehicle'} navigation={navigation} showTabs={false}>
+  return <Page title={vehicle ? 'Edit vehicle' : 'Add vehicle'} subtitle={vehicle ? 'Update your vehicle details' : 'Add a vehicle to your garage'} navigation={navigation} showTabs={false}>
     <Text>Vehicle registration stays private to your account. Shops receive the make, model, year and colour with a request.</Text>
     <Card>{[['make', 'Make', 80], ['model', 'Model', 80], ['year', 'Year', 4], ['colour', 'Colour', 80], ['registration', 'Registration number', 20]].map(([key, label, maxLength]) => <Field key={key} label={label} value={form[key]} onChangeText={value => edit(key, value)} onBlur={() => setTouched(previous => ({...previous, [key]: true}))} error={(submitted || touched[key]) ? errors[key] : null} editable={!disabled} maxLength={maxLength} keyboardType={key === 'year' ? 'number-pad' : 'default'} autoCapitalize={key === 'registration' ? 'characters' : 'words'}/>)}</Card>
     <Notice busy={mutation.saving} error={mutation.error}/>
@@ -99,11 +101,13 @@ function VehicleDraft({route, navigation}) {
 }
 
 export function OwnerRequestsScreen({navigation}) {
+  const {theme}=useTheme();
+  const styles=makeStyles(theme);
   const {offline} = useAuth(), [cursor, setCursor] = useState(null);
   const {data, busy, error, refresh} = useMarketData('requests', {feed: 'mine', cursor});
   const feed = useInfiniteCursor(data, busy, setCursor);
   const disabled = busy || offline;
-  return <Page title="My requests" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
+  return <Page title="My Requests" subtitle="Track your service requests" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
     <Button title="Create service request" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('RequestForm');}}/>
     <Notice busy={busy} error={error}/>
     {feed.items.map(request => <Card key={request.id}>
@@ -114,30 +118,35 @@ export function OwnerRequestsScreen({navigation}) {
       <Text>{formatMoney(request.budgetMinCents)} – {formatMoney(request.budgetMaxCents)}</Text>
       <Button title={`View ${request.title}`} disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('OwnerRequest', {id: request.id});}}/>
     </Card>)}
-    {data && !busy && !feed.items.length && <Text>No service requests yet. Choose a vehicle and describe what you need.</Text>}
+    {data && !busy && !feed.items.length && <Text style={styles.muted}>No service requests yet. Choose a vehicle and describe what you need.</Text>}
     <Button title="Refresh requests" outline disabled={disabled} onPress={() => {if (!disabled) void refresh().catch(() => {});}}/>
-    {busy && !!feed.items.length && <Text style={ui.muted}>Loading more requests...</Text>}
+    {busy && !!feed.items.length && <Text style={styles.muted}>Loading more requests...</Text>}
   </Page>;
 }
 
 function SelectionList({title, state, feed, selected, onSelect, label, disabled, onLayout}) {
-  return <Card onLayout={onLayout} style={styles.selectionCard}><Text weight="medium" style={styles.sectionEyebrow}>{title}</Text>
+  const {theme}=useTheme();
+  const styles=makeStyles(theme);
+  return <Card onLayout={onLayout} style={styles.selectionCard}>
+    <Text weight="medium" style={styles.sectionEyebrow}>{title}</Text>
     <Notice busy={state.busy} error={state.error}/>
     <View style={styles.selectionChips}>{feed.items.map(item => {
       const active = selected === item.id;
       return <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={`${active ? 'Selected: ' : ''}${label(item)}`} accessibilityState={{selected: active, disabled: disabled || state.busy}} disabled={disabled || state.busy} onPress={() => {if (!disabled && !state.busy) onSelect(item);}} style={[styles.selectionChip, active && styles.selectedChip]}>
         <Text style={[styles.selectionText, active && styles.selectedText]}>{label(item)}</Text>
-        {active && <Ionicons name="checkmark" size={16} color={colors.primary}/>}
+        {active && <Ionicons name="checkmark" size={16} color={theme.primaryText}/>}
       </Pressable>;
     })}</View>
-    {state.data && !state.busy && !feed.items.length && <Text>{title.includes('MODIFICATION TYPE') ? 'No active service categories are configured. Ask an administrator to seed serviceCategories with archived set to false.' : 'No available options.'}</Text>}
+    {state.data && !state.busy && !feed.items.length && <Text style={styles.muted}>{title.includes('MODIFICATION TYPE') ? 'No active service categories are configured.' : 'No available options.'}</Text>}
     <Button title={`Refresh ${title.toLowerCase()}`} outline disabled={disabled || state.busy} onPress={() => {if (!disabled && !state.busy) void state.refresh().catch(() => {});}}/>
-    {state.busy && !!feed.items.length && <Text style={ui.muted}>Loading more options...</Text>}
+    {state.busy && !!feed.items.length && <Text style={styles.muted}>Loading more options...</Text>}
   </Card>;
 }
 
 export function RequestFormScreen(props){const {user} = useAuth();const request=props.route.params?.request;return <RequestDraft key={`${user?.uid}:${request?.id||props.route.params?.vehicleId||'choose'}`} {...props}/>;}
 function RequestDraft({route, navigation}) {
+  const {theme}=useTheme();
+  const styles=makeStyles(theme);
   const request = route.params?.request, editing = !!request;
   const [vehicleCursor,setVehicleCursor]=useState(null),[categoryCursor,setCategoryCursor]=useState(null),[shopCursor,setShopCursor]=useState(null);
   const vehicles = useMarketData('vehicles', {cursor: vehicleCursor, archived: false});
@@ -156,10 +165,7 @@ function RequestDraft({route, navigation}) {
   const invalidFields = Object.keys(errors);
   function edit(key, value) {if (!disabled) {setForm(previous => ({...previous, [key]: value})); setTouched(previous => ({...previous, [key]: true}));}}
   const fieldError = key => (submitted || touched[key]) ? errors[key] : null;
-  function showValidation() {
-    setSubmitted(true);
-    setTouched(Object.fromEntries(Object.keys(form).map(key => [key, true])));
-  }
+  function showValidation() {setSubmitted(true);setTouched(Object.fromEntries(Object.keys(form).map(key => [key, true])));}
   function choose(kind, item) {if (disabled) return; edit(`${kind}Id`, item.id); if (kind === 'vehicle') setForm(previous => ({...previous, photoIds: []})); setSelected(previous => ({...previous, [kind]: item}));}
   async function submit() {
     setSubmitted(true);
@@ -168,15 +174,15 @@ function RequestDraft({route, navigation}) {
     try {
       const result = await mutation.run(editing ? 'requestUpdate' : 'requestCreate', {...input, budgetMinCents: parseMoney(budgetMin), budgetMaxCents: parseMoney(budgetMax), ...(form.visibility === 'direct' ? {shopId} : {}), ...(editing ? {photoIds, id: request.id, version: request.version || 1} : (photoIds.length ? {photoIds} : {}))});
       if (result) navigation.replace('OwnerRequest', {id: result.id});
-    } catch (_) { /* Preserve all selections and text for retry. */ }
+    } catch (_) {}
   }
-  return <Page title={editing ? 'Edit service request' : 'Request a service'} navigation={navigation} onScroll={loadMore} onLayout={layoutPage}>
+  return <Page title={editing ? 'Edit service request' : 'Request a service'} subtitle="Tell us what you need" navigation={navigation} onScroll={loadMore} onLayout={layoutPage}>
     <Text style={styles.formIntro}>Tell us what you have in mind. Shops will use these details to prepare a quote.</Text>
     <SelectionList title="01  /  YOUR VEHICLE" state={vehicles} feed={vehicleFeed} selected={form.vehicleId} onSelect={item => choose('vehicle', item)} label={vehicleName} disabled={disabled} onLayout={layoutSelector('vehicle')}/>
     {form.vehicleId && <View style={styles.selectedVehicle}><View style={styles.selectedVehicleCopy}>
       <Text style={styles.selectedVehicleLabel}>SELECTED VEHICLE</Text>
       <Text style={styles.selectedVehicleName}>{selected.vehicle ? vehicleName(selected.vehicle) : 'Vehicle from your garage'}</Text>
-    </View><Ionicons name="checkmark-circle" size={21} color={colors.primary}/></View>}
+    </View><Ionicons name="checkmark-circle" size={21} color={theme.accent}/></View>}
     <Notice error={fieldError('vehicleId')}/>
     {!form.vehicleId && <Button title="Add a vehicle" outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm');}}/>}
     {!!form.vehicleId && <Card>
@@ -193,7 +199,7 @@ function RequestDraft({route, navigation}) {
     <View style={styles.formSection}>
       <Text style={styles.sectionEyebrow}>03  /  THE DETAILS</Text>
       <Field label="Request title" placeholder="e.g. satin black vinyl wrap" value={form.title} onChangeText={value => edit('title', value)} onBlur={() => setTouched(previous => ({...previous, title: true}))} maxLength={100} editable={!disabled} error={fieldError('title')}/>
-      <Field label="Description" placeholder="Tell the shop what you’re looking for…" value={form.description} onChangeText={value => edit('description', value)} onBlur={() => setTouched(previous => ({...previous, description: true}))} maxLength={300} multiline editable={!disabled} error={fieldError('description')} helperText={`${form.description.length}/300 characters`}/>
+      <Field label="Description" placeholder="Tell the shop what you're looking for…" value={form.description} onChangeText={value => edit('description', value)} onBlur={() => setTouched(previous => ({...previous, description: true}))} maxLength={300} multiline editable={!disabled} error={fieldError('description')} helperText={`${form.description.length}/300 characters`}/>
       <Field label="City" value={form.city} onChangeText={value => edit('city', value)} onBlur={() => setTouched(previous => ({...previous, city: true}))} maxLength={100} editable={!disabled} error={fieldError('city')}/>
       <Text style={styles.budgetLabel}>BUDGET RANGE  ·  ZAR</Text>
       <View style={styles.budgetRow}>
@@ -220,6 +226,8 @@ function RequestDraft({route, navigation}) {
 }
 
 export function OwnerRequestScreen({route, navigation}) {
+  const {theme}=useTheme();
+  const styles=makeStyles(theme);
   const [quotesCursor,setQuotesCursor]=useState(null),id = route.params.id;
   const {data, busy, error, refresh} = useMarketData('request', {id, quotesCursor});
   const quotesFeed=useInfiniteCursor(data,busy,setQuotesCursor,{itemsKey:'quotes',cursorKey:'quotesCursor'});
@@ -228,7 +236,7 @@ export function OwnerRequestScreen({route, navigation}) {
     const result = await mutation.run('requestClose', {id});
     if (result) {quotesFeed.reset();setQuotesCursor(null); await refresh().catch(() => {});}
   }
-  return <Page title={request?.title || 'Service request'} navigation={navigation} onScroll={quotesFeed.onScroll} onLayout={quotesFeed.onLayout} onContentSizeChange={quotesFeed.onContentSizeChange}>
+  return <Page title={request?.title || 'Service request'} subtitle="Request details and quotes" navigation={navigation} onScroll={quotesFeed.onScroll} onLayout={quotesFeed.onLayout} onContentSizeChange={quotesFeed.onContentSizeChange}>
     <Notice busy={busy || mutation.saving} error={mutation.error || error}/>
     {request && <><Card>
       <StatusTag>{requestStatus(request.status)}</StatusTag>
@@ -241,38 +249,39 @@ export function OwnerRequestScreen({route, navigation}) {
       <Text>Created: {when(request.createdAt)}</Text>
       {request.bookingId && <Button title="View booking" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('BookingDetail', {id: request.bookingId});}}/>}
       {request.status === 'open' && <Button title="Edit request" outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('RequestForm', {request});}}/>}
-      {request.status === 'open' && <ConfirmationButton title="Close request" message="Stop new or updated quotations for this request. Existing quotations remain available to view. Closing does not create a booking." disabled={disabled} onConfirm={close}/>}
+      {request.status === 'open' && <ConfirmationButton title="Close request" message="Stop new or updated quotations for this request. Existing quotations remain available to view. Closing does not create a booking." disabled={disabled} danger onConfirm={close}/>}
     </Card>
       {!!request.photoIds?.length && <PhotoGallery target="request" id={id}/>}
       <Text weight="semibold" style={styles.heading}>Private quotations</Text>
       <Text>Compare quoted work, prices and validity. An accepted offer creates a booking awaiting the shop's confirmation.</Text>
       {request.status === 'open' && <Button title="Compare quotes" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('QuoteComparison', {id});}}/>}
       {quotesFeed.items.map(quote => <QuoteCard key={quote.id} quote={quote}/>)}
-      {!busy && !quotesFeed.items.length && <Text>No quotations yet.</Text>}
-      {busy && !!quotesFeed.items.length && <Text style={ui.muted}>Loading more quotations...</Text>}
+      {!busy && !quotesFeed.items.length && <Text style={styles.muted}>No quotations yet.</Text>}
+      {busy && !!quotesFeed.items.length && <Text style={styles.muted}>Loading more quotations...</Text>}
     </>}
     <Button title="Refresh request" outline disabled={disabled} onPress={() => {if (!disabled) void refresh().catch(() => {});}}/>
   </Page>;
 }
 
-const styles = StyleSheet.create({
-  heading: {fontSize: 18, lineHeight: 26},
+const makeStyles = (colors) => StyleSheet.create({
+  heading: {fontSize: 18, lineHeight: 26, color: colors.textPrimary, fontWeight: '600'},
+  muted: {color: colors.textSecondary, fontSize: 14},
   row: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
   formIntro: {color: colors.textSecondary, lineHeight: 22},
-  sectionEyebrow: {fontSize: 11, lineHeight: 16, letterSpacing: 1.1, color: colors.textSecondary},
-  selectionCard: {padding: 14, gap: 14},
+  sectionEyebrow: {fontSize: 11, lineHeight: 16, letterSpacing: 1.1, color: colors.textMuted, fontWeight: '600'},
+  selectionCard: {padding: 20, gap: 14},
   selectionChips: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
-  selectionChip: {minHeight: 40, maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 13, paddingVertical: 9, borderRadius: 999, backgroundColor: colors.surfaceCard, borderWidth: 1, borderColor: colors.border},
-  selectedChip: {borderColor: colors.primary},
-  selectionText: {fontSize: 13, color: colors.textSecondary},
-  selectedText: {color: colors.textPrimary},
-  selectedVehicle: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderRadius: 16, backgroundColor: colors.surfaceCard},
+  selectionChip: {minHeight: 40, maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, backgroundColor: colors.surfaceMuted, borderWidth: 0},
+  selectedChip: {backgroundColor: colors.primary},
+  selectionText: {fontSize: 13, color: colors.textSecondary, fontWeight: '500'},
+  selectedText: {color: colors.primaryText, fontWeight: '700'},
+  selectedVehicle: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderRadius: 16, backgroundColor: colors.surfaceCard, borderWidth: 1, borderColor: colors.border},
   selectedVehicleCopy: {flex: 1, gap: 4},
-  selectedVehicleLabel: {fontSize: 10, letterSpacing: 1, color: colors.textSecondary},
-  selectedVehicleName: {fontSize: 15, lineHeight: 21, color: colors.textPrimary},
+  selectedVehicleLabel: {fontSize: 10, letterSpacing: 1, color: colors.textMuted, fontWeight: '600'},
+  selectedVehicleName: {fontSize: 15, lineHeight: 21, color: colors.textPrimary, fontWeight: '500'},
   selectionSummary: {fontSize: 13, color: colors.textSecondary},
-  formSection: {padding: 16, borderRadius: 20, backgroundColor: colors.surfaceCard, gap: 10},
-  budgetLabel: {fontSize: 11, letterSpacing: 1, color: colors.textSecondary, paddingTop: 2},
+  formSection: {padding: 20, borderRadius: 24, backgroundColor: colors.surfaceCard, gap: 12, borderWidth: 1, borderColor: colors.border},
+  budgetLabel: {fontSize: 11, letterSpacing: 1, color: colors.textMuted, fontWeight: '600', paddingTop: 2},
   budgetRow: {flexDirection: 'row', gap: 12},
   budgetField: {flex: 1, minWidth: 0},
   budgetInput: {fontFamily: 'monospace', fontVariant: ['tabular-nums']},

@@ -4,7 +4,6 @@ import PrimaryButton from './PrimaryButton';
 import OutlineButton from './OutlineButton';
 import colors from '../theme/colors';
 
-// Keep the lock synchronous: two taps before a render must issue only one request.
 export default function ConfirmationButton({title, message, onConfirm, disabled, danger}) {
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -20,25 +19,45 @@ export default function ConfirmationButton({title, message, onConfirm, disabled,
     finally { lock.current = false; setBusy(false); }
   }
   return <>
-    <PrimaryButton title={title} disabled={disabled || busy} style={danger && styles.danger}
-      onPress={() => {setError('');setVisible(true);}} />
+    <PrimaryButton
+      title={title}
+      disabled={disabled || busy}
+      style={danger ? styles.dangerButton : undefined}
+      textStyle={danger ? styles.dangerText : undefined}
+      onPress={() => { setError(''); setVisible(true); }}
+    />
     <Modal visible={visible} transparent animationType="fade" onRequestClose={cancel}>
       <View style={styles.backdrop}>
         <View style={styles.card} accessibilityViewIsModal>
           <Text accessibilityRole="header" style={styles.title}>{title}</Text>
-          <Text>{message}</Text>
+          <Text style={styles.message}>{message}</Text>
           {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
-          <PrimaryButton title="Confirm" onPress={confirm} loading={busy} disabled={disabled}
-            style={danger && styles.danger} />
+          <PrimaryButton
+            title="Confirm"
+            onPress={confirm}
+            loading={busy}
+            disabled={disabled}
+            style={danger ? styles.dangerButton : undefined}
+            textStyle={danger ? styles.dangerText : undefined}
+          />
           <OutlineButton title="Cancel" onPress={cancel} disabled={busy} />
         </View>
       </View>
     </Modal>
   </>;
 }
+
 const styles = StyleSheet.create({
-  backdrop: {flex:1,justifyContent:'center',alignItems:'center',padding:24,backgroundColor:'rgba(0,0,0,0.4)'},
-  card: {width:'100%',maxWidth:440,padding:24,gap:18,borderRadius:20,backgroundColor:colors.white},
-  title: {fontSize:22,fontWeight:'500',color:colors.primary},
-  error: {color:colors.error}, danger: {backgroundColor:colors.error,borderColor:colors.error},
+  backdrop: {flex:1,justifyContent:'center',alignItems:'center',padding:24,backgroundColor:'rgba(0,0,0,0.7)'},
+  card: {width:'100%',maxWidth:440,padding:24,gap:18,borderRadius:20,backgroundColor:colors.surfaceCard},
+  title: {fontSize:20,fontWeight:'600',color:colors.textPrimary},
+  message: {fontSize:14,lineHeight:20,color:colors.textSecondary},
+  error: {color:colors.error,fontSize:13},
+  dangerButton: {
+    backgroundColor: '#3A1414',
+    borderColor: '#3A1414',
+  },
+  dangerText: {
+    color: '#FF6B6B',
+  },
 });

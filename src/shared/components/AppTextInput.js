@@ -1,8 +1,7 @@
 import React, { useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import colors from "../theme/colors";
-import { radius, typography, spacing } from "../theme/typography";
+import { useTheme } from "../theme/ThemeContext";
 
 export default function AppTextInput({
   label,
@@ -22,6 +21,8 @@ export default function AppTextInput({
   accessibilityLabel = label,
   ...inputProps
 }) {
+  const { theme } = useTheme();
+  const styles = makeStyles(theme);
   const [revealed, setRevealed] = useState(false);
   const [focused, setFocused] = useState(false);
   const isSecure = secureTextEntry && !revealed;
@@ -38,12 +39,7 @@ export default function AppTextInput({
         ]}
       >
         {icon ? (
-          <Ionicons
-            name={icon}
-            size={18}
-            color={colors.textSecondary}
-            style={styles.leadingIcon}
-          />
+          <Ionicons name={icon} size={18} color={theme.textSecondary} style={styles.leadingIcon} />
         ) : null}
         <TextInput
           {...inputProps}
@@ -52,7 +48,7 @@ export default function AppTextInput({
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
-          placeholderTextColor={colors.placeholder}
+          placeholderTextColor={theme.textMuted}
           secureTextEntry={isSecure}
           keyboardType={keyboardType}
           autoCapitalize={secureTextEntry ? "none" : autoCapitalize}
@@ -70,11 +66,7 @@ export default function AppTextInput({
             hitSlop={10}
             style={styles.eyeButton}
           >
-            <Ionicons
-              name={revealed ? "eye-off-outline" : "eye-outline"}
-              size={20}
-              color={colors.textSecondary}
-            />
+            <Ionicons name={revealed ? "eye-off-outline" : "eye-outline"} size={20} color={theme.textSecondary} />
           </Pressable>
         ) : null}
       </View>
@@ -87,27 +79,27 @@ export default function AppTextInput({
   );
 }
 
-const styles = StyleSheet.create({
-  wrapper: {
-    marginBottom: spacing.md,
-  },
+const makeStyles = (colors) => StyleSheet.create({
+  wrapper: { marginBottom: 16 },
   label: {
-    fontSize: typography.label.fontSize,
-    fontWeight: "500",
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.textSecondary,
+    marginBottom: 8,
+    letterSpacing: 0.2,
   },
   inputRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    paddingHorizontal: spacing.md,
-    borderBottomWidth: 1,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    borderWidth: 1,
     borderColor: colors.border,
+    minHeight: 54,
   },
   inputRowFocused: {
-    borderColor: colors.primary,
+    borderColor: colors.accent,
   },
   inputRowMultiline: {
     alignItems: "flex-start",
@@ -116,20 +108,20 @@ const styles = StyleSheet.create({
     borderColor: colors.error,
   },
   leadingIcon: {
-    marginRight: spacing.sm,
+    marginRight: 10,
   },
   input: {
     flex: 1,
-    paddingVertical: 12,
-    fontSize: typography.body.fontSize,
+    paddingVertical: 14,
+    fontSize: 15,
     color: colors.textPrimary,
   },
   inputMultiline: {
     minHeight: 90,
-    paddingTop: 18,
+    paddingTop: 14,
   },
   eyeButton: {
-    paddingLeft: spacing.sm,
+    paddingLeft: 10,
     paddingVertical: 8,
   },
   errorText: {

@@ -9,8 +9,19 @@ import {ownerRoutes} from '../../marketplace/components/MarketplaceUI';
 import {radius} from '../../../shared/theme/typography';
 import colors from '../../../shared/theme/colors';
 
-const categories=['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
+const categories=[
+  {label:'Tuning', icon:'speedometer-outline'},
+  {label:'Performance', icon:'flash-outline'},
+  {label:'Exhaust', icon:'cloud-outline'},
+  {label:'Lighting', icon:'bulb-outline'},
+  {label:'Body Kit', icon:'construct-outline'},
+  {label:'Wheels', icon:'ellipse-outline'},
+  {label:'Interior', icon:'home-outline'},
+  {label:'Wrap & Paint', icon:'color-palette-outline'},
+  {label:'Other', icon:'ellipsis-horizontal'},
+];
 const sources=[{label:'All',value:'all'},{label:'Shops',value:'shops'},{label:'Customers',value:'customers'}];
+
 export default function OwnerHomeScreen({navigation}){
  const {user}=useAuth(),feedback=useLandingFeedback(),feed=usePostsFeed({view:'feed',source:'all'});
  const [query,setQuery]=useState(''),[normalized,setNormalized]=useState(''),[category,setCategory]=useState('All'),[source,setSource]=useState('all');
@@ -26,15 +37,24 @@ export default function OwnerHomeScreen({navigation}){
  const clear=()=>{setQuery('');setNormalized('');setCategory('All');setSource('all');setLocation('');setFiltersOpen(false);};
  const onScroll=event=>{feed.loadNext();};
  const onContentSizeChange=(_,height)=>{if(height<650)feed.loadNext();};
- return <LandingShell title="Discover" tabs={ownerTabs} activeTab="Discover" {...feedback} onScroll={onScroll} onContentSizeChange={onContentSizeChange} onTabPress={label=>ownerRoutes[label]?navigation.navigate(ownerRoutes[label]):feedback.showFeature(label)}>
+ return <LandingShell
+   title="Discover"
+   subtitle="Find shops and builds near you"
+   tabs={ownerTabs}
+   activeTab="Discover"
+   {...feedback}
+   onScroll={onScroll}
+   onContentSizeChange={onContentSizeChange}
+   onTabPress={label=>ownerRoutes[label]?navigation.navigate(ownerRoutes[label]):feedback.showFeature(label)}
+ >
   <FeedSearchInput accessibilityLabel="Search workshops or services" placeholder="Search workshops or services" value={query} onChangeText={setQuery}/>
   <FeedSourceSelector options={sources} storageKey="feed-source:customer" value={source} onChange={setSource}/>
   <LandingText style={styles.intro}>Explore workshop showcases and customer builds</LandingText>
   <LandingText weight="medium">Browse by service</LandingText>
   <View style={styles.categories}>
-   <FeedServicePill title="All" selected={category==='All'} onPress={()=>setCategory('All')}/>
-   {categories.map(item=><FeedServicePill key={item} title={item} selected={category===item} onPress={()=>setCategory(item)}/>)}
-   <FeedServicePill title="More filters" selected={false} onPress={()=>setFiltersOpen(true)}/>
+   <FeedServicePill title="All" icon="apps-outline" selected={category==='All'} onPress={()=>setCategory('All')}/>
+{categories.map(item=><FeedServicePill key={item.label} title={item.label} icon={item.icon} selected={category===item.label} onPress={()=>setCategory(item.label)}/>)}
+<FeedServicePill title="More filters" icon="options-outline" selected={false} onPress={()=>setFiltersOpen(true)}/>
   </View>
   {feed.busy&&!feed.items.length&&<LandingText accessibilityRole="status" style={ui.muted}>Loading posts...</LandingText>}
   {!!feed.error&&<LandingText accessibilityRole="alert" style={ui.error}>{feed.error}</LandingText>}
@@ -52,4 +72,12 @@ export default function OwnerHomeScreen({navigation}){
   </Modal>
  </LandingShell>;
 }
-const styles=StyleSheet.create({intro:{color:colors.textSecondary,marginTop:-8},categories:{flexDirection:'row',flexWrap:'wrap',gap:8},empty:{alignItems:'center',gap:12,paddingVertical:20},backdrop:{flex:1,justifyContent:'center',padding:24,backgroundColor:'rgba(0,0,0,0.35)'},modal:{padding:24,gap:14,borderRadius:20,backgroundColor:colors.white},modalTitle:{fontSize:20},});
+
+const styles=StyleSheet.create({
+  intro:{color:colors.textSecondary,marginTop:-8},
+  categories:{flexDirection:'row',flexWrap:'wrap',gap:8},
+  empty:{alignItems:'center',gap:12,paddingVertical:20},
+  backdrop:{flex:1,justifyContent:'center',padding:24,backgroundColor:'rgba(0,0,0,0.35)'},
+  modal:{padding:24,gap:14,borderRadius:20,backgroundColor:colors.surfaceCard},
+  modalTitle:{fontSize:20},
+});

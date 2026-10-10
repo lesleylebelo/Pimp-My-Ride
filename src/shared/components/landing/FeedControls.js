@@ -1,11 +1,11 @@
-import React from 'react';
-import {Pressable, StyleSheet, View, Text} from 'react-native';
+import React, { useRef } from 'react';
+import { Pressable, StyleSheet, View, Text, Animated } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {useEffect, useState} from 'react';
-import colors from '../../theme/colors';
-import {radius} from '../../theme/typography';
+import { useEffect, useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../../theme/ThemeContext';
+import { radius } from '../../theme/typography';
 import AppTextInput from '../AppTextInput';
-import {LandingButton} from './LandingUI';
 
 export function FeedSearchInput({accessibilityLabel, placeholder, value, onChangeText, ...props}) {
   return <AppTextInput
@@ -18,17 +18,50 @@ export function FeedSearchInput({accessibilityLabel, placeholder, value, onChang
   />;
 }
 
-export function FeedServicePill({title, selected, onPress, disabled = false, style}) {
-  return <LandingButton
-    title={title}
-    outline={!selected}
-    disabled={disabled}
-    onPress={onPress}
-    style={[styles.pill, style]}
-  />;
+export function FeedServicePill({title, icon, selected, onPress, disabled = false, style}) {
+  const {theme} = useTheme();
+  const styles = makeStyles(theme);
+  const shimmerAnim = useRef(new Animated.Value(-1)).current;
+
+  const handlePressIn = () => {
+    shimmerAnim.setValue(-1);
+    Animated.timing(shimmerAnim, { toValue: 1, duration: 800, useNativeDriver: true }).start();
+  };
+  const handlePressOut = () => {};
+
+  const shimmerTranslate = shimmerAnim.interpolate({
+    inputRange: [-1, 1],
+    outputRange: [-260, 260],
+  });
+
+  const labelColor = selected ? theme.primaryText : theme.textSecondary;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityState={{ selected, disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      style={[styles.pill, selected && styles.pillSelected, disabled && styles.pillDisabled, style]}
+    >
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.shimmer, { transform: [{ translateX: shimmerTranslate }, { rotate: '20deg' }] }]}
+      />
+      {icon ? <Ionicons name={icon} size={16} color={labelColor} style={styles.pillIcon} /> : null}
+      <Text style={[styles.pillLabel, { color: labelColor, fontWeight: selected ? '700' : '500' }]}>
+        {title}
+      </Text>
+    </Pressable>
+  );
 }
 
 export function FeedSourceSelector({options, storageKey, value, onChange}) {
+  const {theme} = useTheme();
+  const styles = makeStyles(theme);
   const [selected,setSelected]=useState(options[0]?.value||'all');
   const active=value??selected;
   const [error,setError]=useState('');
@@ -56,12 +89,46 @@ export function FeedSourceSelector({options, storageKey, value, onChange}) {
   </View>;
 }
 
-const styles = StyleSheet.create({
-  pill: {flexGrow: 1, width: undefined, paddingHorizontal: 12, borderRadius: radius.pill},
-  segmented: {flexDirection:'row',borderRadius:radius.pill,padding:3,backgroundColor:colors.brandGreenLight,gap:3},
-  segment: {flex:1,minHeight:38,alignItems:'center',justifyContent:'center',paddingHorizontal:8,borderRadius:radius.pill},
-  segmentSelected: {backgroundColor:colors.primary},
-  segmentLabel: {fontSize:13,color:colors.textSecondary,fontWeight:'500'},
-  segmentLabelSelected: {color:colors.white},
-  preferenceError: {fontSize:12,color:colors.error,marginTop:4},
+const makeStyles = (colors) => StyleSheet.create({
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    borderRadius: 999,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 0,
+    overflow: 'hidden',
+  },
+  pillSelected: { backgroundColor: colors.primary },
+  pillDisabled: { opacity: 0.5 },
+  pillIcon: { marginTop: 1 },
+  pillLabel: { fontSize: 14, letterSpacing: 0.2 },
+  shimmer: {
+    position: 'absolute',
+    top: -40,
+    bottom: -40,
+    width: 60,
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+  },
+  segmented: {
+    flexDirection: 'row',
+    borderRadius: 999,
+    padding: 4,
+    backgroundColor: colors.surfaceMuted,
+    gap: 4,
+  },
+  segment: {
+    flex: 1,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderRadius: 999,
+  },
+  segmentSelected: { backgroundColor: colors.accent },
+  segmentLabel: { fontSize: 13, color: colors.textSecondary, fontWeight: '500' },
+  segmentLabelSelected: { color: colors.primaryText, fontWeight: '700' },
+  preferenceError: { fontSize: 12, color: colors.error, marginTop: 4 },
 });
