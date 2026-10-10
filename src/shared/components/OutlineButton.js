@@ -1,8 +1,7 @@
 import React from "react";
 import { Pressable, Text, StyleSheet } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import colors from "../theme/colors";
-import { radius, typography } from "../theme/typography";
+import { useTheme } from "../theme/ThemeContext";
 
 export default function OutlineButton({
   title,
@@ -15,7 +14,10 @@ export default function OutlineButton({
   accessibilityHint,
   testID,
 }) {
+  const { theme } = useTheme();
+  const styles = makeStyles(theme);
   const IconComponent = iconSet === "material" ? MaterialCommunityIcons : Ionicons;
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -25,43 +27,48 @@ export default function OutlineButton({
       disabled={disabled}
       testID={testID}
       onPress={onPress}
-      style={({ pressed }) => [styles.button, pressed && styles.pressed, style]}
+      style={({ pressed }) => [
+        styles.button,
+        pressed && !disabled && styles.pressed,
+        disabled && styles.disabled,
+        style,
+      ]}
     >
       {icon ? (
-        <IconComponent
-          name={icon}
-          size={18}
-          color={colors.primary}
-          style={styles.icon}
-        />
+        <IconComponent name={icon} size={18} color={theme.textPrimary} style={styles.icon} />
       ) : null}
-      <Text style={[styles.text, textStyle]}>{title}</Text>
+      <Text style={[styles.text, textStyle]} numberOfLines={2}>{title}</Text>
     </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   button: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    borderRadius: 14,
-    minHeight: 48,
-    paddingVertical: 12,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 999,
+    minHeight: 54,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
     width: "100%",
   },
   pressed: {
-    backgroundColor: colors.disabledSurface,
+    opacity: 0.85,
+    transform: [{ scale: 0.98 }],
+  },
+  disabled: {
+    opacity: 0.4,
   },
   icon: {
     marginRight: 8,
   },
   text: {
-    color: colors.primary,
-    fontSize: typography.button.fontSize,
+    color: colors.textPrimary,
+    fontSize: 15,
     fontWeight: "500",
+    letterSpacing: 0.2,
+    textAlign: "center",
   },
 });

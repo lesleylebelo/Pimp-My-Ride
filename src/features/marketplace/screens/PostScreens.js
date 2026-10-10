@@ -8,8 +8,7 @@ import {PostCard} from '../components/PostCard';
 import {Page,Card,Field,Button,Notice,useInfiniteCursor} from '../components/MarketplaceUI';
 import {useMarketData} from '../hooks/useMarketData';
 import colors from '../../../shared/theme/colors';
-
-const categories=['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
+const categories = ['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
 const failure=e=>e?.message||'Unable to save this post. Please retry.';
 
 export function PostFormScreen({navigation,route}){
