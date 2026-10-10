@@ -36,8 +36,18 @@ function validatePhoto(file){
    position+=length;
   }
   if(!found||!scan||b[b.length-2]!==255||b[b.length-1]!==217)D.fail('This JPG photo has an invalid image header or ending.');type='image/jpeg';
+ }else if(b.length>=30&&b.toString('ascii',0,4)==='RIFF'&&b.toString('ascii',8,12)==='WEBP'&&b.readUInt32LE(4)+8===b.length){
+  const kind=b.toString('ascii',12,16);
+  if(kind==='VP8X'&&b.length>=32){
+   dimensions(1+b.readUIntLE(26,3),1+b.readUIntLE(29,3));
+  }else if(kind==='VP8 '&&b.length>=30&&b[23]===0x9d&&b[24]===0x01&&b[25]===0x2a){
+   dimensions(b.readUInt16LE(26)&0x3fff,b.readUInt16LE(28)&0x3fff);
+  }else if(kind==='VP8L'&&b.length>=25&&b[20]===0x2f){
+   dimensions(1+(b[21]|((b[22]&0x3f)<<8)),1+((b[22]>>6)|(b[23]<<2)|((b[24]&0x0f)<<10)));
+  }else D.fail('This WebP photo has an invalid image header.');
+  type='image/webp';
  }
- if(!type||file.mimetype!==type)D.fail('The photo content must match JPG or PNG.');
+ if(!type||file.mimetype!==type)D.fail('The photo content must match JPG, PNG or WebP.');
  const name=D.text(file.originalname,'Photo name',255).replace(/[\u0000-\u001f\u007f/\\]/g,'_');
  return {buffer:b,name,contentType:type,size:b.length,contentHash:hash(b)};
 }

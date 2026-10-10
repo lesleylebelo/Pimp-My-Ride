@@ -1,12 +1,45 @@
 const {randomUUID}=require('node:crypto');
 const {FieldPath,FieldValue,Timestamp}=require('firebase-admin/firestore');
 const D=require('./domain.cjs'),M=require('./marketplace-domain.cjs'),P=require('./photo-domain.cjs');
+const {ApiError}=require('./errors.cjs');
 const {mutation}=require('./mutations.cjs');
-const PAGE_SIZE=20,stamp=()=>FieldValue.serverTimestamp();
+const PAGE_SIZE=20,MAX_SHOWCASE_IMAGES=10,stamp=()=>FieldValue.serverTimestamp();
 const serialize=value=>value instanceof Timestamp?value.toMillis():Array.isArray(value)?value.map(serialize):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([key,v])=>[key,serialize(v)])):value;
 const row=doc=>({id:doc.id,...serialize(doc.data())});
 const categories=['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
 function eligible(profile,role){return P.eligible(profile,role);}
+function validation(fields){
+ const error=new ApiError('validation_error','Please correct the highlighted fields.');
+ error.fields=fields;throw error;
+}
+function validPostId(value){
+ if(typeof value!=='string'||! /^[A-Za-z0-9_-]{1,128}$/.test(value))validation({id:'Enter a valid post id.'});
+ return value;
+}
+function cursorValue(value){
+ if(value===undefined||value===null||value==='')return null;
+ try{
+  const parsed=JSON.parse(Buffer.from(value,'base64url').toString('utf8'));
+  if(!parsed||!Number.isSafeInteger(parsed.createdAt)||parsed.createdAt<1||typeof parsed.id!=='string'||! /^[A-Za-z0-9_-]{1,128}$/.test(parsed.id))throw Error();
+  return parsed;
+ }catch{validation({cursor:'The feed cursor is invalid. Refresh the feed.'});}
+}
+function encodeCursor(doc){
+ const createdAt=doc.get('createdAt')?.toMillis?.();
+ return Number.isSafeInteger(createdAt)?Buffer.from(JSON.stringify({createdAt,id:doc.id})).toString('base64url'):null;
+}
+function shopSnapshot(id,profile,post){
+ return {id,name:profile?.shop?.shopName||post.authorName||'Workshop',avatar:profile?.shop?.avatarUrl||profile?.avatarUrl||profile?.photoURL||post.authorAvatar||null,
+  city:profile?.shop?.city||post.city||'',province:profile?.shop?.province||post.province||''};
+}
+function postVehicle(value){
+ if(value&&typeof value==='object'&&!Array.isArray(value))return {make:value.make||'',model:value.model||'',year:value.year||null};
+ if(typeof value==='string'){
+  const match=value.match(/^\s*(?:(\d{4})\s+)?(.*)$/);
+  return {make:match?.[2]||value,model:'',year:match?.[1]?Number(match[1]):null};
+ }
+ return {make:'',model:'',year:null};
+}
 function authorName(profile,role){
  const name=(role==='shop'?profile.shop?.shopName:profile.fullName)||'';
  const safe=name.trim().replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,'').replace(/(?:\+?\d[\d\s().-]{7,}\d)/g,'').replace(/\s+/g,' ').trim();
@@ -26,8 +59,159 @@ function createPosts({db,auth,actor,storage}){
  async function image(path,uid){
   if(typeof path!=='string'||!path.startsWith(`posts/${uid}/`))D.fail('Choose an uploaded post photo.');
   const details=await storage.inspect(path);
-  if(!details||!['image/jpeg','image/png'].includes(details.contentType)||details.size<=0||details.size>5*1024*1024)D.fail('An uploaded photo is unavailable. Upload it again.');
+  if(!details||!['image/jpeg','image/png','image/webp'].includes(details.contentType)||details.size<=0||details.size>5*1024*1024)D.fail('An uploaded photo is unavailable. Upload it again.');
   return {path,url:storage.publicUrl(path),contentType:details.contentType,size:details.size};
+ }
+ async function requireShop(request){
+  const a=await actor(request);
+  if(a.profile.role!=='shop')D.fail('Only shops can manage showcase posts.','forbidden');
+  if(!eligible(a.profile,'shop')||a.profile.verificationStatus!=='approved')D.fail('An active, approved shop account is required.','forbidden');
+  const user=await auth.getUser(a.uid);
+  if(!user.emailVerified||user.disabled)D.fail('An active, verified shop is required.','forbidden');
+  return a;
+ }
+ function validateShowcase(input,{partial=false}={}){
+  const fields={};
+  if(!partial||Object.hasOwn(input,'title')){
+   if(typeof input.title!=='string'||!input.title.trim()||input.title.trim().length>100)fields.title='Enter a title of 1 to 100 characters.';
+  }
+  if(!partial||Object.hasOwn(input,'description')){
+   if(input.description!==undefined&&typeof input.description!=='string')fields.description='Enter a valid description.';
+   else if((input.description||'').length>2000)fields.description='Description must be at most 2000 characters.';
+  }
+  const category=input.serviceCategory??input.category;
+  if(!partial||Object.hasOwn(input,'serviceCategory')||Object.hasOwn(input,'category')){
+   if(!categories.includes(category))fields.serviceCategory='Choose a valid service category.';
+  }
+  if(Object.hasOwn(input,'vehicle')){
+   if(!input.vehicle||typeof input.vehicle!=='object'||Array.isArray(input.vehicle))fields.vehicle='Enter valid vehicle details.';
+   else{
+    for(const key of ['make','model'])if(input.vehicle[key]!==undefined&&(typeof input.vehicle[key]!=='string'||input.vehicle[key].trim().length>80))fields[`vehicle.${key}`]=`${key==='make'?'Make':'Model'} must be at most 80 characters.`;
+    if(input.vehicle.year!==undefined&&input.vehicle.year!==null&&input.vehicle.year!==''&&(!Number.isInteger(Number(input.vehicle.year))||Number(input.vehicle.year)<1886||Number(input.vehicle.year)>new Date().getFullYear()+1))fields['vehicle.year']='Enter a valid vehicle year.';
+   }
+  }
+  if(Object.hasOwn(input,'images')&&(!Array.isArray(input.images)||input.images.length<1||input.images.length>MAX_SHOWCASE_IMAGES))fields.images='Choose between 1 and 10 photos.';
+  if(Object.keys(fields).length)validation(fields);
+  return {
+   ...(Object.hasOwn(input,'title')?{title:input.title.trim()}:{}),
+   ...(Object.hasOwn(input,'description')?{description:input.description.trim()}:{}),
+   ...(Object.hasOwn(input,'serviceCategory')||Object.hasOwn(input,'category')?{category,serviceCategory:category}:{}),
+   ...(Object.hasOwn(input,'vehicle')?{vehicle:{make:(input.vehicle.make||'').trim(),model:(input.vehicle.model||'').trim(),year:input.vehicle.year?Number(input.vehicle.year):null}}:{})
+  };
+ }
+ async function restImages(paths,uid){
+  if(!Array.isArray(paths)||paths.length<1||paths.length>MAX_SHOWCASE_IMAGES)validation({images:'Choose between 1 and 10 photos.'});
+  if(paths.some(path=>typeof path!=='string')||new Set(paths).size!==paths.length)validation({images:'Choose each uploaded photo once.'});
+  return Promise.all(paths.map(path=>image(path,uid)));
+ }
+ function publicPost(id,data,profile){
+  const shop=shopSnapshot(data.shopId||data.authorId,profile,data);
+  const serialized=serialize(data);delete serialized.cleanupImages;
+  return {id,...serialized,shopId:shop.id,shop,serviceCategory:data.serviceCategory||data.category,
+   vehicle:postVehicle(data.vehicle),authorName:shop.name,authorAvatar:shop.avatar,city:shop.city,province:shop.province};
+ }
+ async function postsList(request){
+  const a=await actor(request);
+  if(!['owner','shop'].includes(a.profile.role))D.fail('Only customers and shops can view showcase posts.','forbidden');
+  const query=request.query||{},allowed=new Set(['service','q','cursor','page','limit','shop_id']);
+  if(Object.keys(query).some(key=>!allowed.has(key)))validation({query:'Only service, q, cursor, page, limit and shop_id are supported.'});
+  const limit=query.limit===undefined?20:Number(query.limit);
+  if(!Number.isInteger(limit)||limit<1||limit>50)validation({limit:'Limit must be an integer from 1 to 50.'});
+  if(query.page!==undefined&&(!/^[1-9]\d*$/.test(String(query.page))||Number(query.page)>1000))validation({page:'Page must be an integer from 1 to 1000.'});
+  if(query.page!==undefined&&query.cursor)validation({page:'Use either page or cursor pagination, not both.'});
+  const service=query.service||'All';
+  if(service!=='All'&&!categories.includes(service))validation({service:'Choose a valid service category.'});
+  const q=query.q===undefined?'':typeof query.q==='string'?query.q.trim().toLocaleLowerCase():null;
+  if(q===null||q.length>120)validation({q:'Search must be at most 120 characters.'});
+  const shopId=query.shop_id?validPostId(query.shop_id):null;
+  const cursor=cursorValue(query.cursor),collection=db.collection('posts');
+  let base=collection.where('status','==','published').where('authorRole','==','shop');
+  if(service!=='All')base=base.where('category','==',service);
+  if(shopId)base=base.where('shopId','==',shopId);
+  let current=cursor,skip=query.page===undefined?0:(Number(query.page)-1)*limit,matched=0;
+  const items=[],scanSize=Math.min(100,Math.max(limit*2,40));
+  let hasMore=false;
+  while(items.length<limit){
+   let queryRef=base.orderBy('createdAt','desc').orderBy(FieldPath.documentId(),'desc');
+   if(current)queryRef=queryRef.startAfter(Timestamp.fromMillis(current.createdAt),current.id);
+   const snapshot=await queryRef.limit(scanSize).get();
+   if(!snapshot.docs.length)break;
+   const profiles=new Map();
+   await Promise.all([...new Set(snapshot.docs.map(doc=>doc.data().shopId||doc.data().authorId))].map(async id=>{
+    const profile=(await db.doc(`users/${id}`).get()).data();if(profile)profiles.set(id,profile);
+   }));
+   for(let index=0;index<snapshot.docs.length;index++){
+    const doc=snapshot.docs[index],data=doc.data(),id=data.shopId||data.authorId,shop=shopSnapshot(id,profiles.get(id),data),vehicle=postVehicle(data.vehicle);
+    current={createdAt:doc.get('createdAt').toMillis(),id:doc.id};
+    if(q&&!`${data.title||''} ${data.description||''} ${shop.name} ${vehicle.make} ${vehicle.model}`.toLocaleLowerCase().includes(q))continue;
+    if(matched++<skip)continue;
+    items.push(publicPost(doc.id,data,profiles.get(id)));
+    if(items.length===limit){hasMore=index<snapshot.docs.length-1||snapshot.docs.length===scanSize;break;}
+   }
+   if(items.length===limit)break;
+   if(snapshot.docs.length<scanSize){hasMore=false;break;}
+  }
+  return {items,cursor:hasMore&&current?Buffer.from(JSON.stringify(current)).toString('base64url'):null};
+ }
+ async function postDetail(request){
+  const a=await actor(request);
+  if(!['owner','shop'].includes(a.profile.role))D.fail('Only customers and shops can view showcase posts.','forbidden');
+  const id=validPostId(request.id),snapshot=await db.doc(`posts/${id}`).get(),data=snapshot.data();
+  if(!data||data.status!=='published'||data.authorRole!=='shop')D.fail('Post not found.','not_found');
+  const shopId=data.shopId||data.authorId,profile=(await db.doc(`users/${shopId}`).get()).data();
+  return {post:publicPost(id,data,profile)};
+ }
+ async function createShowcase(request){
+  const a=await requireShop(request),input=request.data||{};
+  if(Object.keys(input).some(key=>!['title','description','serviceCategory','category','vehicle','images'].includes(key)))validation({post:'Remove unsupported post fields.'});
+  const fields=validateShowcase(input);
+  const images=await restImages(input.images,a.uid),ref=db.collection('posts').doc(),profile=a.profile,now=stamp();
+  const shop=shopSnapshot(a.uid,profile,{});
+  const data={authorId:a.uid,shopId:a.uid,authorRole:'shop',type:'showcase',...fields,images,
+   authorName:shop.name,authorAvatar:shop.avatar,city:shop.city,province:shop.province,
+   status:'published',createdAt:now,updatedAt:now};
+  await db.runTransaction(async tx=>{
+   tx.create(ref,data);audit(tx,a.uid,'create',ref.id);
+  });
+  return {post:publicPost(ref.id,{...data,createdAt:Timestamp.now(),updatedAt:Timestamp.now()},profile)};
+ }
+ async function updateShowcase(request){
+  const a=await requireShop(request),id=validPostId(request.id),ref=db.doc(`posts/${id}`),snapshot=await ref.get(),current=snapshot.data();
+  if(!current||current.status!=='published'||current.authorRole!=='shop')D.fail('Post not found.','not_found');
+  if((current.shopId||current.authorId)!==a.uid)D.fail('You can only edit your own showcase posts.','forbidden');
+  const input=request.data||{},editable=['title','description','serviceCategory','category','vehicle','images'];
+  if(Object.keys(input).some(key=>!editable.includes(key)))validation({post:'Remove unsupported post fields.'});
+  if(!Object.keys(input).length)validation({post:'Provide at least one field to update.'});
+  const fields=validateShowcase(input,{partial:true});
+  const images=Object.hasOwn(input,'images')?await restImages(input.images,a.uid):current.images||[];
+  const oldPaths=[...(current.cleanupImages||[]),...(current.images||[]).map(item=>item.path).filter(Boolean)],newPaths=new Set(images.map(item=>item.path));
+  const cleanupPaths=[...new Set(oldPaths.filter(path=>!newPaths.has(path)))];
+  const changes={...fields,...(Object.hasOwn(input,'images')?{images}:{}),...(cleanupPaths.length?{cleanupImages:cleanupPaths}:{}),updatedAt:stamp()};
+  await db.runTransaction(async tx=>{
+   const latest=(await tx.get(ref)).data();
+   if(!latest||latest.status!=='published')D.fail('Post not found.','not_found');
+   if((latest.shopId||latest.authorId)!==a.uid)D.fail('You can only edit your own showcase posts.','forbidden');
+   tx.update(ref,changes);audit(tx,a.uid,'update',id);
+  });
+  for(const path of cleanupPaths)await storage.remove(path);
+  if(cleanupPaths.length)await ref.update({cleanupImages:FieldValue.delete()});
+  return {post:publicPost(id,{...current,...changes,updatedAt:Timestamp.now()},a.profile)};
+ }
+ async function deleteShowcase(request){
+  const a=await requireShop(request),id=validPostId(request.id),ref=db.doc(`posts/${id}`);
+  const snapshot=await ref.get(),current=snapshot.data();
+  if(!current||current.authorRole!=='shop')D.fail('Post not found.','not_found');
+  if((current.shopId||current.authorId)!==a.uid)D.fail('You can only delete your own showcase posts.','forbidden');
+  if(current.status!=='removed')await db.runTransaction(async tx=>{
+   const latest=(await tx.get(ref)).data();
+   if(!latest||latest.status!=='published')D.fail('Post not found.','not_found');
+   if((latest.shopId||latest.authorId)!==a.uid)D.fail('You can only delete your own showcase posts.','forbidden');
+   tx.update(ref,{status:'removed',cleanupImages:[...new Set([...(latest.cleanupImages||[]),...(latest.images||[]).map(image=>image.path).filter(Boolean)])],updatedAt:stamp()});audit(tx,a.uid,'remove',id);
+  });
+  const paths=[...(current.cleanupImages||[]),...(current.images||[]).map(image=>image.path)].filter(path=>typeof path==='string'&&path.startsWith(`posts/${a.uid}/`));
+  for(const path of new Set(paths))await storage.remove(path);
+  if(current.cleanupImages?.length)await ref.update({cleanupImages:FieldValue.delete()});
+  return {id,deleted:true};
  }
  async function postsApi(request){
   const a=await actor(request),input=request.data||{},op=input.op;
@@ -92,12 +276,13 @@ function createPosts({db,auth,actor,storage}){
   D.id(input.requestId);
   const receipt=mutation(db,a.uid,`posts:${op}`,input);
   if(op==='create'||op==='update'){
+   if(a.profile.role!=='shop')D.fail('Only shops can manage showcase posts.','forbidden');
    const profile=await author(a),type=op==='create'?input.type:null;
    const current=op==='update'?(await db.doc(`posts/${D.id(input.id)}`).get()).data():null;
    if(op==='update'&&(!current||current.authorId!==a.uid||current.status!=='published'))D.fail('Post not found.','not-found');
    const authorRole=a.profile.role==='shop'?'shop':'customer';
    if(op==='create'&&((authorRole==='shop'&&type!=='showcase')||(authorRole==='customer'&&type!=='build')))D.fail('This account cannot publish that post type.','permission-denied');
-   const title=D.text(input.title,'Title',80),description=D.text(input.description,'Description',1000);
+   const title=D.text(input.title,'Title',100),description=input.description===undefined?'':D.text(input.description,'Description',2000);
    const category=input.category===undefined?(current?.category||'Other'):input.category;
    if(!categories.includes(category))D.fail('Choose a service category.');
    const projectStatus=input.projectStatus===undefined?current?.projectStatus:input.projectStatus;
@@ -105,7 +290,7 @@ function createPosts({db,auth,actor,storage}){
    if(authorRole==='customer'&&projectStatus!==undefined)D.fail('Customer build posts cannot set a project status.');
    const vehicle=input.vehicle===undefined?(current?.vehicle||''):typeof input.vehicle==='string'?input.vehicle.trim():D.fail('Enter a valid vehicle.', 'invalid-argument');
    if(vehicle.length>120)D.fail('Vehicle must be at most 120 characters.');
-   if(!Array.isArray(input.images)||input.images.length>6)D.fail('Choose up to six post photos.');
+   if(!Array.isArray(input.images)||input.images.length<1||input.images.length>MAX_SHOWCASE_IMAGES)D.fail('Choose between one and ten post photos.');
    const images=await Promise.all(input.images.map(path=>image(path,a.uid)));
    const id=op==='create'?posts.doc().id:D.id(input.id),ref=posts.doc(id);
    const fields={authorId:a.uid,authorRole,type:authorRole==='shop'?'showcase':'build',title,description,images,category,...(authorRole==='shop'?{projectStatus}:{}),vehicle,
@@ -113,7 +298,8 @@ function createPosts({db,auth,actor,storage}){
    return receipt.atomic(async tx=>{
     if(op==='update'){
      const snapshot=await tx.get(ref),saved=snapshot.data();
-     if(!saved||saved.authorId!==a.uid||saved.status!=='published')D.fail('Post not found.','not-found');
+     if(!saved||saved.status!=='published')D.fail('Post not found.','not-found');
+     if((saved.shopId||saved.authorId)!==a.uid)D.fail('You can only edit your own showcase posts.','forbidden');
      tx.update(ref,{...fields,createdAt:saved.createdAt});
     }else tx.create(ref,{...fields,createdAt:stamp()});
     audit(tx,a.uid,op,id);return {id};
@@ -123,13 +309,14 @@ function createPosts({db,auth,actor,storage}){
    const id=D.id(input.id),ref=posts.doc(id);
    return receipt.atomic(async tx=>{
     const saved=(await tx.get(ref)).data();
-    if(!saved||saved.authorId!==a.uid||saved.status!=='published')D.fail('Post not found.','not-found');
+    if(!saved||saved.status!=='published')D.fail('Post not found.','not-found');
+    if((saved.shopId||saved.authorId)!==a.uid)D.fail('You can only delete your own showcase posts.','forbidden');
     tx.update(ref,{status:'removed',updatedAt:stamp()});audit(tx,a.uid,op,id);return {id};
    });
   }
  }
  async function uploadPostImage(request){
-  const a=await actor(request),profile=await author(a);
+  const a=await requireShop(request),profile=a.profile;
   const file=P.validatePhoto(request.file);
   if(a.profile.role==='shop'&&profile.verificationStatus!=='approved')D.fail('Shop verification is required to publish showcases.','permission-denied');
   const path=`posts/${a.uid}/${randomUUID()}`;
@@ -138,6 +325,6 @@ function createPosts({db,auth,actor,storage}){
   if(details.size!==file.size||details.contentType!==file.contentType){await storage.remove(path);D.fail('The uploaded photo could not be verified. Choose it again.','failed-precondition');}
   return {path,url:storage.publicUrl(path),size:file.size,contentType:file.contentType};
  }
- return {postsApi,uploadPostImage};
+ return {postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage};
 }
 module.exports={createPosts,categories,authorName,PAGE_SIZE};

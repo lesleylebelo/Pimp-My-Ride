@@ -33,7 +33,7 @@ export function PostCard({post,onOpen,onEdit,onRemoved,editable=false,onSaved}){
    {editable&&<Pressable accessibilityRole="button" accessibilityLabel="Post options" onPress={()=>setMenu(value=>!value)} hitSlop={8} style={styles.more}><Ionicons name="ellipsis-horizontal" size={22} color={colors.textSecondary}/></Pressable>}
   </View>
   {!!photos.length&&<ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={styles.photos}>
-   {photos.map(photo=><Image key={photo.path} source={{uri:photo.url}} style={styles.photo} resizeMode="cover"/>)}
+   {photos.slice(0,1).map(photo=><Image key={photo.path} source={{uri:photo.url}} style={styles.photo} resizeMode="cover"/>)}
   </ScrollView>}
   <View style={styles.tags}><Text style={styles.tag}>{post.type==='showcase'?'Showcase':'Build'} · {post.category}</Text>{!!post.projectStatus&&<Text style={styles.status}>{post.projectStatus}</Text>}</View>
   <Text weight="medium" style={styles.title}>{post.title}</Text>
@@ -46,7 +46,7 @@ export function PostCard({post,onOpen,onEdit,onRemoved,editable=false,onSaved}){
    </Pressable>
   </View>
   {!!error&&<Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
-  {menu&&<View style={styles.menu}><Button title="Edit post" outline onPress={()=>{setMenu(false);onEdit?.(post);}}/><ConfirmationButton title="Delete post" message="Delete this post from public feeds? This cannot be undone." danger onConfirm={async()=>{try{await postsApi('remove',{id:post.id},user?.uid);setMenu(false);onRemoved?.(post.id);}catch(e){setError(e.message||'Unable to delete post.');}}}/></View>}
+  {menu&&<View style={styles.menu}><Button title="Edit post" outline onPress={()=>{setMenu(false);onEdit?.(post);}}/><ConfirmationButton title="Delete post" message="Delete this post from public feeds? This cannot be undone." danger onConfirm={async()=>{try{await postsApi('remove',{id:post.id,...(post.type==='showcase'?{showcase:true}:{})},user?.uid);setMenu(false);onRemoved?.(post.id);}catch(e){setError(e.message||'Unable to delete post.');}}}/></View>}
  </Card>;
 }
 

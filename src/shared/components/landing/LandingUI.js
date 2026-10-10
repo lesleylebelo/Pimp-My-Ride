@@ -59,7 +59,7 @@ export const shopTabs = [
   { label: 'My Shop', icon: 'profile' },
 ];
 
-export function LandingShell({ title, subtitle, tabs, feature, showFeature, onClose, children, admin = false, activeTab, onTabPress, onScroll, onLayout, onContentSizeChange, floatingAction }) {
+export function LandingShell({ title, subtitle, tabs, feature, showFeature, onClose, children, admin = false, activeTab, onTabPress, onScroll, onLayout, onContentSizeChange, floatingAction, refreshControl }) {
   const [loaded, fontError] = useFonts({ SpaceGrotesk_500Medium, SpaceGrotesk_600SemiBold, SpaceGrotesk_700Bold, Manrope_400Regular, Manrope_500Medium, Manrope_600SemiBold });
   const { logout, working, offline, cachedAt } = useAuth();
   const {theme} = useTheme();
@@ -91,7 +91,7 @@ export function LandingShell({ title, subtitle, tabs, feature, showFeature, onCl
             </Pressable>}
           </View>
 
-          <ScrollView style={ui.scroll} contentContainerStyle={[ui.content, !tabs && { paddingBottom: Math.max(insets.bottom, 24) }]} keyboardShouldPersistTaps="handled" onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} scrollEventThrottle={onScroll ? 16 : undefined}>
+          <ScrollView refreshControl={refreshControl} style={ui.scroll} contentContainerStyle={[ui.content, !tabs && { paddingBottom: Math.max(insets.bottom, 24) }]} keyboardShouldPersistTaps="handled" onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} scrollEventThrottle={onScroll ? 16 : undefined}>
             {!!signOutError && <LandingText style={ui.error}>{signOutError}</LandingText>}
             {children}
             {admin && <LandingButton title="Sign Out" outline onPress={signOut} disabled={working} />}

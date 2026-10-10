@@ -46,8 +46,29 @@ export async function apiRequest(path,data,{multipart=false,expectedUid,authClie
  const token=await user.getIdToken();
  if(auth.currentUser?.uid!==user.uid)throw new Error('Your account changed. Please try again.');
  const response=await fetchWithTimeout(`${url}/api/${path}`,{method:'POST',headers:{Authorization:`Bearer ${token}`,...(!multipart?{'Content-Type':'application/json'}:{})},body:multipart?data:JSON.stringify(data)},multipart?60000:45000,multipart?'upload':'request');
- let result;try{result=await response.json();}catch{throw new Error('The server returned an unexpected response. Refresh before trying again.');}
- if(!response.ok){const error=new Error(result.error?.message||'The request failed.');error.code=`api/${result.error?.code||'internal'}`;if(result.error?.retryWithNewRequest===true)error.retryWithNewRequest=true;throw error;}
+ const requestUrl=response.url||`${url}/api/${path}`,responseBody=await response.text(),loggedBody=responseBody.slice(0,4000);
+ let result;
+ try{result=JSON.parse(responseBody);}
+ catch{
+  const message=response.status===401?'Your session expired. Please sign out and sign in again.':response.status>=500?`The server could not complete this request (HTTP ${response.status}). Please try again shortly.`:'The server returned an unexpected response. Please try again.';
+  const error=new Error(message);error.code=`api/http-${response.status}`;error.status=response.status;error.responseBody=loggedBody;error.requestUrl=requestUrl;
+  console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});
+  throw error;
+ }
+ if(!response.ok){
+  const payload=result&&typeof result==='object'?result:{},errorBody=payload.error||payload;
+  const message=response.status===401?'Your session expired. Please sign out and sign in again.':response.status>=500?`The server could not complete this request (HTTP ${response.status}). Please try again shortly.`:payload.error?.message||'The request failed.';
+  const error=new Error(message);error.code=`api/${payload.error?.code||'internal'}`;error.status=response.status;error.responseBody=errorBody;error.requestUrl=requestUrl;
+  if(payload.error?.retryWithNewRequest===true)error.retryWithNewRequest=true;
+  console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});
+  throw error;
+ }
+ if(!result||typeof result!=='object'||!Object.prototype.hasOwnProperty.call(result,'data')){
+  const error=new Error('The server returned an unexpected response. Please try again.');
+  error.code='api/unexpected-response';error.status=response.status;error.responseBody=loggedBody;error.requestUrl=requestUrl;
+  console.error('[PimpMyRide API response invalid]',{status:response.status,responseBody:loggedBody,requestUrl});
+  throw error;
+ }
  return result.data;
 }
 
@@ -77,4 +98,43 @@ export async function uploadRequest(path,body,{expectedUid,onProgress}={}){
   };
   xhr.send(body);
  });
+}
+
+export async function apiMethodRequest(path,{method='GET',query,data,expectedUid}={}){
+ await requireConnection();
+ const root=baseURL(),auth=firebase().auth,user=auth.currentUser;
+ if(!user)throw new Error('Please sign in again.');
+ if(expectedUid&&user.uid!==expectedUid)throw new Error('Your account changed. Please try again.');
+ await ready(root);
+ if(auth.currentUser?.uid!==user.uid)throw new Error('Your account changed. Please try again.');
+ const token=await user.getIdToken();
+ if(auth.currentUser?.uid!==user.uid)throw new Error('Your account changed. Please try again.');
+ const params=query?Object.entries(query).filter(([,value])=>value!==undefined&&value!==null)
+  .map(([key,value])=>`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`).join('&'):'';
+ const requestUrlBase=`${root}/api/${path}${params?`?${params}`:''}`;
+ const hasBody=data!==undefined&&data!==null;
+ const response=await fetchWithTimeout(requestUrlBase,{
+  method,headers:{Authorization:`Bearer ${token}`,...(hasBody?{'Content-Type':'application/json'}:{})},
+  ...(hasBody?{body:JSON.stringify(data)}:{})
+ },45000,'request');
+ const requestUrl=response.url||requestUrlBase,responseBody=await response.text(),loggedBody=responseBody.slice(0,4000);
+ let result;
+ try{result=JSON.parse(responseBody);}
+ catch{
+  const message=response.status===401?'Your session expired. Please sign out and sign in again.':response.status>=500?`The server could not complete this request (HTTP ${response.status}). Please try again shortly.`:'The server returned an unexpected response. Please try again.';
+  const error=new Error(message);error.code=`api/http-${response.status}`;error.status=response.status;error.responseBody=loggedBody;error.requestUrl=requestUrl;
+  console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});throw error;
+ }
+ if(!response.ok){
+  const payload=result&&typeof result==='object'?result:{},errorBody=payload.error||payload;
+  const message=response.status===401?'Your session expired. Please sign out and sign in again.':response.status>=500?`The server could not complete this request (HTTP ${response.status}). Please try again shortly.`:payload.error?.message||'The request failed.';
+  const error=new Error(message);error.code=`api/${payload.error?.code||'internal'}`;error.status=response.status;error.responseBody=errorBody;error.requestUrl=requestUrl;
+  console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});throw error;
+ }
+ if(!result||typeof result!=='object'||!Object.hasOwn(result,'data')){
+  const error=new Error('The server returned an unexpected response. Please try again.');
+  error.code='api/unexpected-response';error.status=response.status;error.responseBody=loggedBody;error.requestUrl=requestUrl;
+  console.error('[PimpMyRide API response invalid]',{status:response.status,responseBody:loggedBody,requestUrl});throw error;
+ }
+ return result.data;
 }

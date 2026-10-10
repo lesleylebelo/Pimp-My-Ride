@@ -112,7 +112,10 @@ function RequestsFeed({navigation, feed}) {
     setFiltersOpen(false);
   };
   const disabled = busy || offline;
-  const retry = () => {void refresh().catch(() => {});};
+  const retry = () => {
+    if(error)void refresh().catch(() => {});
+    if(posts.error)void posts.refresh();
+  };
   const onScroll=event=>{requestFeed.onScroll(event);const {contentOffset,contentSize,layoutMeasurement}=event.nativeEvent;if(contentSize.height-contentOffset.y-layoutMeasurement.height<260)posts.loadNext();};
   const onContentSizeChange=(width,height)=>{requestFeed.onContentSizeChange(width,height);if(height<650)posts.loadNext();};
 
@@ -140,7 +143,7 @@ function RequestsFeed({navigation, feed}) {
 <FeedServicePill title="More filters" icon="options-outline" selected={false} onPress={() => setFiltersOpen(true)}/>
     </View>
     <Notice busy={(busy&&!feedRequests.length||posts.busy&&!posts.items.length)} error={offline ? offlineMessage : error||posts.error}/>
-    {!!error && <Button title="Retry loading requests" outline onPress={retry}/>}
+    {!!(error||posts.error) && <Button title={error?'Retry loading requests':'Retry loading posts'} outline disabled={!!(error&&busy)||!!(posts.error&&posts.busy)} onPress={retry}/>}
     {!busy && !posts.busy && !error && !posts.error && !feedItems.length && <View style={styles.emptyState}>
       <Text style={styles.emptyTitle}>{hasFilters ? 'No requests match your search' : 'No open requests are available'}</Text>
       {hasFilters && <Button title="Clear filters" outline onPress={clearFilters}/>}

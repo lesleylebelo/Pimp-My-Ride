@@ -169,7 +169,7 @@ async function completeProfile(request){
 const {listDocuments,checkUpload,uploadDocument}=createDocuments({db,storage,actor});
 const marketplace=createMarketplace({db,auth,actor});
 const {photosApi,checkPhotoUpload,uploadPhoto}=createPhotos({db,auth,storage:photoStorage,actor});
-const {postsApi,uploadPostImage}=createPosts({db,auth,actor,storage:postStorage});
-return {adminApi,sessionEvent,completeProfile,listDocuments,checkUpload,uploadDocument,marketplace,photosApi,checkPhotoUpload,uploadPhoto,postsApi,uploadPostImage};
+const {postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage}=createPosts({db,auth,actor,storage:postStorage});
+return {adminApi,sessionEvent,completeProfile,listDocuments,checkUpload,uploadDocument,marketplace,photosApi,checkPhotoUpload,uploadPhoto,postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage};
 }
 module.exports={createServices};

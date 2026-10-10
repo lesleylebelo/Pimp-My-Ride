@@ -14,6 +14,7 @@ export function useMarketData(op,input={}){
   setState(s=>({...s,busy:true,error:''}));
   try{
    const data=await marketApi(op,JSON.parse(key));
+   if(op==='requests'&&!Array.isArray(data?.items))throw new Error('The server returned an unexpected requests response. Please try again.');
    if(mounted.current&&current===generation.current)setState({data,busy:false,error:''});
    return data;
   }catch(error){

@@ -30,6 +30,10 @@ local file; `npm start` uses the process environment. Keep credentials out of
 command-line arguments and Git. Never launch experiments or data-writing tests
 with production credentials. Point browser development at the intended API;
 native devices cannot reach a host machine through the device's `localhost`.
+Before opening the HTTP listener, startup checks Firebase project/credential
+configuration and validates the required Supabase storage URL and secret, port,
+and CORS settings. Render must provide the storage settings even when only
+read-only feeds are being debugged.
 
 ## Safe local checks
 
@@ -86,7 +90,7 @@ Do not deploy until separately instructed. These are review steps for the owner:
    `npm start` (`node server.cjs`); Node: 22.x; health path: `/health`.
 2. Verify `NODE_ENV`, `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON`,
    `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_BUCKET`,
-   `SUPABASE_PHOTO_BUCKET`, and `CORS_ORIGINS`
+   `SUPABASE_PHOTO_BUCKET`, optional `SUPABASE_POSTS_BUCKET`, and `CORS_ORIGINS`
    privately. `PORT` is provided by Render. No emulator variables may be present
    in production. Do not copy values into issues, screenshots, or this document.
 3. `CORS_ORIGINS` is an exact comma-separated HTTP(S) origin list with no paths,
@@ -107,6 +111,45 @@ HTTP 204 with the expected localhost origin. These are historical read-only
 observations, not verification of the current revision or backend credentials.
 
 ## Firebase verification and rules
+
+## Shop showcase posts
+
+Showcase metadata is stored in Firestore `posts` documents; photo binaries live
+in the existing Supabase `public-posts` bucket (configurable with
+`SUPABASE_POSTS_BUCKET`). There is no SQL database or relational migration in
+this project. The REST API accepts authenticated `GET /api/posts`,
+`GET/PATCH/DELETE /api/posts/:id`, and `POST /api/posts`; photos continue to
+upload through `POST /api/posts/images`. Keep the posts bucket public for
+customer image URLs and do not use Render local disk.
+
+Before release, deploy the Firestore composites in `firestore.indexes.json`:
+
+```text
+firebase deploy --only firestore:indexes --project YOUR_FIREBASE_PROJECT_ID
+```
+
+The legacy showcase documents are readable without a data change, but a
+production-safe, additive compatibility migration fills `shopId` and
+`serviceCategory` for shop-authored posts. Run a dry-run first, then inspect the
+planned count and execute with explicit `--apply`:
+
+```text
+node scripts/migrate-showcase-posts.cjs YOUR_FIREBASE_PROJECT_ID
+node scripts/migrate-showcase-posts.cjs YOUR_FIREBASE_PROJECT_ID --apply
+```
+
+Use Firebase Application Default Credentials (`gcloud auth application-default
+login`) or set `FIREBASE_SERVICE_ACCOUNT_JSON` in the PowerShell process that
+runs the script. Confirm the project ID before applying. The migration is
+idempotent and only adds compatibility fields plus `updatedAt`; it does not
+delete or move posts or files.
+
+In Supabase, create/retain a **public** bucket matching `SUPABASE_POSTS_BUCKET`
+(default `public-posts`), with image uploads allowed for the backend service
+role. Render needs no additional environment variable if the existing Supabase
+URL, secret key, and bucket are configured. Never put the Supabase secret in
+Expo configuration. Deploy/restart the backend after the release; no local-disk
+or new service setup is required.
 
 The user confirmed the Firebase-hosted password-reset handler on 23 September
 2026. See [the flow decision](AUTH_FLOW_DECISION.md). Delivered reset emails,
