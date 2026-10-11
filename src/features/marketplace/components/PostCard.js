@@ -14,6 +14,12 @@ export function postTime(value){
  const elapsed=Math.max(0,Date.now()-timestamp),minutes=Math.floor(elapsed/60000);
  return minutes<1?'just now':minutes<60?`${minutes}m ago`:minutes<1440?`${Math.floor(minutes/60)}h ago`:`${Math.floor(minutes/1440)}d ago`;
 }
+function formatVehicle(value){
+ if(typeof value==='string')return value.trim();
+ if(!value||typeof value!=='object'||Array.isArray(value))return '';
+ const text=part=>typeof part==='string'?part.trim():typeof part==='number'&&Number.isFinite(part)?String(part):'';
+ return [text(value.year),text(value.make),text(value.model)].filter(Boolean).join(' ');
+}
 export function PostCard({post,onOpen,onEdit,onRemoved,editable=false,onSaved}){
  const {user,offline}=useAuth(),[saved,setSaved]=useState(post.saved===true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[menu,setMenu]=useState(false);
  async function toggleSaved(){
@@ -23,6 +29,7 @@ export function PostCard({post,onOpen,onEdit,onRemoved,editable=false,onSaved}){
   finally{setBusy(false);}
  }
  const photos=(post.images||[]).filter(image=>typeof image?.url==='string'&&image.url.startsWith('https://'));
+ const vehicle=formatVehicle(post.vehicle);
  const place=[post.city,post.province].filter(Boolean).join(' · ');
  const author=post.authorName||'Customer';
  return <Card style={styles.card}>
@@ -38,7 +45,7 @@ export function PostCard({post,onOpen,onEdit,onRemoved,editable=false,onSaved}){
   <View style={styles.tags}><Text style={styles.tag}>{post.type==='showcase'?'Showcase':'Build'} · {post.category}</Text>{!!post.projectStatus&&<Text style={styles.status}>{post.projectStatus}</Text>}</View>
   <Text weight="medium" style={styles.title}>{post.title}</Text>
   <Text style={styles.description}>{post.description}</Text>
-  {!!post.vehicle&&<Text style={styles.vehicle}>{post.vehicle}</Text>}
+  {!!vehicle&&<Text style={styles.vehicle}>{vehicle}</Text>}
   <View style={styles.actions}>
    <Pressable accessibilityRole="button" accessibilityLabel={`View ${post.title}`} onPress={onOpen} style={styles.view}><Text weight="medium" style={styles.viewText}>View →</Text></Pressable>
    <Pressable accessibilityRole="button" accessibilityLabel={saved?'Unsave post':'Save post'} accessibilityState={{selected:saved}} disabled={busy||offline} onPress={()=>void toggleSaved()} style={styles.save}>

@@ -45,15 +45,16 @@ export async function postsApi(op,data={},expectedUid){
   return result;
  }finally{account();}
 }
-export async function pickPostPhotos(maximum){
- const [ImagePicker,ImageManipulator]=await Promise.all([
-  import('expo-image-picker'),
-  import('expo-image-manipulator')
- ]);
+export async function pickPostPhotos(maximum,{
+ loadImagePicker=()=>import('expo-image-picker'),
+ loadImageManipulator=()=>import('expo-image-manipulator'),
+}={}){
+ const ImagePicker=await loadImagePicker();
  const picked=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsMultipleSelection:true,selectionLimit:maximum,quality:1});
- if(picked.canceled)return [];
+ if(picked.canceled||!picked.assets?.length)return [];
+ const ImageManipulator=await loadImageManipulator();
  const compressed=[];
- for(const asset of picked.assets||[]){
+ for(const asset of picked.assets){
   const file={uri:asset.uri,name:asset.fileName||`showcase-${Date.now()}.jpg`,size:asset.fileSize||1,mimeType:asset.mimeType||'image/jpeg'};
   const issue=photoFileError(file);if(issue)throw new Error(issue);
   const result=await ImageManipulator.manipulateAsync(asset.uri,[{resize:{width:Math.min(asset.width||1600,1600)}}],{compress:0.78,format:ImageManipulator.SaveFormat.JPEG});

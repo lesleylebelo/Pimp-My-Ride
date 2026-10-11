@@ -68,7 +68,7 @@ test('showcase REST CRUD enforces role/ownership, validates fields and updates t
  const invalid=await request(f.app).post('/api/posts').set('Authorization',f.token('shop')).send({title:'',serviceCategory:'Invalid',images:[]}).expect(400);
  assert.equal(invalid.body.error.code,'validation_error');assert.ok(invalid.body.error.fields.title);
  const created=await request(f.app).post('/api/posts').set('Authorization',f.token('shop')).send({title:'Turbo tune',description:'A clean fit',serviceCategory:'Tuning',vehicle:{make:'Honda',model:'Civic',year:2022},images:[image]}).expect(201);
- const id=created.body.data.post.id;assert.equal(created.body.data.post.shop.name,'North Garage');assert.equal(created.body.data.post.images[0].url,`https://images.example/${image}`);
+ const id=created.body.data.post.id;assert.equal(created.body.data.post.shop.name,'North Garage');assert.deepEqual(created.body.data.post.vehicle,{make:'Honda',model:'Civic',year:2022});assert.equal(created.body.data.post.images[0].url,`https://images.example/${image}`);
  const foreign=await request(f.app).patch(`/api/posts/${id}`).set('Authorization',f.token('other')).send({title:'Stolen'}).expect(403);
  assert.equal(foreign.body.error.code,'forbidden');
  const updated=await request(f.app).patch(`/api/posts/${id}`).set('Authorization',f.token('shop')).send({title:'Updated tune'}).expect(200);

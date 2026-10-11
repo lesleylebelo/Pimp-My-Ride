@@ -21,7 +21,7 @@ export function PostFormScreen({navigation,route}){
  async function selectPhotos(){
   if(busy||offline)return;
   try{const selected=await pickPostPhotos(Math.max(0,10-images.length-files.length));setFiles(previous=>[...previous,...selected].slice(0,Math.max(0,10-images.length)));setImageOrder(previous=>[...previous,...selected.map(file=>`f:${file.uri}`)]);}
-  catch(e){setError(failure(e));}
+  catch(e){if(__DEV__)console.error('[PimpMyRide showcase photo picker failed]',e);setError(failure(e));}
  }
  async function save(){
   if(lock.current||busy||offline)return;
