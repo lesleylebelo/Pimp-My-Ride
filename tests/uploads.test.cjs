@@ -79,6 +79,7 @@ async function screen({items=[],upload,read,uid='shop-1',offline=false,canUpload
  return {
   uploads,busy,get listCalls(){return listCalls;},
   text:()=>JSON.stringify(tree.toJSON()),
+  metadata:kind=>tree.root.findByProps({testID:`document-${kind}`}).findAllByType('Text').flatMap(node=>node.props.children).join(' '),
   file:kind=>tree.root.findByProps({testID:`document-${kind}`}).findByType('PickerField').props.value,
   choose:async(kind,selected)=>act(async()=>tree.root.findByProps({testID:`document-${kind}`}).findByType('PickerField').props.onChange(selected)),
   press:async id=>act(async()=>{await button(id).props.onPress();await flush();}),
@@ -93,14 +94,14 @@ async function screen({items=[],upload,read,uid='shop-1',offline=false,canUpload
 test('saved metadata is displayed and a failed individual upload retries without reuploading successful files',async()=>{
  let fail=true;
  const s=await screen({items:[{id:'cipcCert',name:'existing.pdf',size:1024}],upload:async kind=>{if(kind==='ownerId'&&fail)throw Error('Server unavailable');}});
- assert.match(s.text(),/Saved: existing.pdf/);
+ assert.match(s.metadata('cipcCert'),/existing\.pdf/);
  await s.choose('proofOfAddress',file('address.pdf'));await s.press('upload-proofOfAddress');
- assert.equal(s.file('proofOfAddress'),null);assert.match(s.text(),/Saved: address.pdf/);
+ assert.equal(s.file('proofOfAddress'),null);assert.match(s.metadata('proofOfAddress'),/address\.pdf/);
  await s.choose('ownerId',file('id.pdf'));await s.press('upload-ownerId');
  assert.equal(s.file('ownerId').name,'id.pdf');assert.match(s.text(),/Server unavailable/);
  fail=false;await s.press('upload-ownerId');
  assert.deepEqual(s.uploads.map(value=>value.kind),['proofOfAddress','ownerId','ownerId']);
- assert.equal(s.file('ownerId'),null);assert.match(s.text(),/Saved: id.pdf/);
+ assert.equal(s.file('ownerId'),null);assert.match(s.metadata('ownerId'),/id\.pdf/);
  await s.close();
 });
 
@@ -112,7 +113,7 @@ test('rapid duplicate submissions share a ref lock and retain successful status 
  await act(async()=>{pending=press();void press();});
  assert.equal(s.uploads.length,1);assert.deepEqual(s.busy,[true]);
  await act(async()=>{release();await pending;});
- assert.match(s.text(),/Saved: id.pdf/);assert.match(s.text(),/Uploaded successfully/);assert.match(s.text(),/Could not refresh saved documents/);
+ assert.match(s.metadata('ownerId'),/id\.pdf/);assert.match(s.text(),/Uploaded successfully/);assert.match(s.text(),/Could not refresh saved documents/);
  assert.equal(s.file('ownerId'),null);assert.deepEqual(s.busy,[true,false]);await s.close();
 });
 

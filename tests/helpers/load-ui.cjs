@@ -3,6 +3,18 @@ function loadUI(file,mocks={}) {
  const native=Object.fromEntries(['View','Text','Pressable','TextInput','ScrollView','ActivityIndicator','Image'].map(n=>[n,n]));
  native.StyleSheet={create:v=>v};native.Modal=({visible,children})=>visible?React.createElement('Modal',null,children):null;
  native.AppState={currentState:'active',addEventListener:()=>({remove(){}})};
+ // Complete the timing calls synchronously; UI tests do not run a native driver.
+ class AnimatedValue {
+  constructor(value){this.value=value;}
+  setValue(value){this.value=value;}
+  interpolate(config){return {value:this,config};}
+ }
+ native.Animated={Value:AnimatedValue,View:'AnimatedView',timing:(value,config)=>({
+  start(callback){value.setValue(config.toValue);callback?.({finished:true});},
+  stop(){},
+ })};
+ // Screen-specific mocks override exports without losing the shared defaults.
+ Object.assign(native,mocks['react-native']);
  const cache={};
  const expoStubs={
    '@react-native-async-storage/async-storage': { getItem: async () => null, setItem: async () => undefined, removeItem: async () => undefined },
@@ -18,7 +30,7 @@ function loadUI(file,mocks={}) {
  function load(f){f=path.resolve(f);if(cache[f])return cache[f].exports;
  const mod={exports:{}};cache[f]=mod;
  const {code}=babel.transformSync(fs.readFileSync(f,'utf8'),{configFile:false,babelrc:false,plugins:[[require.resolve('@babel/plugin-transform-react-jsx'),{runtime:'automatic'}],require.resolve('@babel/plugin-transform-modules-commonjs')]});
- new Function('require','module','exports',code)(name=>{if(Object.hasOwn(mocks,name))return mocks[name];const matched=Object.keys(expoStubs).find(prefix=>name===prefix||name.startsWith(prefix+'/'));if(matched)return expoStubs[matched];if(name==='react-native')return native;if(name==='@expo/vector-icons')return {Ionicons:'Icon',MaterialCommunityIcons:'Icon'};if(name==='react-native-safe-area-context')return {SafeAreaView:'SafeAreaView'};if(name.startsWith('.'))return load(path.resolve(path.dirname(f),name+'.js'));return require(name);},mod,mod.exports);return mod.exports;}
+ new Function('require','module','exports',code)(name=>{if(name==='react-native')return native;if(Object.hasOwn(mocks,name))return mocks[name];const matched=Object.keys(expoStubs).find(prefix=>name===prefix||name.startsWith(prefix+'/'));if(matched)return expoStubs[matched];if(name==='@expo/vector-icons')return {Ionicons:'Icon',MaterialCommunityIcons:'Icon'};if(name==='react-native-safe-area-context')return {SafeAreaView:'SafeAreaView'};if(name.startsWith('.'))return load(path.resolve(path.dirname(f),name+'.js'));return require(name);},mod,mod.exports);return mod.exports;}
  return load(file);
 }
 module.exports={loadUI};

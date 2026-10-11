@@ -16,7 +16,7 @@ const says=(tree,text)=>tree.root.findAllByType('Text').some(node=>String([node.
 const change=(tree,label,value)=>act(async()=>field(tree,label).props.onChangeText(value));
 const press=(tree,title)=>act(async()=>button(tree,title).props.onPress());
 const unmount=tree=>act(async()=>tree.unmount());
-const scrollToBottom=tree=>act(async()=>{const view=tree.root.findAllByType('View').find(node=>node.props.onScroll);view.props.onScroll({nativeEvent:{contentOffset:{y:500},contentSize:{height:1200},layoutMeasurement:{height:600}}});});
+const scrollToBottom=tree=>act(async()=>{const view=tree.root.findAllByType('View').find(node=>node.props.onScroll);assert.ok(view,'Scrollable page must expose onScroll for pagination');view.props.onScroll({nativeEvent:{contentOffset:{y:500},contentSize:{height:1200},layoutMeasurement:{height:600}}});});
 function setup({api=async()=>({id:'saved'}),read,auth={user:{uid:'owner'},profile:{role:'owner'},offline:false}}={}){
   const calls=[],reads=[],moves=[];
   const navigation={navigate:(...args)=>moves.push(['navigate',...args]),replace:(...args)=>moves.push(['replace',...args]),goBack:()=>moves.push(['back'])};
@@ -70,22 +70,29 @@ test('offline owner forms block actions and an unmounted request does not naviga
   await act(async()=>{release({id:vehicle.id});await pending;});assert.deepEqual(context.moves,[]);
 });
 
-test('garage appends vehicles while scrolling and archive/restore require confirmation with the displayed version',async()=>{
+test('garage appends vehicles while scrolling',async t=>{
   const context=setup({read:(op,input)=>({items:input.archived?[{...vehicle,archived:true}]:input.cursor?[secondVehicle]:[vehicle],cursor:input.cursor?null:'next-vehicles'})});
   const tree=await mount(context,'GarageScreen');
+  t.after(()=>unmount(tree));
   assert.equal(button(tree,'Next'),undefined);await scrollToBottom(tree);assert.ok(context.reads.some(([op,input])=>op==='vehicles'&&input.cursor==='next-vehicles'));
+  assert.ok(says(tree,'Ford Fiesta'));
+});
+
+test('garage archive/restore require confirmation with the displayed version',async t=>{
+  const context=setup({read:(op,input)=>({items:input.archived?[{...vehicle,archived:true}]:[secondVehicle],cursor:null})});
+  const tree=await mount(context,'GarageScreen');
+  t.after(()=>unmount(tree));
   await press(tree,'Remove Ford Fiesta');await press(tree,'Cancel');assert.equal(context.calls.length,0);
   await press(tree,'Remove Ford Fiesta');await press(tree,'Confirm');assert.deepEqual(context.calls,[['vehicleArchive',{id:'vehicle-two',version:3,archived:true}]]);assert.ok(says(tree,'Ford Fiesta removed from your active garage.'));
   await press(tree,'Archived vehicles');assert.ok(context.reads.some(([op,input])=>op==='vehicles'&&input.archived===true&&input.cursor===null));
   await press(tree,'Restore Toyota Corolla');await press(tree,'Confirm');assert.deepEqual(context.calls[1],['vehicleArchive',{id:'vehicle-one',version:3,archived:false}]);
-  await unmount(tree);
 });
 
 test('request form scrolls vehicle choices independently, validates amounts and dates, and preserves a failed direct draft',async()=>{
   let fail=true,release;
   const context=setup({read:(op,input)=>op==='vehicles'?{items:input.cursor?[secondVehicle]:[vehicle],cursor:input.cursor?null:'vehicle-page-two'}:op==='categories'?{items:[category]}:{items:[shop]},api:async()=>{if(fail){await new Promise(resolve=>{release=resolve;});throw Error('Network interrupted. Retry this request.');}return {id:'new-request'};}});
   const tree=await mount(context,'RequestFormScreen');
-  const selector=tree.root.findAllByType('View').find(node=>node.props.onLayout&&node.props.style?.some?.(style=>style?.padding===14));
+  const selector=tree.root.find(node=>node.props.title==='01  /  YOUR VEHICLE'&&typeof node.props.onLayout==='function');
   assert.ok(selector);await act(async()=>selector.props.onLayout({nativeEvent:{layout:{y:0,height:180}}}));
   assert.ok(context.reads.some(([op,input])=>op==='vehicles'&&input.cursor==='vehicle-page-two'));
   assert.equal(button(tree,'Next'),undefined);await press(tree,'Ford Fiesta (2020)');await press(tree,'Paint');

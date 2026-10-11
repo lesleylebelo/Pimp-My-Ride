@@ -162,6 +162,7 @@ test('navigation refuses unverified user objects for every role and opens the si
   '../features/auth/screens/SignInScreen','../features/auth/screens/SignUpScreen',
   '../features/auth/screens/ForgotPasswordScreen','../features/auth/screens/VerifyEmailScreen','../shared/components/BackendStatus',
  ].map(name=>[name,placeholder]));
+ const initialRoutes=[];
  for(const role of ['owner','shop','admin']){
   const Navigator=loadUI('src/navigation/AppNavigator.js',{
    ...screenMocks,
@@ -171,8 +172,10 @@ test('navigation refuses unverified user objects for every role and opens the si
    'react-native-safe-area-context':{SafeAreaProvider:'SafeAreaProvider'},'expo-status-bar':{StatusBar:'StatusBar'},
   }).default;
   let tree;await act(async()=>{tree=Renderer.create(React.createElement(Navigator));});
-  assert.equal(tree.root.findByType('StackNavigator').props.initialRouteName,'SignIn');
-  assert.deepEqual(tree.root.findAllByType('StackScreen').map(n=>n.props.name),['Legal','Splash','SignIn','SignUp','ForgotPassword','VerifyEmail']);
-  await act(async()=>tree.unmount());
+  try{
+   assert.deepEqual(tree.root.findAllByType('StackScreen').map(n=>n.props.name),['Legal','Splash','SignIn','SignUp','ForgotPassword','VerifyEmail']);
+   initialRoutes.push(tree.root.findByType('StackNavigator').props.initialRouteName);
+  }finally{await act(async()=>tree.unmount());}
  }
+ assert.deepEqual(initialRoutes,['SignIn','SignIn','SignIn']);
 });

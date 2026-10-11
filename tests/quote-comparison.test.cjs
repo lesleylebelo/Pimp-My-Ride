@@ -37,7 +37,11 @@ test('owner compares real offer details and confirms one selected quote before n
   const context = setup(), tree = await mount(context);
   t.after(() => unmount(tree));
   assert.ok(says(tree, 'First Customs')); assert.ok(says(tree, 'Paint and labour')); assert.ok(says(tree, 'R750.00'));
-  assert.ok(says(tree, '3 working days')); assert.ok(says(tree, 'Warranty: Six months')); assert.ok(says(tree, 'Warranty: not specified'));
+  assert.ok(says(tree, '3 working days'));
+  const firstQuote=tree.root.find(node=>node.props.quote?.id==='quote-one');
+  assert.ok(firstQuote.findAllByType('Text').some(node=>node.props.children==='Warranty'));
+  assert.ok(firstQuote.findAllByType('Text').some(node=>node.props.children==='Six months'));
+  assert.ok(says(tree, 'Warranty: not specified'));
   assert.equal(button(tree, 'Continue to book').props.disabled, true);
   await press(tree, 'Select: First Customs'); assert.equal(!!button(tree, 'Continue to book').props.disabled, false);
   await press(tree, 'Continue to book'); assert.ok(says(tree, 'Cancelling the booking does not reopen the request.'));

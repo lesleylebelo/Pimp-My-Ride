@@ -17,7 +17,7 @@ const uploadParams=call=>new URL(call[0],'https://example.invalid/').searchParam
 
 test('photo validation rejects missing, invalid, oversized and remote files before upload',async()=>{
  const s=setup();
- for(const [selected,pattern] of [[null,/Choose/],[{...file(),mimeType:'image/gif'},/JPEG or PNG/],[{...file(),size:0},/size/],[{...file(),size:1.5},/size/],[{...file(),size:5*1024*1024+1},/5 MB/],[{...file(),uri:'https://example.invalid/private.jpg'},/device/]]){
+ for(const [selected,pattern] of [[null,/Choose/],[{...file(),mimeType:'image/gif'},/Choose a JPEG, PNG or WebP photo\./],[{...file(),size:0},/size/],[{...file(),size:1.5},/size/],[{...file(),size:5*1024*1024+1},/5 MB/],[{...file(),uri:'https://example.invalid/private.jpg'},/device/]]){
   await assert.rejects(()=>s.uploadVehiclePhoto('car','1',0,selected,'owner'),pattern);
  }
  assert.equal(s.calls.length,0);
