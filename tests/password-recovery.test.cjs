@@ -95,7 +95,7 @@ test('hosted recovery returns to a clean shared sign-in stack',async()=>{
  assert.deepEqual(s.calls.navigation,[['reset',{index:0,routes:[{name:'SignIn'}]}]]);await s.close();
 });
 
-test('guest navigation exposes email recovery without custom password-reset routes',async()=>{
+test('guest navigation starts at Splash and exposes email recovery without custom password-reset routes',async()=>{
  const placeholder=()=>null;
  const screenMocks=Object.fromEntries([
   '../features/auth/screens/AccountScreen','../features/marketplace/OwnerNavigator',
@@ -114,6 +114,6 @@ test('guest navigation exposes email recovery without custom password-reset rout
  let tree;await act(async()=>{tree=Renderer.create(React.createElement(Navigator));});
  try{
   assert.deepEqual(tree.root.findAllByType('StackScreen').map(n=>n.props.name),['Legal','Splash','SignIn','SignUp','ForgotPassword','VerifyEmail']);
-  assert.equal(tree.root.findByType('StackNavigator').props.initialRouteName,'SignIn');
+  assert.equal(tree.root.findByType('StackNavigator').props.initialRouteName,'Splash');
  }finally{await act(async()=>tree.unmount());}
 });

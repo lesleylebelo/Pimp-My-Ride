@@ -3,15 +3,24 @@ require('../../scripts/assert-emulators.cjs').assertEmulators({auth:true});
 const {initializeApp,deleteApp}=require('firebase-admin/app');
 const {getAuth}=require('firebase-admin/auth'),{getFirestore,Timestamp}=require('firebase-admin/firestore');
 const http=require('supertest'),{createServices}=require('../services.cjs'),{createApp}=require('../app.cjs');
+const {quoteId}=require('../marketplace.cjs');
 const firebase=initializeApp({projectId:'demo-pmr-security'},'marketplace-tests'),db=getFirestore(firebase),auth=getAuth(firebase);
-const services=createServices({db,auth,storage:{}});let app,sequence=0;
+const mockPaymentEnv={...process.env,NODE_ENV:'test',PMR_MOCK_PAYMENTS_ENABLED:'true',FIREBASE_PROJECT_ID:'demo-pmr-security'};
+const services=createServices({db,auth,storage:{},mockPaymentEnv});let app,sequence=0;
 const vehicle={make:'Test make',model:'Test model',year:2020,colour:'Blue',registration:'TEST 123 GP'};
 const details={title:'Body kit installation',description:'Supply and fit a synthetic example body kit.',categoryId:'body',city:'Johannesburg',budgetMinCents:100000,budgetMaxCents:300000,preferredDate:'',visibility:'open'};
 const quote={scope:'Fit and inspect the example kit.',items:[{description:'Fitment',amountCents:125000},{description:'Paint',amountCents:50000}],completionDays:5,warranty:'12 months workmanship',validForDays:14};
 const identity=uid=>({uid,token:{email_verified:true,auth_time:Math.floor(Date.now()/1000)+1}});
-const writes=new Set(['vehicleSave','vehicleArchive','requestCreate','requestClose','quoteSubmit','quoteWithdraw','quoteAccept','bookingConfirm','bookingCancel']);
-const body=(op,data={})=>({op,...(writes.has(op)?{requestId:`emulator-${++sequence}`} : {}),...data});
-const call=(uid,op,data={})=>services.marketplace({auth:identity(uid),data:body(op,data)});
+const writes=new Set(['vehicleSave','vehicleArchive','requestCreate','requestUpdate','requestClose','quoteSubmit','quoteWithdraw','quoteAccept','paymentMockResult','paymentRetry','paymentStart','paymentRecordInStore','bookingComplete','bookingConfirm','bookingCancel','notificationRead']);
+const body=(op,data={})=>({op,...(writes.has(op)?{requestId:`emulator-${++sequence}`} : {}),...(op==='quoteAccept'?{paymentMethod:'pay_in_store'}:{}),...data});
+const call=async(uid,op,data={})=>{
+ if(op==='quoteSubmit'&&data.termsVersion===undefined){
+  const request=await db.doc(`serviceRequests/${data.serviceRequestId}`).get();
+  data={...data,termsVersion:request.data()?.termsVersion||request.data()?.version||1};
+ }
+ if(op==='paymentMockResult'){const attempt=(await db.doc('bookings/'+data.id+'/paymentAttempts/'+data.paymentAttemptId).get()).data();data={expectedBookingId:data.id,expectedAmountCents:attempt?.amountCents,expectedCurrency:attempt?.currency,...data};}
+ return services.marketplace({auth:identity(uid),data:body(op,data)});
+};
 async function seed(uid,role,extra={}){
  await auth.createUser({uid,email:`${uid}@example.invalid`,emailVerified:true,password:'SyntheticPassword1234'});
  await db.doc(`users/${uid}`).set({role,accountStatus:'active',fullName:'Fictional test user',email:`${uid}@example.invalid`,phone:'0821234567',...(role==='shop'?{verificationStatus:'approved',shop:{shopName:`Workshop ${uid}`,city:'Johannesburg',province:'Gauteng',services:'Body kits'}}:{}),...extra});
@@ -41,7 +50,7 @@ test('authenticated HTTP acceptance creates a booking that the selected shop con
  const offered=await offers(),owner=await signIn('alice'),shop=await signIn('shop-one'),other=await signIn('shop-two');
  const api=async(token,op,data={})=>(await http(app).post('/api/marketplace').set('Authorization',`Bearer ${token}`).send(body(op,data)).expect(200)).body.data;
  const accepted=await api(owner,'quoteAccept',{id:offered.first,requestId:'accept-http'});assert.equal(accepted.id,offered.requestId);
- assert.deepEqual(await api(owner,'quoteAccept',{id:offered.first,requestId:'accept-http'}),accepted);
+ assert.deepEqual(await api(owner,'quoteAccept',{id:offered.first,requestId:'accept-http'}),{id:accepted.id,paymentAttemptId:null,existingBooking:true});
  await http(app).post('/api/marketplace').set('Authorization',`Bearer ${other}`).send(body('booking',{id:accepted.id})).expect(404);
  const initial=(await api(shop,'booking',{id:accepted.id})).booking;assert.equal(initial.status,'pending_confirmation');assert.equal(initial.ownerId,undefined);assert.equal(initial.vehicleId,undefined);assert.equal(initial.vehicle.registration,undefined);
  assert.equal((await api(owner,'bookings')).items[0].id,accepted.id);
@@ -52,6 +61,136 @@ test('authenticated HTTP acceptance creates a booking that the selected shop con
  const cancelled=(await api(shop,'booking',{id:accepted.id})).booking;assert.equal(cancelled.status,'cancelled');assert.equal(cancelled.cancellationReason,'Synthetic change of plans');assert.equal(cancelled.cancelledByRole,'owner');
  assert.equal((await db.doc(`serviceRequests/${offered.requestId}`).get()).data().status,'booked');assert.equal((await db.doc(`quotations/${offered.first}`).get()).data().status,'accepted');
  assert.equal((await acceptanceAudits(accepted.id)).length,1);
+});
+
+test('Firestore resolves a request update racing quote acceptance without mismatched booking terms',async()=>{
+ const offered=await offers(),requestRef=db.doc(`serviceRequests/${offered.requestId}`),before=(await requestRef.get()).data();
+ const update=call('alice','requestUpdate',{id:offered.requestId,version:before.version,...details,title:'Updated body kit scope'});
+ const accept=call('alice','quoteAccept',{id:offered.first,paymentMethod:'pay_in_store'});
+ const [updated,accepted]=await Promise.allSettled([update,accept]);
+ assert.equal(Number(updated.status==='fulfilled')+Number(accepted.status==='fulfilled'),1);
+ const request=(await requestRef.get()).data(),quote=(await db.doc(`quotations/${offered.first}`).get()).data();
+ if(accepted.status==='fulfilled'){
+  const booking=(await db.doc(`bookings/${offered.requestId}`).get()).data();
+  assert.equal(request.status,'booked');assert.equal(quote.status,'accepted');
+  assert.equal(booking.scope,quote.scope);assert.equal(booking.totalCents,quote.totalCents);
+  assert.equal(booking.requestTitle,details.title);
+ }else{
+  assert.equal(request.status,'open');assert.equal(request.termsVersion,before.termsVersion+1);
+  assert.equal(quote.status,'submitted');assert.equal((await db.doc(`bookings/${offered.requestId}`).get()).exists,false);
+ }
+});
+
+test('Firestore preserves request and quotation-head consistency across quote races',async()=>{
+ const updateTerms=async requestId=>{
+  const ref=db.doc(`serviceRequests/${requestId}`),before=(await ref.get()).data();
+  return call('alice','requestUpdate',{id:requestId,version:before.version,...details,title:'Updated body kit scope'});
+ };
+ const requestWithVehicle=async()=>{
+  return call('alice','requestCreate',{...details,vehicleId:sharedVehicle});
+ };
+ const sharedVehicle=(await call('alice','vehicleSave',vehicle)).id;
+
+ const submitRace=await requestWithVehicle(),submitTerms=(await db.doc(`serviceRequests/${submitRace.id}`).get()).data();
+ const submitted=await Promise.allSettled([
+  updateTerms(submitRace.id),
+  call('shop-one','quoteSubmit',{...quote,serviceRequestId:submitRace.id,termsVersion:submitTerms.termsVersion}),
+ ]);
+ assert.ok(submitted.some(result=>result.status==='fulfilled'));
+ const requestAfterRace=(await db.doc(`serviceRequests/${submitRace.id}`).get()).data();
+ const headAfterRace=await db.doc(`quotationHeads/${quoteId(submitRace.id,'shop-one')}`).get();
+ if(headAfterRace.exists){
+  const pointed=await db.doc(`quotations/${headAfterRace.data().quoteId}`).get();
+  assert.ok(pointed.exists);assert.equal(pointed.data().serviceRequestId,submitRace.id);assert.equal(pointed.data().shopId,'shop-one');
+  if(pointed.data().termsVersion!==requestAfterRace.termsVersion){
+   await assert.rejects(()=>call('alice','quoteAccept',{id:pointed.id,requestId:'race-stale-accept',paymentMethod:'pay_in_store'}),{code:'failed-precondition'});
+  }
+ }
+
+ const replacementRequest=await requestWithVehicle(),original=await call('shop-one','quoteSubmit',{...quote,serviceRequestId:replacementRequest.id});
+ await updateTerms(replacementRequest.id);
+ const currentTerms=(await db.doc(`serviceRequests/${replacementRequest.id}`).get()).data().termsVersion;
+ const replacements=await Promise.allSettled([
+  call('shop-one','quoteSubmit',{...quote,scope:'Replacement A',serviceRequestId:replacementRequest.id,termsVersion:currentTerms}),
+  call('shop-one','quoteSubmit',{...quote,scope:'Replacement B',serviceRequestId:replacementRequest.id,termsVersion:currentTerms}),
+ ]);
+ assert.equal(replacements.filter(result=>result.status==='fulfilled').length,1);
+ const replacementHead=(await db.doc(`quotationHeads/${quoteId(replacementRequest.id,'shop-one')}`).get()).data();
+ const currentQuote=(await db.doc(`quotations/${replacementHead.quoteId}`).get()).data();
+ assert.equal(currentQuote.status,'submitted');assert.equal(currentQuote.termsVersion,currentTerms);
+ assert.equal((await db.doc(`quotations/${original.id}`).get()).data().status,'superseded');
+ const history=(await db.collection('quotations').where('serviceRequestId','==',replacementRequest.id).where('shopId','==','shop-one').get()).docs;
+ assert.equal(history.filter(doc=>doc.data().status==='submitted').length,1);
+
+ for(const competingAction of ['withdraw','accept']){
+  const raceRequest=await requestWithVehicle(),old=await call('shop-one','quoteSubmit',{...quote,serviceRequestId:raceRequest.id});
+  await updateTerms(raceRequest.id);
+  const terms=(await db.doc(`serviceRequests/${raceRequest.id}`).get()).data().termsVersion;
+  const contenders=[
+   call('shop-one','quoteSubmit',{...quote,scope:`Replacement ${competingAction}`,serviceRequestId:raceRequest.id,termsVersion:terms}),
+   competingAction==='withdraw'?call('shop-one','quoteWithdraw',{id:old.id}):call('alice','quoteAccept',{id:old.id}),
+  ];
+  const results=await Promise.allSettled(contenders);
+  assert.equal(results.filter(result=>result.status==='fulfilled').length,1);
+  const head=(await db.doc(`quotationHeads/${quoteId(raceRequest.id,'shop-one')}`).get()).data();
+  const headQuote=(await db.doc(`quotations/${head.quoteId}`).get()).data();
+  assert.equal(headQuote.serviceRequestId,raceRequest.id);assert.equal(headQuote.shopId,'shop-one');
+  if(competingAction==='withdraw'){
+   const previousQuote=(await db.doc(`quotations/${old.id}`).get()).data();
+   if(results[1].status==='fulfilled'){
+    assert.equal(head.quoteId,old.id);assert.equal(headQuote.status,'withdrawn');
+    assert.equal(previousQuote.status,'withdrawn');
+   }else{
+    assert.notEqual(head.quoteId,old.id);assert.equal(headQuote.status,'submitted');
+    assert.equal(headQuote.termsVersion,terms);assert.equal(previousQuote.status,'superseded');
+   }
+  }else{
+    const booking=await db.doc(`bookings/${raceRequest.id}`).get();
+    if(results[1].status==='fulfilled'){
+     assert.equal(head.quoteId,old.id);assert.equal(headQuote.status,'accepted');
+     assert.equal(headQuote.termsVersion,terms-1);assert.equal(booking.exists,true);
+     assert.equal(booking.data().quoteId,old.id);
+    }else{
+     assert.notEqual(head.quoteId,old.id);assert.equal(headQuote.status,'submitted');
+     assert.equal(headQuote.termsVersion,terms);assert.equal(booking.exists,false);
+     assert.equal((await db.doc(`quotations/${old.id}`).get()).data().status,'superseded');
+    }
+   }
+  const quotes=(await db.collection('quotations').where('serviceRequestId','==',raceRequest.id).where('shopId','==','shop-one').get()).docs;
+  assert.ok(quotes.every(doc=>doc.data().serviceRequestId===raceRequest.id&&doc.data().shopId==='shop-one'));
+  assert.ok(quotes.filter(doc=>doc.data().status==='submitted').length<=1);
+ }
+});
+
+test('Firestore serializes deposit and concurrent outstanding-balance settlement without overpayment',async()=>{
+ const vehicleSaved=await call('alice','vehicleSave',vehicle),request=await call('alice','requestCreate',{...details,vehicleId:vehicleSaved.id});
+ const submitted=await call('shop-one','quoteSubmit',{...quote,serviceRequestId:request.id,depositType:'percentage',depositValue:25});
+ const booking=await call('alice','quoteAccept',{id:submitted.id,paymentMethod:'pay_deposit'});
+ const pending=(await db.doc(`bookings/${booking.id}`).get()).data();
+ assert.equal(booking.id,request.id);assert.equal(pending.depositAmountCents,43750);assert.equal(pending.paidCents,0);
+ const deposit=await db.doc(`bookings/${booking.id}/paymentAttempts/${booking.paymentAttemptId}`).get();
+ assert.equal(deposit.data().amountCents,43750);assert.equal(deposit.data().status,'pending');
+ await call('alice','paymentMockResult',{id:booking.id,paymentAttemptId:booking.paymentAttemptId,outcome:'successful'});
+ let balance=(await db.doc(`bookings/${booking.id}`).get()).data();
+ assert.equal(balance.paymentStatus,'partially_paid');assert.equal(balance.paidCents,43750);assert.equal(balance.balanceDueCents,131250);
+
+ const starts=await Promise.allSettled([
+  call('alice','paymentStart',{id:booking.id}),
+  call('alice','paymentStart',{id:booking.id}),
+ ]);
+ assert.equal(starts.filter(result=>result.status==='fulfilled').length,1);
+ const started=starts.find(result=>result.status==='fulfilled').value;
+ const attempt=(await db.doc(`bookings/${booking.id}/paymentAttempts/${started.paymentAttemptId}`).get()).data();
+ assert.equal(attempt.amountCents,131250);assert.equal(attempt.status,'pending');
+ await assert.rejects(()=>call('alice','paymentMockResult',{id:booking.id,paymentAttemptId:booking.paymentAttemptId,outcome:'successful'}),{code:'failed-precondition'});
+ const settlements=await Promise.allSettled([
+  call('alice','paymentMockResult',{id:booking.id,paymentAttemptId:started.paymentAttemptId,outcome:'successful'}),
+  call('alice','paymentMockResult',{id:booking.id,paymentAttemptId:started.paymentAttemptId,outcome:'successful'}),
+ ]);
+ assert.equal(settlements.filter(result=>result.status==='fulfilled').length,1);
+ balance=(await db.doc(`bookings/${booking.id}`).get()).data();
+ assert.equal(balance.paymentStatus,'paid');assert.equal(balance.paidCents,balance.totalCents);assert.equal(balance.balanceDueCents,0);
+ assert.equal((await db.doc(`paymentReceipts/${started.paymentAttemptId}`).get()).exists,true);
 });
 
 test('concurrent acceptance of different offers commits exactly one booking, selected quote and audit',async()=>{
@@ -67,7 +206,7 @@ test('concurrent acceptance of different offers commits exactly one booking, sel
 
 test('concurrent acceptance of the same quote with distinct retry keys returns the one durable booking',async()=>{
  const offered=await offers(),results=await Promise.all([call('alice','quoteAccept',{id:offered.first,requestId:'device-one'}),call('alice','quoteAccept',{id:offered.first,requestId:'device-two'})]);
- assert.deepEqual(results[0],results[1]);assert.equal(results[0].id,offered.requestId);assert.equal((await db.collection('bookings').get()).size,1);assert.equal((await acceptanceAudits(offered.requestId)).length,1);
+ assert.equal(results[0].id,results[1].id);assert.deepEqual(results.map(r=>r.existingBooking).sort(),[false,true]);assert.equal(results.find(r=>r.existingBooking).paymentAttemptId,null);assert.equal(results[0].id,offered.requestId);assert.equal((await db.collection('bookings').get()).size,1);assert.equal((await acceptanceAudits(offered.requestId)).length,1);
 });
 
 test('acceptance racing withdrawal or request closure never books an unavailable offer',async()=>{
@@ -113,7 +252,8 @@ test('real authenticated HTTP workflow registers a vehicle, publishes a request,
  await http(app).post('/api/marketplace').send({op:'vehicles'}).expect(401);
  const v=await api(owner,'vehicleSave',vehicle),r=await api(owner,'requestCreate',{...details,vehicleId:v.id});
  const jobs=await api(shop,'requests',{feed:'open'});assert.equal(jobs.items[0].id,r.id);assert.equal(jobs.items[0].vehicle.registration,undefined);assert.equal(jobs.items[0].ownerId,undefined);
- const q=await api(shop,'quoteSubmit',{...quote,serviceRequestId:r.id});
+ const requestTerms=(await db.doc(`serviceRequests/${r.id}`).get()).data();
+ const q=await api(shop,'quoteSubmit',{...quote,serviceRequestId:r.id,termsVersion:requestTerms.termsVersion});
  const received=await api(owner,'request',{id:r.id});assert.equal(received.quotes.length,1);assert.equal(received.quotes[0].id,q.id);assert.equal(received.quotes[0].totalCents,175000);assert.equal(received.quotes[0].currency,'ZAR');
  await api(shop,'quoteWithdraw',{id:q.id});assert.equal((await api(owner,'request',{id:r.id})).quotes[0].status,'withdrawn');
  await api(owner,'requestClose',{id:r.id});assert.equal((await api(owner,'request',{id:r.id})).request.status,'closed');
@@ -159,4 +299,161 @@ test('paginated vehicle reads stay owner-scoped and include every matching recor
  const batch=db.batch();for(let i=0;i<25;i++){batch.set(db.doc(`vehicles/alice-${i}`),{...vehicle,ownerId:'alice',archived:false,version:1});batch.set(db.doc(`vehicles/bob-${i}`),{...vehicle,ownerId:'bob',archived:false,version:1});}await batch.commit();
  let cursor=null,ids=[];do{const page=await call('alice','vehicles',{cursor});assert.ok(page.items.length<=20);ids.push(...page.items.map(v=>v.id));cursor=page.cursor;}while(cursor);
  assert.equal(ids.length,25);assert.equal(new Set(ids).size,25);assert.ok(ids.every(id=>id.startsWith('alice-')));
+});
+
+
+test('HTTP simulation gate defaults closed without disabling ordinary marketplace reads',async()=>{
+ const closedServices=createServices({db,auth,storage:{},mockPaymentEnv:{}}),closed=createApp({auth,services:closedServices}),offered=await offers(),token=await signIn('alice');
+ await http(closed).post('/api/marketplace').set('Authorization','Bearer '+token).send(body('vehicles')).expect(200);
+ for(const [op,data] of [['quoteAccept',{id:offered.first,paymentMethod:'pay_in_store'}],['paymentStart',{id:'none'}],['paymentRetry',{id:'none'}],['paymentMockResult',{id:'none',paymentAttemptId:'none',outcome:'successful'}],['paymentRecordInStore',{id:'none',method:'simulated_cash'}]]){
+  const response=await http(closed).post('/api/marketplace').set('Authorization','Bearer '+token).send(body(op,data)).expect(409);
+  assert.match(response.body.error.message,/Mock payments are disabled/);
+ }
+ assert.equal((await db.collection('bookings').get()).size,0);
+});
+
+async function depositBooking(){
+ const v=await call('alice','vehicleSave',vehicle),r=await call('alice','requestCreate',{...details,vehicleId:v.id}),q=await call('shop-one','quoteSubmit',{...quote,serviceRequestId:r.id,depositType:'percentage',depositValue:25}),b=await call('alice','quoteAccept',{id:q.id,paymentMethod:'pay_deposit'});
+ await call('alice','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful'});return b;
+}
+async function assertSettledOnce(b){
+ const saved=(await db.doc('bookings/'+b.id).get()).data(),attempts=await db.collection('bookings/'+b.id+'/paymentAttempts').get();
+ assert.equal(saved.paidCents,175000);assert.equal(saved.balanceDueCents,0);assert.equal(saved.paymentStatus,'paid');
+ const paid=attempts.docs.filter(d=>d.data().status==='paid');assert.equal(paid.length,2);assert.equal(paid.reduce((sum,d)=>sum+d.data().amountCents,0),175000);
+ for(const d of paid){const receipt=await db.doc('paymentReceipts/'+d.id).get();assert.equal(receipt.data().amountCents,d.data().amountCents);assert.equal(receipt.data().testTransaction,true);}
+ assert.equal((await db.collection('paymentReceipts').where('bookingId','==',b.id).get()).size,2);
+ return saved;
+}
+
+test('Firestore serializes online balance initiation against in-store settlement with exactly one winning settlement',async()=>{
+ for(let run=0;run<3;run++){
+  const b=await depositBooking();await call('shop-one','bookingConfirm',{id:b.id,...futureAppointment});
+  const before=(await db.doc('bookings/'+b.id).get()).data();
+  const results=await Promise.allSettled([call('alice','paymentStart',{id:b.id}),call('shop-one','paymentRecordInStore',{id:b.id,method:'simulated_cash'})]);
+  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+  if(results[0].status==='fulfilled')await call('alice','paymentMockResult',{id:b.id,paymentAttemptId:results[0].value.paymentAttemptId,outcome:'successful'});
+  const saved=await assertSettledOnce(b);assert.equal(saved.status,'confirmed');assert.equal(saved.appointmentAt.toMillis(),before.appointmentAt.toMillis());assert.equal(saved.confirmedAt.toMillis(),before.confirmedAt.toMillis());
+ }
+});
+
+test('Firestore serializes a pending online result against in-store recording without duplicate receipts',async()=>{
+ for(let run=0;run<3;run++){
+  const b=await depositBooking(),started=await call('alice','paymentStart',{id:b.id});
+  const results=await Promise.allSettled([call('alice','paymentMockResult',{id:b.id,paymentAttemptId:started.paymentAttemptId,outcome:'successful'}),call('shop-one','paymentRecordInStore',{id:b.id,method:'simulated_eft'})]);
+  assert.equal(results[0].status,'fulfilled');assert.equal(results[1].status,'rejected');assert.equal(results[1].reason.code,'failed-precondition');
+  await assertSettledOnce(b);
+ }
+});
+
+test('Firestore cancellation racing a payment result retains only payments committed before cancellation',async()=>{
+ for(let run=0;run<3;run++){
+  const b=await depositBooking(),started=await call('alice','paymentStart',{id:b.id});
+  const results=await Promise.allSettled([call('alice','bookingCancel',{id:b.id,reason:'Synthetic cancellation race'}),call('alice','paymentMockResult',{id:b.id,paymentAttemptId:started.paymentAttemptId,outcome:'successful'})]);
+  assert.equal(results[0].status,'fulfilled');
+  const saved=(await db.doc('bookings/'+b.id).get()).data(),receipt=await db.doc('paymentReceipts/'+started.paymentAttemptId).get();
+  assert.equal(saved.status,'cancelled');assert.equal(saved.paymentReconciliationStatus,'refund_review_required');assert.equal(saved.paidCents+saved.balanceDueCents,175000);
+  if(results[1].status==='fulfilled'){assert.equal(saved.paidCents,175000);assert.equal(receipt.exists,true);}else{assert.equal(results[1].reason.code,'failed-precondition');assert.equal(saved.paidCents,43750);assert.equal(receipt.exists,false);assert.equal(saved.balanceDueCents,131250);}
+  const before=JSON.stringify((await call('alice','booking',{id:b.id})));
+  await assert.rejects(()=>call('alice','paymentMockResult',{id:b.id,paymentAttemptId:started.paymentAttemptId,outcome:'successful'}),{code:'failed-precondition'});
+  await assert.rejects(()=>call('alice','paymentStart',{id:b.id}),{code:'failed-precondition'});
+  await assert.rejects(()=>call('shop-one','paymentRecordInStore',{id:b.id,method:'simulated_cash'}),{code:'failed-precondition'});
+  assert.equal(JSON.stringify(await call('alice','booking',{id:b.id})),before);
+ }
+});
+
+test('Firestore cancellation committed first rejects all later payment results without new accounting or receipts',async()=>{
+ const b=await depositBooking(),started=await call('alice','paymentStart',{id:b.id});await call('alice','bookingCancel',{id:b.id,reason:'Cancel before result'});
+ const before=JSON.stringify(await call('alice','booking',{id:b.id}));
+ await assert.rejects(()=>call('alice','paymentMockResult',{id:b.id,paymentAttemptId:started.paymentAttemptId,outcome:'successful'}),{code:'failed-precondition'});
+ assert.equal(JSON.stringify(await call('alice','booking',{id:b.id})),before);assert.equal((await db.doc('paymentReceipts/'+started.paymentAttemptId).get()).exists,false);
+});
+
+
+test('Firestore renews an expired offer once under concurrent submissions and preserves deposit history',async()=>{
+ const v=await call('alice','vehicleSave',vehicle),r=await call('alice','requestCreate',{...details,vehicleId:v.id}),q=await call('shop-one','quoteSubmit',{...quote,serviceRequestId:r.id,depositType:'percentage',depositValue:25});
+ await db.doc('quotations/'+q.id).update({validUntil:Timestamp.fromMillis(Date.now()-1)});const old=(await db.doc('quotations/'+q.id).get()).data();
+ const input={...quote,serviceRequestId:r.id,termsVersion:1,items:[{description:'Renewal work',amountCents:200000}],depositType:'fixed',depositValue:50000};
+ const outcomes=await Promise.allSettled([call('shop-one','quoteSubmit',{...input,requestId:'renew-device-a'}),call('shop-one','quoteSubmit',{...input,requestId:'renew-device-b'})]);assert.equal(outcomes.filter(r=>r.status==='fulfilled').length,1);assert.equal(outcomes.find(r=>r.status==='rejected').reason.code,'already-exists');
+ const winner=outcomes.find(r=>r.status==='fulfilled').value,head=(await db.doc('quotationHeads/'+quoteId(r.id,'shop-one')).get()).data(),prior=(await db.doc('quotations/'+q.id).get()).data(),fresh=(await db.doc('quotations/'+winner.id).get()).data();
+ assert.notEqual(winner.id,q.id);assert.equal(head.quoteId,winner.id);assert.equal(prior.status,'superseded');assert.equal(prior.totalCents,old.totalCents);assert.equal(prior.depositAmountCents,old.depositAmountCents);assert.equal(prior.validUntil.toMillis(),old.validUntil.toMillis());assert.equal(fresh.depositAmountCents,50000);assert.equal(fresh.totalCents,200000);assert.equal(fresh.termsVersion,1);assert.ok(fresh.validUntil.toMillis()>Date.now());
+ const records=await db.collection('quotations').where('serviceRequestId','==',r.id).get();assert.equal(records.size,2);assert.equal(records.docs.filter(d=>d.data().status==='submitted').length,1);
+ await assert.rejects(()=>call('alice','quoteAccept',{id:q.id,paymentMethod:'pay_now'}),{code:'failed-precondition'});await call('alice','quoteAccept',{id:winner.id,paymentMethod:'pay_deposit'});
+ await assert.rejects(()=>call('shop-one','quoteSubmit',{...input,requestId:'renew-booked'}),{code:'failed-precondition'});
+});
+
+test('Firestore expired acceptance racing renewal never books the expired offer',async()=>{
+ const offered=await offers();await db.doc('quotations/'+offered.first).update({validUntil:Timestamp.fromMillis(Date.now()-1)});
+ const outcomes=await Promise.allSettled([call('alice','quoteAccept',{id:offered.first}),call('shop-one','quoteSubmit',{...quote,serviceRequestId:offered.requestId,termsVersion:1})]);assert.equal(outcomes[0].status,'rejected');assert.equal(outcomes[0].reason.code,'failed-precondition');assert.equal(outcomes[1].status,'fulfilled');assert.equal((await db.doc('bookings/'+offered.requestId).get()).exists,false);
+ assert.equal((await db.doc('quotationHeads/'+quoteId(offered.requestId,'shop-one')).get()).data().quoteId,outcomes[1].value.id);
+});
+
+test('Firestore checkout replay and concurrent R250/R750 confirmations preserve exact payment consent',async()=>{
+ const v=await call('alice','vehicleSave',vehicle),request=await call('alice','requestCreate',{...details,vehicleId:v.id}),offer=await call('shop-one','quoteSubmit',{...quote,serviceRequestId:request.id,items:[{description:'Exact R1000 total',amountCents:100000}],depositType:'fixed',depositValue:25000});
+ const b=await call('alice','quoteAccept',{id:offer.id,paymentMethod:'pay_deposit',requestId:'exact-checkout'});await call('alice','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful'});const started=await call('alice','paymentStart',{id:b.id}),saved=(await db.doc('bookings/'+b.id).get()).data();
+ assert.equal(saved.depositAmountCents,25000);assert.equal(saved.balanceDueCents,75000);
+ const replay=await call('alice','quoteAccept',{id:saved.quoteId,paymentMethod:'pay_deposit'});assert.deepEqual(replay,{id:b.id,paymentAttemptId:null,existingBooking:true});
+ const results=await Promise.allSettled([
+  call('alice','paymentMockResult',{id:b.id,paymentAttemptId:started.paymentAttemptId,expectedBookingId:b.id,expectedAmountCents:saved.depositAmountCents,expectedCurrency:'ZAR',outcome:'successful'}),
+  call('alice','paymentMockResult',{id:b.id,paymentAttemptId:started.paymentAttemptId,expectedBookingId:b.id,expectedAmountCents:saved.balanceDueCents,expectedCurrency:'ZAR',outcome:'successful'}),
+ ]);assert.equal(results[0].status,'rejected');assert.equal(results[0].reason.code,'failed-precondition');assert.equal(results[1].status,'fulfilled');assert.equal(results[1].value.paymentStatus,'paid');const final=(await db.doc('bookings/'+b.id).get()).data();assert.equal(final.paidCents,100000);assert.equal(final.balanceDueCents,0);assert.equal((await db.doc('paymentReceipts/'+started.paymentAttemptId).get()).data().amountCents,75000);assert.equal((await db.collection('paymentReceipts').where('bookingId','==',b.id).get()).size,2);
+ const replayOriginal=await call('alice','quoteAccept',{id:offer.id,paymentMethod:'pay_deposit',requestId:'exact-checkout'});assert.deepEqual(replayOriginal,{id:b.id,paymentAttemptId:null,existingBooking:true});
+});
+
+test('authenticated HTTP results reject missing or mismatched confirmation context without a receipt',async()=>{
+ const offered=await offers(),accepted=await call('alice','quoteAccept',{id:offered.first,paymentMethod:'pay_now'}),token=await signIn('alice');
+ for(const expected of [{},{expectedBookingId:'other',expectedAmountCents:175000,expectedCurrency:'ZAR'},{expectedBookingId:accepted.id,expectedAmountCents:1,expectedCurrency:'ZAR'},{expectedBookingId:accepted.id,expectedAmountCents:175000,expectedCurrency:'USD'}]){
+  const response=await http(app).post('/api/marketplace').set('Authorization','Bearer '+token).send(body('paymentMockResult',{id:accepted.id,paymentAttemptId:accepted.paymentAttemptId,outcome:'successful',...expected})).expect(409);assert.match(response.body.error.message,/Refresh the booking/);
+ }
+ const booking=(await db.doc('bookings/'+accepted.id).get()).data();assert.equal(booking.paidCents,0);assert.equal(booking.balanceDueCents,175000);assert.equal((await db.doc('paymentReceipts/'+accepted.paymentAttemptId).get()).exists,false);
+ const replay=await call('alice','quoteAccept',{id:offered.first,paymentMethod:'pay_now'});assert.equal(replay.existingBooking,true);assert.equal(replay.paymentAttemptId,null);
+});
+
+
+test('Phase 3 Firestore deposit and balance receipts are immutable snapshots, private, and idempotent under concurrent replay',async()=>{
+ const v=await call('alice','vehicleSave',vehicle),r=await call('alice','requestCreate',{...details,vehicleId:v.id,visibility:'direct',shopId:'shop-one'});
+ const q=await call('shop-one','quoteSubmit',{...quote,serviceRequestId:r.id,depositType:'percentage',depositValue:25});
+ const b=await call('alice','quoteAccept',{id:q.id,paymentMethod:'pay_deposit',requestId:'phase3-accept'});
+ const payment={id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful',requestId:'phase3-payment'};
+ const results=await Promise.all([call('alice','paymentMockResult',payment),call('alice','paymentMockResult',payment)]);assert.deepEqual(results[0],results[1]);
+ const first=(await call('alice','receipt',{id:b.paymentAttemptId})).receipt;
+ assert.equal(first.amountCents,43750);assert.equal(first.totalCents,175000);assert.equal(first.paidCentsAfter,43750);assert.equal(first.balanceDueCentsAfter,131250);assert.ok(Number.isFinite(first.issuedAt));assert.equal(first.method,'simulated_online');assert.equal(first.customer.id,'alice');assert.equal(first.shop.id,'shop-one');assert.equal(first.scope,quote.scope);
+ await call('shop-one','bookingConfirm',{id:b.id,...futureAppointment});
+ const final=await call('shop-one','paymentRecordInStore',{id:b.id,method:'simulated_card',requestId:'phase3-store'});await call('shop-one','paymentRecordInStore',{id:b.id,method:'simulated_card',requestId:'phase3-store'});
+ const second=(await call('shop-one','receipt',{id:final.paymentAttemptId})).receipt;
+ assert.equal(second.amountCents,131250);assert.equal(second.paidCentsAfter,175000);assert.equal(second.balanceDueCentsAfter,0);
+ assert.equal((await call('alice','booking',{id:b.id})).booking.status,'confirmed');
+ await call('alice','bookingCancel',{id:b.id,reason:'Synthetic cancellation'});
+ assert.deepEqual((await call('shop-one','receipt',{id:b.paymentAttemptId})).receipt,first);
+ for(const uid of ['bob','shop-two'])await assert.rejects(()=>call(uid,'receipt',{id:b.paymentAttemptId}),{code:'not-found'});
+ const receipts=await db.collection('paymentReceipts').get();assert.equal(receipts.size,2);
+ const paidNotices=(await db.collection('notifications').where('event','==','simulated_payment_paid').get()).docs;assert.equal(paidNotices.length,2);
+ assert.deepEqual(paidNotices[0].data().target,{type:'receipt',id:b.paymentAttemptId,bookingId:b.id});assert.equal(paidNotices[0].data().amountCents,43750);
+ const paidEmails=(await db.collection('emailOutbox').where('event','==','simulated_payment_paid').get()).docs;assert.equal(paidEmails.length,2);
+ for(const doc of paidEmails){const value=doc.data();assert.equal(value.transport,'test_outbox');assert.equal(value.deliveryStatus,'test_sink_only');assert.match(value.body,/SIMULATED \/ TEST/);assert.match(value.body,/ZAR 437.50/);assert.ok(!JSON.stringify(value).includes('@'));}
+ const token=await signIn('bob');await http(app).post('/api/marketplace').set('Authorization','Bearer '+token).send(body('receipt',{id:b.paymentAttemptId})).expect(404);
+ await http(app).post('/api/marketplace').send(body('receipt',{id:b.paymentAttemptId})).expect(401);
+});
+
+test('Phase 3 Firestore notifications paginate timestamp ties chronologically and preserve recipient-only read history',async()=>{
+ const batch=db.batch();
+ for(let i=0;i<45;i++)batch.create(db.doc('notifications/n'+String(i).padStart(2,'0')),{recipientUid:'alice',event:'booking_created',bookingId:'test-booking',readAt:null,createdAt:new Timestamp(100+Math.floor(i/3),123456789)});
+ batch.create(db.doc('notifications/foreign'),{recipientUid:'bob',readAt:null,createdAt:Timestamp.now()});await batch.commit();
+ const first=await call('alice','notifications'),second=await call('alice','notifications',{cursor:first.cursor}),third=await call('alice','notifications',{cursor:second.cursor});
+ assert.deepEqual([...first.items,...second.items,...third.items].map(n=>n.id),Array.from({length:45},(_,i)=>'n'+String(44-i).padStart(2,'0')));assert.equal(third.cursor,null);
+ assert.equal((await call('bob','notifications')).items.length,1);
+ await assert.rejects(()=>call('bob','notifications',{cursor:first.cursor}),{code:'not-found'});
+ await assert.rejects(()=>call('shop-one','notificationRead',{id:'n44'}),{code:'not-found'});
+ await Promise.all([call('alice','notificationRead',{id:'n44',requestId:'read-once'}),call('alice','notificationRead',{id:'n44',requestId:'read-once'})]);
+ const timestamp=(await db.doc('notifications/n44').get()).data().readAt;assert.ok(timestamp instanceof Timestamp);
+ await call('alice','notificationRead',{id:'n44'});assert.ok((await db.doc('notifications/n44').get()).data().readAt.isEqual(timestamp));
+ assert.equal((await call('alice','notifications')).items[0].readAt,timestamp.toMillis());assert.equal((await db.collection('notifications').get()).size,46);
+});
+
+test('Phase 3 Firestore historical receipts never reconstruct missing balances and failed payments have no receipts',async()=>{
+ const offered=await offers(),b=await call('alice','quoteAccept',{id:offered.first,paymentMethod:'pay_now'});
+ await call('alice','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'failed'});
+ assert.equal((await db.doc('paymentReceipts/'+b.paymentAttemptId).get()).exists,false);
+ await db.doc('paymentReceipts/old-receipt').create({bookingId:b.id,paymentAttemptId:'old-receipt',amountCents:123,currency:'ZAR',simulated:true,testTransaction:true,issuedAt:Timestamp.fromMillis(1000)});
+ const value=(await call('alice','receipt',{id:'old-receipt'})).receipt;
+ assert.equal(value.amountCents,123);assert.equal(value.balanceDueCentsAfter,null);assert.equal(value.paidCentsAfter,null);assert.equal(value.totalCents,null);assert.equal(value.method,null);assert.equal(value.historicalSnapshotUnavailable,true);
 });

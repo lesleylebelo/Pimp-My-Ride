@@ -26,7 +26,7 @@ beforeEach(async()=>{
  await db.doc('serviceCategories/body').set({name:'Body kit',description:'Body customization',archived:false});
  objects=new Map();links=[];uploadHook=null;
  const photoStorage={upload:async(path,bytes,contentType)=>{assert.equal(objects.has(path),false);objects.set(path,{bytes,contentType});if(uploadHook)await uploadHook(path);},signedUrl:async(path,seconds)=>{assert.ok(objects.has(path));assert.equal(seconds,60);links.push(path);return 'https://photos.example.invalid/temporary';}};
- services=createServices({db,auth,storage:{},photoStorage});app=createApp({auth,services});
+ services=createServices({db,auth,storage:{},photoStorage,mockPaymentEnv:{...process.env,NODE_ENV:'test',PMR_MOCK_PAYMENTS_ENABLED:'true',FIREBASE_PROJECT_ID:'demo-pmr-security'}});app=createApp({auth,services});
 });
 after(async()=>{await db.terminate();await deleteApp(firebase);});
 async function signIn(uid){
@@ -51,8 +51,9 @@ test('authenticated photos survive replacement/removal and remain private reques
  assert.equal((await photos('alice','list','vehicle',v.id)).items.length,0);assert.equal(objects.size,2);
  assert.equal((await read(owner,'list')).items[0].id,first.id);await read(shop,'view',{photoId:first.id});assert.equal(links.at(-1),originalPath);
  await assert.rejects(()=>photos('alice','view','vehicle',v.id,{photoId:replacement.id}),{code:'not-found'});
- const offer=await call('shop-one','quoteSubmit',{...quote,serviceRequestId:request.id});
- await call('alice','quoteAccept',{id:offer.id});
+ const requestTerms=(await db.doc(`serviceRequests/${request.id}`).get()).data();
+ const offer=await call('shop-one','quoteSubmit',{...quote,serviceRequestId:request.id,termsVersion:requestTerms.termsVersion});
+ await call('alice','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'});
  const booking=(await services.marketplace({auth:identity('shop-one'),data:{op:'booking',id:request.id}})).booking;
  assert.deepEqual(booking.photoIds,[first.id]);assertPrivate(booking);
  await call('alice','vehicleArchive',{id:v.id,version:1,archived:true});await db.doc('serviceCategories/body').update({archived:true});

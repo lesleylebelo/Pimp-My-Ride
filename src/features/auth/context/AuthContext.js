@@ -4,7 +4,7 @@ import {AppState} from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import {onAuthStateChanged, reload, getIdTokenResult, signOut} from 'firebase/auth';
 import {doc, getDocFromServer, onSnapshot} from 'firebase/firestore';
-import {firebase, configured} from '../../../shared/services/firebase';
+import {firebase, configured, localDemo, prepareLocalDemo} from '../../../shared/services/firebase';
 import {isOffline, isNetworkError, requireConnection} from '../../../shared/services/network';
 import {readProfileCache, saveProfileCache, clearProfileCache, CACHE_AGE} from '../../../shared/offline/profileCache';
 import {authError} from '../utils/authErrors';
@@ -78,6 +78,9 @@ export function AuthProvider({children}) {
  useEffect(()=>{
   active.current=true;
   if(!configured){setState(s=>({...s,initializing:false,error:'Firebase configuration is missing.'}));return;}
+  let disposed=false,dispose=()=>{};
+  function start(){
+  if(disposed||!active.current)return;
   const network=NetInfo.addEventListener(value=>{
    const next=!isOffline(value),changed=next!==online.current;online.current=next;
    if(!next)setState(s=>({...s,offline:true,profile:s.profile?.role==='admin'?null:s.profile,error:s.profile?.role==='admin'?'Administrator access requires an internet connection.':s.error}));
@@ -87,7 +90,11 @@ export function AuthProvider({children}) {
   const app=AppState.addEventListener('change',status=>{
    if(status==='active' && !lock.current)void sync();
   });
-  return()=>{active.current=false;++epoch.current;network();unsubscribe();app.remove();};
+  dispose=()=>{network();unsubscribe();app.remove();};
+  }
+  if(localDemo)prepareLocalDemo().then(start).catch(e=>{if(!disposed&&active.current)setState(s=>({...s,initializing:false,error:e.message}));});
+  else start();
+  return()=>{disposed=true;active.current=false;++epoch.current;dispose();};
  },[sync]);
  useEffect(()=>{
   if(!state.user)return;

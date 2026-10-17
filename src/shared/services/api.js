@@ -1,9 +1,10 @@
-import {firebase} from './firebase';
+import {firebase,localDemo,prepareLocalDemo} from './firebase';
 import {requireConnection} from './network';
 let waking=null,lastReady=0;
 const listeners=new Set();
 export const onBackendWaiting=fn=>{listeners.add(fn);return()=>listeners.delete(fn);};
 function baseURL(){
+ if(localDemo)return localDemo.apiURL;
  const url=(process.env.EXPO_PUBLIC_API_URL||'').replace(/\/$/,'');
  if(!url)throw new Error('Backend setup is missing. Set EXPO_PUBLIC_API_URL using docs/OPERATIONS.md and restart Expo.');
  if(!url.startsWith('https://')&&!(__DEV__&&url.startsWith('http://')))throw new Error('The backend address must use HTTPS.');
@@ -27,6 +28,7 @@ async function fetchWithTimeout(url,options,ms,stage){
  finally{clearTimeout(timer);}
 }
 async function ready(url){
+ if(localDemo)await prepareLocalDemo();
  if(Date.now()-lastReady<60000)return;
  if(!waking){waking=(async()=>{
   const timer=setTimeout(()=>listeners.forEach(fn=>fn(true)),4000);
@@ -45,6 +47,7 @@ export async function apiRequest(path,data,{multipart=false,expectedUid,authClie
  if(auth.currentUser?.uid!==user.uid)throw new Error('Your account changed. Please try again.');
  const token=await user.getIdToken();
  if(auth.currentUser?.uid!==user.uid)throw new Error('Your account changed. Please try again.');
+ if(localDemo&&multipart)data=await require('./demoMedia').demoUploadBody(data);
  const response=await fetchWithTimeout(`${url}/api/${path}`,{method:'POST',headers:{Authorization:`Bearer ${token}`,...(!multipart?{'Content-Type':'application/json'}:{})},body:multipart?data:JSON.stringify(data)},multipart?60000:45000,multipart?'upload':'request');
  const requestUrl=response.url||`${url}/api/${path}`,responseBody=await response.text(),loggedBody=responseBody.slice(0,4000);
  let result;
@@ -80,6 +83,7 @@ export async function uploadRequest(path,body,{expectedUid,onProgress}={}){
  await ready(url);
  const token=await user.getIdToken();
  if(auth.currentUser?.uid!==user.uid)throw new Error('Your account changed. Please try again.');
+ if(localDemo)body=await require('./demoMedia').demoUploadBody(body);
  return new Promise((resolve,reject)=>{
   const xhr=new XMLHttpRequest();
   xhr.open('POST',`${url}/api/${path}`);

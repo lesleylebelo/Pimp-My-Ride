@@ -20,8 +20,7 @@ function createStorage({url,key,bucket='verification',client,scope='verification
  if(scope==='public-posts')return {
   async upload(path,buffer,contentType){pathOK(path);const store=await postBucket();const {error}=await store.upload(path,buffer,{contentType,upsert:false,cacheControl:'31536000'});if(error)throw new ApiError('unavailable','Public photo storage could not accept the upload. Please try again.');},
   async inspect(path){pathOK(path);const store=await postBucket();const folder=path.slice(0,path.lastIndexOf('/')),name=path.slice(path.lastIndexOf('/')+1);const {data,error}=await store.list(folder,{limit:1,search:name});const file=data?.find(f=>f.name===name);if(error||!file)throw new ApiError('not-found','The uploaded photo is missing. Please upload it again.');return {size:Number(file.metadata?.size),contentType:file.metadata?.mimetype};},
-  publicUrl(path){pathOK(path);if(!supabase)throw new ApiError('unavailable','Public post storage is not configured.');return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;},
-  async remove(path){pathOK(path);const store=await postBucket();const {error}=await store.remove([path]);if(error)throw new ApiError('unavailable','Public photo cleanup failed.');}
+  publicUrl(path){pathOK(path);if(!supabase)throw new ApiError('unavailable','Public post storage is not configured.');return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;}
  };
  return {
   async upload(path,buffer,contentType){pathOK(path);const store=await privateBucket();const {error}=await store.upload(path,buffer,{contentType,upsert:false,cacheControl:'0'});if(error)throw new ApiError('unavailable','Private storage could not accept the upload. Please try again.');},

@@ -184,17 +184,13 @@ function createPosts({db,auth,actor,storage}){
   if(!Object.keys(input).length)validation({post:'Provide at least one field to update.'});
   const fields=validateShowcase(input,{partial:true});
   const images=Object.hasOwn(input,'images')?await restImages(input.images,a.uid):current.images||[];
-  const oldPaths=[...(current.cleanupImages||[]),...(current.images||[]).map(item=>item.path).filter(Boolean)],newPaths=new Set(images.map(item=>item.path));
-  const cleanupPaths=[...new Set(oldPaths.filter(path=>!newPaths.has(path)))];
-  const changes={...fields,...(Object.hasOwn(input,'images')?{images}:{}),...(cleanupPaths.length?{cleanupImages:cleanupPaths}:{}),updatedAt:stamp()};
+  const changes={...fields,...(Object.hasOwn(input,'images')?{images}:{}),updatedAt:stamp()};
   await db.runTransaction(async tx=>{
    const latest=(await tx.get(ref)).data();
    if(!latest||latest.status!=='published')D.fail('Post not found.','not_found');
    if((latest.shopId||latest.authorId)!==a.uid)D.fail('You can only edit your own showcase posts.','forbidden');
    tx.update(ref,changes);audit(tx,a.uid,'update',id);
   });
-  for(const path of cleanupPaths)await storage.remove(path);
-  if(cleanupPaths.length)await ref.update({cleanupImages:FieldValue.delete()});
   return {post:publicPost(id,{...current,...changes,updatedAt:Timestamp.now()},a.profile)};
  }
  async function deleteShowcase(request){
@@ -206,11 +202,8 @@ function createPosts({db,auth,actor,storage}){
    const latest=(await tx.get(ref)).data();
    if(!latest||latest.status!=='published')D.fail('Post not found.','not_found');
    if((latest.shopId||latest.authorId)!==a.uid)D.fail('You can only delete your own showcase posts.','forbidden');
-   tx.update(ref,{status:'removed',cleanupImages:[...new Set([...(latest.cleanupImages||[]),...(latest.images||[]).map(image=>image.path).filter(Boolean)])],updatedAt:stamp()});audit(tx,a.uid,'remove',id);
+   tx.update(ref,{status:'removed',updatedAt:stamp()});audit(tx,a.uid,'remove',id);
   });
-  const paths=[...(current.cleanupImages||[]),...(current.images||[]).map(image=>image.path)].filter(path=>typeof path==='string'&&path.startsWith(`posts/${a.uid}/`));
-  for(const path of new Set(paths))await storage.remove(path);
-  if(current.cleanupImages?.length)await ref.update({cleanupImages:FieldValue.delete()});
   return {id,deleted:true};
  }
  async function postsApi(request){
@@ -270,8 +263,7 @@ function createPosts({db,auth,actor,storage}){
   if(op==='removeImage'){
    await author(a);const path=input.path;
    if(typeof path!=='string'||!path.startsWith(`posts/${a.uid}/`))D.fail('Photo not found.','not-found');
-   await storage.remove(path);
-   return {ok:true};
+   D.fail('Showcase photos are retained to protect post data; automatic deletion is unavailable.','failed-precondition');
   }
   D.id(input.requestId);
   const receipt=mutation(db,a.uid,`posts:${op}`,input);
@@ -322,7 +314,7 @@ function createPosts({db,auth,actor,storage}){
   const path=`posts/${a.uid}/${randomUUID()}`;
   await storage.upload(path,file.buffer,file.contentType);
   const details=await storage.inspect(path);
-  if(details.size!==file.size||details.contentType!==file.contentType){await storage.remove(path);D.fail('The uploaded photo could not be verified. Choose it again.','failed-precondition');}
+  if(!details||details.size!==file.size||details.contentType!==file.contentType)D.fail('The uploaded photo could not be verified. Choose it again.','failed-precondition');
   return {path,url:storage.publicUrl(path),size:file.size,contentType:file.contentType};
  }
  return {postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage};

@@ -33,7 +33,18 @@ function quotation(input){
  const items=input.items.map(item=>{fields(item,['description','amountCents']);return {description:D.text(item.description,'Item description',200),amountCents:integer(item.amountCents,'Item amount',1,MAX_CENTS)};});
  const totalCents=items.reduce((total,item)=>total+item.amountCents,0);
  integer(totalCents,'Quotation total',1,MAX_CENTS);
- return {scope:D.text(input.scope,'Scope of work',2000),items,totalCents,currency:'ZAR',completionDays:integer(input.completionDays,'Completion days',1,365),warranty:optional(input.warranty,'Warranty',500),validForDays:integer(input.validForDays,'Validity days',1,90)};
+ const depositType=input.depositType===undefined?'none':input.depositType;
+ let depositValue=null,depositAmountCents=null;
+ if(depositType==='percentage'){
+  depositValue=integer(input.depositValue,'Deposit percentage',1,99);
+  depositAmountCents=Math.floor((totalCents*depositValue+50)/100);
+ }else if(depositType==='fixed'){
+  depositValue=integer(input.depositValue,'Fixed deposit amount',1,MAX_CENTS);
+  depositAmountCents=depositValue;
+ }else if(depositType!=='none')D.fail('Choose no deposit, a percentage, or a fixed deposit amount.');
+ if(depositType!=='none'&&(depositAmountCents<=0||depositAmountCents>=totalCents))D.fail('The deposit must be positive and less than the quotation total.');
+ if(depositType==='none'&&input.depositValue!==undefined&&input.depositValue!==null)D.fail('A quotation without a deposit cannot include a deposit value.');
+ return {scope:D.text(input.scope,'Scope of work',2000),items,totalCents,currency:'ZAR',completionDays:integer(input.completionDays,'Completion days',1,365),warranty:optional(input.warranty,'Warranty',500),validForDays:integer(input.validForDays,'Validity days',1,90),depositType,depositValue,depositAmountCents};
 }
 const vehicleSnapshot=value=>Object.fromEntries(['make','model','year','colour'].map(key=>[key,value[key]]));
 module.exports={fields,integer,optional,bool,vehicle,serviceRequest,quotation,vehicleSnapshot,requireFutureDate};

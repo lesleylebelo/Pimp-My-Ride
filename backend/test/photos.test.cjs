@@ -3,6 +3,7 @@ const assert=require('node:assert/strict');
 const {memoryDb}=require('./helpers/memory-db.cjs');
 const {createPhotos,LEASE_MS}=require('../photos.cjs');
 const {createMarketplace}=require('../marketplace.cjs');
+const {LOCAL_MOCK_ENV}=require('./helpers/mock-payments.cjs');
 const P=require('../photo-domain.cjs');
 
 // Generated one-pixel colour fixtures, with real image headers and image data.
@@ -24,11 +25,18 @@ function fixture(){
  const auth={getUser:async uid=>users.get(uid)||{emailVerified:true,disabled:false}};
  const actor=async request=>({uid:request.auth.uid,profile:(await db.doc(`users/${request.auth.uid}`).get()).data()});
  const storage={upload:async(path,buffer)=>files.set(path,buffer),signedUrl:async(path,seconds)=>{signed.push({path,seconds});return `https://private.example.invalid/${signed.length}`;},remove:async()=>assert.fail('Photo operations must never delete source objects.')};
- const api=createPhotos({db,auth,storage,actor}),market=createMarketplace({db,auth,actor});
+ db.projectId='demo-pmr-security';
+ const api=createPhotos({db,auth,storage,actor}),market=createMarketplace({db,auth,actor,mockPaymentEnv:LOCAL_MOCK_ENV});
  const data=(extra={})=>({auth:{uid:'owner'},vehicleId:'car',slot:'1',version:db.rows.get('vehicles/car').photoRevision||0,requestId:`upload-${++sequence}`,file:file(),...extra});
  const upload=extra=>api.uploadPhoto(data(extra));
  const read=(uid,op,extra={})=>api.photosApi({auth:{uid},data:{op,target:'vehicle',id:'car',...extra}});
- const write=(uid,op,extra={})=>market({auth:{uid},data:{op,requestId:`market-${++sequence}`,...extra}});
+ const write=async(uid,op,extra={})=>{
+  if(op==='quoteSubmit'&&extra.termsVersion===undefined){
+   const request=(await db.doc(`serviceRequests/${extra.serviceRequestId}`).get()).data();
+   extra={...extra,termsVersion:request?.termsVersion||request?.version||1};
+  }
+  return market({auth:{uid},data:{op,requestId:`market-${++sequence}`,...extra}});
+ };
  const attempts=()=>[...db.rows].filter(([path])=>path.startsWith('storagePhotosUploadAttempts/')).map(([,value])=>value);
  const assets=()=>[...db.rows].filter(([path])=>path.startsWith('marketplacePhotos/')).map(([,value])=>value);
  return {db,files,users,signed,auth,actor,storage,api,market,data,upload,read,write,attempts,assets};
@@ -145,7 +153,7 @@ test('legacy requests need no photos; booked requests copy immutable photo IDs a
  // Even a malformed privileged/legacy metadata record is redacted at output.
  f.db.rows.get(`serviceRequests/${created.id}`).photos[0].path='private/unexpected/path';
  const detail=await f.market({auth:{uid:'shop'},data:{op:'request',id:created.id}});assert.ok(!JSON.stringify(detail).includes('private/unexpected/path'));
- const quote=await f.write('shop','quoteSubmit',{serviceRequestId:created.id,...quoteData}),booking=await f.write('owner','quoteAccept',{id:quote.id});assert.deepEqual(f.db.rows.get(`bookings/${booking.id}`).photoIds,[photo.id]);
+ const quote=await f.write('shop','quoteSubmit',{serviceRequestId:created.id,...quoteData}),booking=await f.write('owner','quoteAccept',{id:quote.id,paymentMethod:'pay_in_store'});assert.deepEqual(f.db.rows.get(`bookings/${booking.id}`).photoIds,[photo.id]);
  assert.equal((await f.read('shop','list',{target:'request',id:created.id})).items.length,1);
  await assert.rejects(()=>f.read('competitor','list',{target:'request',id:created.id}),{code:'not-found'});
  f.db.rows.get('vehicles/car').archived=true;assert.equal((await f.read('shop','list',{target:'request',id:created.id})).items.length,1);

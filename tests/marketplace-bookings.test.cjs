@@ -6,7 +6,7 @@ global.IS_REACT_ACT_ENVIRONMENT = true;
 const act = Renderer.act;
 const booking = {id: 'booking-1', ownerId: 'owner-1', shopId: 'shop-1', serviceRequestId: 'request-1', quoteId: 'quote-1', shopName: 'Approved shop', requestTitle: 'Restore bonnet', vehicle: {make: 'Ford', model: 'Fiesta', year: 2015, colour: 'Blue'}, categoryName: 'Paint', city: 'Pretoria', scope: 'Prepare and repaint bonnet', items: [{description: 'Materials and labour', amountCents: 12345}], totalCents: 12345, currency: 'ZAR', completionDays: 7, warranty: 'Six months on paint', status: 'pending_confirmation'};
 function setup(overrides = {}) {
-  const state = {auth: {user: {uid: 'shop-1'}, profile: {role: 'shop'}, offline: false}, data: {booking}, busy: false, error: '', calls: [], reads: [], navigations: [], api: async () => ({id: booking.id}), refresh: async () => ({}), ...overrides};
+  const state = {auth: {user: {uid: 'shop-1'}, profile: {role: 'shop'}, offline: false}, data: {booking}, busy: false, error: '', calls: [], reads: [], navigations: [], api: async op => ({id: booking.id,...(['paymentRetry','paymentStart'].includes(op)?{paymentAttemptId:'attempt-2'}:{})}), refresh: async () => ({}), ...overrides};
   const PrimaryButton = loadUI('src/shared/components/PrimaryButton.js').default;
   const landing = {LandingText: 'Text', LandingShell: ({children, onScroll, onLayout, onContentSizeChange}) => React.createElement('View', {onScroll, onLayout, onContentSizeChange}, children), LandingButton: PrimaryButton, ownerTabs: [], shopTabs: [], ui: {}, useLandingFeedback: () => ({showFeature() {}})};
   const screens = loadUI('src/features/marketplace/screens/BookingScreens.js', {
@@ -22,6 +22,7 @@ function setup(overrides = {}) {
 const button = (tree, title) => tree.root.findAllByType('Pressable').find(node => node.findAllByType('Text').some(text => text.props.children === title));
 const input = (tree, label) => tree.root.findAllByType('TextInput').find(node => node.props.accessibilityLabel === label);
 const text = tree => tree.root.findAllByType('Text').map(node => Array.isArray(node.props.children) ? node.props.children.join('') : node.props.children).join('\n');
+const lastRead = (state, op) => state.reads.filter(read => read.op === op).at(-1);
 async function change(tree, label, value) {await act(async () => input(tree, label).props.onChangeText(value));}
 async function mount(Screen, props) {let tree; await act(async () => {tree = Renderer.create(React.createElement(Screen, props));}); return tree;}
 const detailProps = navigation => ({navigation, route: {params: {id: booking.id}}});
@@ -34,19 +35,19 @@ test('bookings list loads on scroll, navigates by identifier, resets across acco
   let refreshes = 0;
   const {state, screens, navigation} = setup({data: {items: [booking], cursor: 'page-2'}, refresh: async () => {refreshes++; throw Error('Retry unavailable');}});
   const props = {navigation}, tree = await mount(screens.BookingsScreen, props);
-  assert.deepEqual(state.reads.at(-1), {op: 'bookings', input: {cursor: null}});
+  assert.deepEqual(lastRead(state, 'bookings'), {op: 'bookings', input: {cursor: null}});
   assert.match(text(tree), /Awaiting shop confirmation/);
   assert.match(text(tree), /Accepted total: R123.45/);
   await act(async () => button(tree, 'View booking').props.onPress());
   assert.deepEqual(state.navigations, [['BookingDetail', {id: booking.id}]]);
   const scroller=tree.root.findAllByType('View').find(node=>node.props.onScroll);
   await act(async()=>scroller.props.onScroll({nativeEvent:{contentOffset:{y:900},contentSize:{height:1200},layoutMeasurement:{height:500}}}));
-  assert.equal(state.reads.at(-1).input.cursor,'page-2');
+  assert.equal(lastRead(state, 'bookings').input.cursor,'page-2');
   assert.equal(button(tree,'Next'),undefined);
   state.data = {items: [], cursor: null};
   state.auth = {...state.auth, user: {uid: 'shop-2'}};
   await act(async () => tree.update(React.createElement(screens.BookingsScreen, props)));
-  assert.equal(state.reads.at(-1).input.cursor, null);
+  assert.equal(lastRead(state, 'bookings').input.cursor, null);
   assert.match(text(tree), /No bookings yet/);
   await act(async () => button(tree, 'Refresh bookings').props.onPress());
   assert.equal(refreshes, 1);
@@ -74,6 +75,8 @@ test('booking detail reloads the identifier, presents accepted terms, and gives 
   assert.match(text(tree), /Prepare and repaint bonnet/);
   assert.match(text(tree), /Materials and labour/);
   assert.match(text(tree), /Total: R123.45/);
+  assert.match(text(tree), /Simulated amount paid: R0.00/);
+  assert.match(text(tree), /Outstanding balance: R123.45/);
   assert.match(text(tree), /7 working days/);
   assert.match(text(tree), /Six months on paint/);
   assert.equal(button(tree, 'Confirm booking'), undefined);
@@ -85,6 +88,60 @@ test('booking detail reloads the identifier, presents accepted terms, and gives 
   await act(async () => tree.update(React.createElement(screens.BookingDetailScreen, props)));
   assert.equal(button(tree, 'Confirm booking'), undefined);
   assert.match(text(tree), /2099-01-02 at 14:30 SAST \(UTC\+02:00\)/);
+  await act(async () => tree.unmount());
+});
+
+test('failed online simulations retry through the test API with an explicit attempt and no client amount', async () => {
+  const failedBooking = {...booking, status: 'pending_payment', paymentMethod: 'pay_now', paymentStatus: 'failed',currentPaymentAttemptId:'attempt-1'};
+  const {state, screens, navigation} = setup({
+    auth: {user: {uid: 'owner-1'}, profile: {role: 'owner'}, offline: false},
+    data: {booking: failedBooking, paymentAttempts: [{id:'attempt-1',status:'failed',amountCents:12345}], testEmailEvents: []},
+  });
+  const tree = await mount(screens.BookingDetailScreen, detailProps(navigation));
+  await act(async () => button(tree, 'Retry simulated payment').props.onPress());
+  assert.deepEqual(state.calls, [
+    {op: 'paymentRetry', input: {id: booking.id}},
+  ]);
+  assert.match(text(tree), /Test payment attempt opened/);
+  state.data={booking:{...failedBooking,currentPaymentAttemptId:'attempt-2'},currentPaymentAttempt:{id:'attempt-2',status:'pending',amountCents:12345,currency:'ZAR'},paymentAttempts:[]};
+  await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,detailProps(navigation))));
+  await act(async()=>button(tree,'Simulate successful payment').props.onPress());
+  assert.deepEqual(state.calls.at(-1),{op:'paymentMockResult',input:{id:booking.id,paymentAttemptId:'attempt-2',expectedBookingId:booking.id,expectedAmountCents:12345,expectedCurrency:'ZAR',outcome:'successful'}});
+  assert.match(text(tree), /no real payment was processed/i);
+  await act(async () => tree.unmount());
+});
+
+test('booking detail displays the accepted deposit and lets an owner settle only the saved pending attempt',async()=>{
+  const partial={...booking,status:'pending_confirmation',paymentStatus:'partially_paid',paymentMethod:'pay_deposit',depositType:'fixed',depositValue:2500,depositAmountCents:2500,paidCents:2500,balanceDueCents:9845,currentPaymentAttemptId:'balance-attempt'};
+  const {state,screens,navigation}=setup({
+    auth:{user:{uid:'owner-1'},profile:{role:'owner'},offline:false},
+    data:{booking:partial,paymentAttempts:[{id:'balance-attempt',status:'pending',kind:'balance',amountCents:9845,currency:'ZAR'}],testEmailEvents:[]},
+  });
+  const tree=await mount(screens.BookingDetailScreen,detailProps(navigation));
+  assert.match(text(tree),/Accepted required deposit/);assert.match(text(tree),/Simulated amount paid: R25.00/);
+  assert.match(text(tree),/Outstanding balance: R98.45/);assert.match(text(tree),/Payment status: Partially paid/);
+  await act(async()=>button(tree,'Simulate successful payment').props.onPress());
+  assert.deepEqual(state.calls,[{op:'paymentMockResult',input:{id:booking.id,paymentAttemptId:'balance-attempt',expectedBookingId:booking.id,expectedAmountCents:9845,expectedCurrency:'ZAR',outcome:'successful'}}]);
+  assert.doesNotMatch(JSON.stringify(state.calls),/amountCents/);
+  await act(async()=>tree.unmount());
+});
+
+test('shop payment recording and service completion remain separate simulated actions', async () => {
+  const dueBooking = {...booking, paymentMethod: 'pay_in_store', paymentStatus: 'due'};
+  const {state, screens, navigation} = setup({
+    auth: {user: {uid: 'shop-1'}, profile: {role: 'shop'}, offline: false},
+    data: {booking: dueBooking, paymentAttempts: [], testEmailEvents: []},
+  });
+  const props = detailProps(navigation), tree = await mount(screens.BookingDetailScreen, props);
+  await act(async () => button(tree, 'Record test cash').props.onPress());
+  assert.deepEqual(state.calls.at(-1), {op: 'paymentRecordInStore', input: {id: booking.id, method: 'simulated_cash'}});
+  assert.match(text(tree), /no real payment was processed/i);
+
+  state.data = {booking: {...dueBooking, status: 'confirmed', serviceStatus: 'not_started'}, paymentAttempts: [], testEmailEvents: []};
+  await act(async () => tree.update(React.createElement(screens.BookingDetailScreen, props)));
+  await act(async () => button(tree, 'Mark service completed').props.onPress());
+  assert.deepEqual(state.calls.at(-1), {op: 'bookingComplete', input: {id: booking.id}});
+  assert.match(text(tree), /no real payment was processed/i);
   await act(async () => tree.unmount());
 });
 
@@ -247,5 +304,55 @@ test('booking photo galleries reference the accepted request for both parties an
   state.auth={...state.auth,offline:true};await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));assert.equal(tree.root.findAllByType('PhotoGallery').length,0);
   state.auth={...state.auth,offline:false};state.data={booking:{...booking,photoIds:[]}};await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));assert.equal(tree.root.findAllByType('PhotoGallery').length,0);
   assert.equal(state.calls.length,0);await act(async()=>tree.unmount());
+ }
+});
+
+
+test('current payment outside history remains actionable while history pages accumulate and reset',async()=>{
+ const current={id:'z-current',status:'pending',kind:'balance',amountCents:9845,currency:'ZAR'};
+ const partial={...booking,status:'confirmed',paymentStatus:'partially_paid',paidCents:2500,balanceDueCents:9845,currentPaymentAttemptId:current.id};
+ const first=Array.from({length:20},(_,i)=>({id:'a'+String(i).padStart(2,'0'),status:'failed',amountCents:2500}));
+ const {state,screens,navigation}=setup({auth:{user:{uid:'owner-1'},profile:{role:'owner'},offline:false},data:{booking:partial,currentPaymentAttempt:current,paymentAttempts:first,paymentCursor:'a19'}});
+ const props=detailProps(navigation),tree=await mount(screens.BookingDetailScreen,props);
+ assert.match(text(tree),/Attempt reference: z-current/);assert.ok(button(tree,'Simulate successful payment'));
+ await act(async()=>button(tree,'Load more payment history').props.onPress());
+ assert.deepEqual(lastRead(state,'booking').input,{id:booking.id,paymentCursor:'a19'});
+ state.data={booking:partial,currentPaymentAttempt:current,paymentAttempts:[{id:'a20',status:'failed',amountCents:2500},current],paymentCursor:null};
+ await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));
+ assert.match(text(tree),/Attempt reference: a00/);assert.match(text(tree),/Attempt reference: a20/);
+ assert.equal((text(tree).match(/Attempt reference: z-current/g)||[]).length,1);assert.equal(button(tree,'Load more payment history'),undefined);
+ await act(async()=>button(tree,'Simulate successful payment').props.onPress());
+ assert.deepEqual(state.calls,[{op:'paymentMockResult',input:{id:booking.id,paymentAttemptId:'z-current',expectedBookingId:booking.id,expectedAmountCents:9845,expectedCurrency:'ZAR',outcome:'successful'}}]);
+ await act(async()=>button(tree,'Refresh booking').props.onPress());assert.deepEqual(lastRead(state,'booking').input,{id:booking.id});
+ state.auth={...state.auth,user:{uid:'owner-2'}};state.data={booking:{...partial,currentPaymentAttemptId:'new-account'},currentPaymentAttempt:null,paymentAttempts:[],paymentCursor:null};
+ await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));
+ assert.doesNotMatch(text(tree),/Attempt reference: a00|Attempt reference: z-current/);
+ await act(async()=>tree.unmount());
+});
+
+test('shop cannot offer in-store settlement when independently returned current attempt is pending',async()=>{
+ const {screens,navigation}=setup({data:{booking:{...booking,currentPaymentAttemptId:'outside-page',paidCents:0,balanceDueCents:12345,paymentStatus:'pending'},currentPaymentAttempt:{id:'outside-page',status:'pending',amountCents:12345},paymentAttempts:[{id:'old',status:'failed',amountCents:12345}],paymentCursor:'old'}});
+ const tree=await mount(screens.BookingDetailScreen,detailProps(navigation));
+ assert.equal(button(tree,'Record test cash'),undefined);assert.equal(button(tree,'Record test card'),undefined);assert.equal(button(tree,'Record test eft'),undefined);
+ assert.match(text(tree),/Attempt reference: outside-page/);await act(async()=>tree.unmount());
+});
+
+
+test('new balance attempt requires a fresh result action and mixed settlement labels describe initial choice',async()=>{
+ const partial={...booking,status:'confirmed',paymentMethod:'pay_deposit',paymentStatus:'partially_paid',paidCents:2500,balanceDueCents:9845,currentPaymentAttemptId:'deposit'};
+ const {state,screens,navigation}=setup({auth:{user:{uid:'owner-1'},profile:{role:'owner'},offline:false},data:{booking:partial,currentPaymentAttempt:{id:'deposit',status:'paid',amountCents:2500,currency:'ZAR'},paymentAttempts:[]}}),props=detailProps(navigation),tree=await mount(screens.BookingDetailScreen,props);
+ await act(async()=>button(tree,'Start simulated balance payment').props.onPress());assert.deepEqual(state.calls,[{op:'paymentStart',input:{id:booking.id}}]);
+ state.data={booking:{...partial,currentPaymentAttemptId:'balance'},currentPaymentAttempt:{id:'balance',status:'pending',amountCents:9845,currency:'ZAR'},paymentAttempts:[]};await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));
+ assert.match(text(tree),/Confirm this attempt: R98.45 ZAR/);await act(async()=>button(tree,'Simulate failed payment').props.onPress());assert.deepEqual(state.calls.at(-1),{op:'paymentMockResult',input:{id:booking.id,paymentAttemptId:'balance',expectedBookingId:booking.id,expectedAmountCents:9845,expectedCurrency:'ZAR',outcome:'failed'}});
+ state.auth={...state.auth,profile:{role:'shop'}};await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));assert.match(text(tree),/customer must resolve that attempt/);assert.equal(button(tree,'Record test cash'),undefined);
+ state.data={booking:{...partial,paymentStatus:'paid',paidCents:12345,balanceDueCents:0},paymentAttempts:[{id:'cash',status:'paid',method:'simulated_cash',amountCents:9845,currency:'ZAR'}]};await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));assert.match(text(tree),/Initial choice: Deposit online/);assert.match(text(tree),/Method: cash/);await act(async()=>tree.unmount());
+});
+
+test('booking history exposes notification history and issued receipts to both participant roles',async()=>{
+ for(const role of ['owner','shop']){
+  const {state,screens,navigation}=setup({auth:{user:{uid:role+'-1'},profile:{role},offline:false},data:{items:[booking],cursor:null}});
+  let tree=await mount(screens.BookingsScreen,{navigation});await act(async()=>button(tree,'Notification history').props.onPress());assert.deepEqual(state.navigations.at(-1),['Notifications']);await act(async()=>tree.unmount());
+  state.data={booking:{...booking,paymentStatus:'paid',paidCents:12345,balanceDueCents:0},paymentAttempts:[{id:'paid-attempt',amountCents:12345,currency:'ZAR',status:'paid',receiptIssued:true},{id:'failed-attempt',amountCents:12345,currency:'ZAR',status:'failed',receiptIssued:false}]};
+  tree=await mount(screens.BookingDetailScreen,detailProps(navigation));assert.equal(tree.root.findAllByType('Pressable').filter(node=>node.findAllByType('Text').some(t=>t.props.children==='View simulated receipt')).length,1);await act(async()=>button(tree,'View simulated receipt').props.onPress());assert.deepEqual(state.navigations.at(-1),['ReceiptDetail',{id:'paid-attempt'}]);await act(async()=>tree.unmount());
  }
 });

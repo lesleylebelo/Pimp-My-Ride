@@ -55,7 +55,7 @@ export function GarageScreen({navigation}) {
       await refresh().catch(() => {});
     }
   }
-  return <Page title="My Garage" subtitle="Manage your vehicles in one place" navigation={navigation}>
+  return <Page title="My Garage" subtitle="Manage your vehicles in one place" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
     <Text>Add your vehicles, then choose one when requesting a service.</Text>
     <Button title="Add vehicle" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm');}}/>
     <View style={styles.row}>{[false, true].map(value => <Button key={String(value)} title={value ? 'Archived vehicles' : 'Active vehicles'} outline={archived !== value} disabled={disabled} onPress={() => {if (!disabled) {feed.reset();setArchived(value);setCursor(null);}}}/>)}</View>

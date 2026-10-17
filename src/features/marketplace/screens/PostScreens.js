@@ -46,7 +46,6 @@ export function PostFormScreen({navigation,route}){
    navigation.goBack();
   }catch(e){
    setError(failure(e));
-   await Promise.all(uploaded.map(path=>postsApi('removeImage',{path},user?.uid).catch(()=>{})));
   }finally{lock.current=false;setBusy(false);}
  }
  function removeImage(path){if(!busy){setImages(current=>current.filter(image=>image.path!==path));setImageOrder(current=>current.filter(item=>item!==`p:${path}`));}}

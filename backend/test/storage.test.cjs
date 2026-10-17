@@ -27,3 +27,22 @@ test('photo storage is a separate private scope and never accepts document or tr
  let used=false;const publicClient={storage:{getBucket:async()=>({data:{public:true}}),from:()=>{used=true;}}};
  await assert.rejects(()=>createStorage({client:publicClient,scope:'photos'}).upload(photo,Buffer.from('x'),'image/jpeg'));assert.equal(used,false);
 });
+
+test('public showcase storage supports upload and reads but exposes no delete operation',async()=>{
+ const calls=[],path='posts/shop/12345678-1234-4123-8123-123456789abc';
+ const client={storage:{
+  getBucket:async()=>({data:{public:true}}),
+  from:()=>({
+   upload:async(...args)=>{calls.push(['upload',...args]);return {};},
+   list:async()=>({data:[{name:path.split('/').at(-1),metadata:{size:8,mimetype:'image/png'}}]}),
+   getPublicUrl:()=>({data:{publicUrl:`https://example.test/${path}`}}),
+   remove:async()=>{calls.push(['remove']);}
+  })
+ }};
+ const s=createStorage({client,scope:'public-posts',bucket:'public-posts'});
+ await s.upload(path,Buffer.from('image'),'image/png');
+ assert.deepEqual(await s.inspect(path),{size:8,contentType:'image/png'});
+ assert.equal(s.publicUrl(path),`https://example.test/${path}`);
+ assert.equal(s.remove,undefined);assert.equal(calls.some(([operation])=>operation==='remove'),false);
+ assert.equal(calls[0][1],path);assert.equal(calls[0][3].upsert,false);
+});

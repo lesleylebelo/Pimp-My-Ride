@@ -32,5 +32,14 @@ export function quoteErrors(form){
   const cents=parseMoney(item.amount);errors[`items.${i}.amount`]=cents===null||cents<=0?'Enter a positive amount with at most two decimal places.':null;total+=cents||0;
  }
  if(total>MAX_CENTS)errors.items='The total must not exceed R1,000,000.';
+ const depositType=form.depositType||'none';
+ if(depositType==='percentage'){
+  const percent=integer(form.depositValue,1,99)?Number(form.depositValue):null;
+  const cents=percent===null?null:Math.floor((total*percent+50)/100);
+  errors.depositValue=percent===null?'Enter a whole percentage from 1 to 99.':cents<=0||cents>=total?'The rounded deposit must be positive and less than the quotation total.':null;
+ }else if(depositType==='fixed'){
+  const cents=parseMoney(form.depositValue);
+  errors.depositValue=cents===null||cents<=0||cents>=total?'Enter a positive deposit less than the quotation total.':null;
+ }else if(depositType!=='none')errors.depositType='Choose no deposit, a percentage, or a fixed amount.';
  return clean(errors);
 }

@@ -1,3 +1,4 @@
+if(process.env.PMR_LOCAL_DEMO==='true')throw Error('Local demo must use node backend/local-demo.cjs; production startup is disabled for demo mode.');
 const {initializeApp,cert,applicationDefault}=require('firebase-admin/app');
 const {getAuth}=require('firebase-admin/auth');
 const {getFirestore}=require('firebase-admin/firestore');

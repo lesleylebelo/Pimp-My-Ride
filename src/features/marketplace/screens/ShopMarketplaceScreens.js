@@ -18,6 +18,19 @@ const offlineMessage = 'Connect to the internet to view requests and manage quot
 const errorMessage = error => error?.message || 'Unable to complete this action. Please retry.';
 const dateLabel = value => value ? new Date(value).toLocaleDateString() : 'Not specified';
 const reload = refresh => () => { void refresh().catch(() => {}); };
+const requestTermsVersion = request => Number.isSafeInteger(request?.termsVersion) ? request.termsVersion : Number.isSafeInteger(request?.version) ? request.version : 1;
+const quoteMatchesRequest = (quote, request) => {
+  const quoteVersion = Object.prototype.hasOwnProperty.call(quote || {}, 'termsVersion') ? quote.termsVersion : quote?.requestVersion;
+  const currentVersion = requestTermsVersion(request);
+  return Number.isSafeInteger(quoteVersion) && quoteVersion > 0 && quoteVersion === currentVersion;
+};
+
+const quoteExpired=(quote,now)=>typeof quote.validUntil==='number'&&Number.isFinite(quote.validUntil)&&quote.validUntil<=now;
+function useQuoteExpiry(quotes){
+ const [now,setNow]=useState(Date.now);
+ useEffect(()=>{const expiry=Math.min(...quotes.filter(q=>q.status==='submitted'&&Number(q.validUntil)>Date.now()).map(q=>Number(q.validUntil)));if(!Number.isFinite(expiry))return;const timer=setTimeout(()=>setNow(Date.now()),Math.min(2147483647,Math.max(1,expiry-Date.now()+1)));return()=>clearTimeout(timer);},[quotes,now]);
+ return Math.max(now,Date.now());
+}
 
 export function filterJobRequests(requests, {query = '', category = 'All', location = '', minimumCents = null, maximumCents = null, notQuoted = false} = {}) {
   return requests.filter(request => {
@@ -232,7 +245,13 @@ export function ShopRequestScreen({navigation, route}) {
   const {offline} = useAuth();
   const {data, busy, error, refresh} = useMarketData('request', {id: route.params?.id});
   const request = data?.request, quotes = data?.quotes || [];
-  const canQuote = !offline && !busy && request?.status === 'open' && !quotes.length;
+  const now=useQuoteExpiry(quotes);
+  const hasExpiredQuote=quotes.some(quote=>quote.status==='submitted'&&quoteExpired(quote,now));
+  const hasCurrentQuote = quotes.some(quote => quote.status === 'submitted' && quoteMatchesRequest(quote, request) && !quoteExpired(quote,now));
+  const hasAcceptedQuote = quotes.some(quote => quote.status === 'accepted');
+  const hasWithdrawnQuote = quotes.some(quote => quote.status === 'withdrawn');
+  const hasOutdatedQuote = quotes.some(quote => quote.status === 'submitted' && !quoteMatchesRequest(quote, request));
+  const canQuote = !offline && !busy && request?.status === 'open' && !hasCurrentQuote && !hasAcceptedQuote && !hasWithdrawnQuote;
   return <Page title="Service request" navigation={navigation}>
     <Notice busy={busy} error={offline ? offlineMessage : error}/>
     {request && <>
@@ -240,8 +259,14 @@ export function ShopRequestScreen({navigation, route}) {
       {!!request.photoIds?.length && (request.status === 'open' || quotes.some(quote => quote.status === 'accepted')) && <PhotoGallery target="request" id={request.id}/>}
       {quotes.length > 0 ? <>
         <Text style={styles.heading}>Your quotation</Text>
-        {quotes.map(quote => <QuoteCard key={quote.id} quote={quote}/>)}
-        <Text style={styles.muted}>A shop can submit one quotation per request. Submitted quotations can be withdrawn from My quotations.</Text>
+        {quotes.map(quote => <React.Fragment key={quote.id}>
+          <QuoteCard quote={quote}/>
+          {quote.status === 'submitted' && !quoteMatchesRequest(quote, request) && <Text>This quotation is outdated or has no revision record, so the customer cannot accept it.</Text>}
+        </React.Fragment>)}
+        {hasWithdrawnQuote && <Text style={styles.muted}>Withdrawal is final for this request. Your withdrawn quotation remains in history and cannot be resubmitted or replaced.</Text>}
+        {hasExpiredQuote&&!hasWithdrawnQuote&&<Text>This quotation has expired. Renew it with current pricing and deposit terms; its history will be preserved.</Text>}
+        {hasOutdatedQuote && !hasWithdrawnQuote && <Text style={styles.muted}>Review the current request details and submit a replacement quotation. The previous offer will remain in quotation history.</Text>}
+        {canQuote && <Button title={hasExpiredQuote?'Renew expired quotation':hasOutdatedQuote ? 'Update outdated quotation' : 'Prepare another quotation'} disabled={!canQuote} onPress={() => navigation.navigate('QuoteForm', {request})}/>}
         <Button title="My quotations" onPress={() => navigation.navigate('ShopQuotes')}/>
       </> : <>
         {request.status !== 'open' && <Text>This request is closed and no longer accepts quotations.</Text>}
@@ -262,14 +287,20 @@ function QuoteDraft({navigation, requestId}) {
   const {offline} = useAuth();
   // Reload the request: navigation parameters never decide whether quoting is allowed.
   const {data, busy, error, refresh} = useMarketData('request', {id: requestId});
-  const [form, setForm] = useState({scope: '', items: [{description: '', amount: ''}], completionDays: '7', warranty: '', validForDays: '14'});
+  const [form, setForm] = useState({scope: '', items: [{description: '', amount: ''}], completionDays: '7', warranty: '', validForDays: '14', depositType:'none',depositValue:''});
   const [touched, setTouched] = useState({}), [submitted, setSubmitted] = useState(false);
   const [saving, setSaving] = useState(false), [failure, setFailure] = useState(''), [sent, setSent] = useState(false);
   const lock = useRef(false), active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
-  const request = data?.request, existingQuote = data?.quotes?.length > 0;
+  const request = data?.request, quotes = data?.quotes || [];
+  const now=useQuoteExpiry(quotes);
+  const hasExpiredQuote=quotes.some(quote=>quote.status==='submitted'&&quoteExpired(quote,now));
+  const hasCurrentQuote = quotes.some(quote => quote.status === 'submitted' && quoteMatchesRequest(quote, request) && !quoteExpired(quote,now));
+  const hasAcceptedQuote = quotes.some(quote => quote.status === 'accepted');
+  const hasWithdrawnQuote = quotes.some(quote => quote.status === 'withdrawn');
+  const hasOutdatedQuote = quotes.some(quote => quote.status === 'submitted' && !quoteMatchesRequest(quote, request));
   const errors = quoteErrors(form);
-  const disabled = busy || saving || offline || !request || request.status !== 'open' || existingQuote;
+  const disabled = busy || saving || offline || !request || request.status !== 'open' || hasCurrentQuote || hasAcceptedQuote || hasWithdrawnQuote;
   const fieldError = key => (submitted || touched[key]) ? errors[key] : undefined;
   const touch = key => setTouched(value => ({...value, [key]: true}));
   const change = (key, value) => { touch(key); setForm(current => ({...current, [key]: value})); };
@@ -278,6 +309,7 @@ function QuoteDraft({navigation, requestId}) {
     setForm(current => ({...current, items: current.items.map((item, position) => position === index ? {...item, [key]: value} : item)}));
   };
   const total = form.items.reduce((sum, item) => sum + (parseMoney(item.amount) || 0), 0);
+  const depositAmount=form.depositType==='percentage'&&/^\d+$/.test(form.depositValue)?Math.floor((total*Number(form.depositValue)+50)/100):form.depositType==='fixed'?parseMoney(form.depositValue):null;
   async function send() {
     if (lock.current || disabled || sent) return;
     setSubmitted(true);
@@ -286,13 +318,15 @@ function QuoteDraft({navigation, requestId}) {
     try {
       await marketApi('quoteSubmit', {
         serviceRequestId: requestId,
+        termsVersion: requestTermsVersion(request),
         scope: form.scope.trim(),
         items: form.items.map(item => ({description: item.description.trim(), amountCents: parseMoney(item.amount)})),
         completionDays: Number(form.completionDays), warranty: form.warranty.trim(), validForDays: Number(form.validForDays),
+        depositType:form.depositType,depositValue:form.depositType==='percentage'?Number(form.depositValue):form.depositType==='fixed'?parseMoney(form.depositValue):null,
       });
       if (active.current) {
         setSent(true);
-        setForm({scope: '', items: [{description: '', amount: ''}], completionDays: '7', warranty: '', validForDays: '14'});
+        setForm({scope: '', items: [{description: '', amount: ''}], completionDays: '7', warranty: '', validForDays: '14', depositType:'none',depositValue:''});
       }
     } catch (e) { if (active.current) setFailure(errorMessage(e)); }
     finally { lock.current = false; if (active.current) setSaving(false); }
@@ -305,7 +339,11 @@ function QuoteDraft({navigation, requestId}) {
       <Button title="My quotations" onPress={() => navigation.navigate('ShopQuotes')}/>
     </Card> : <>
       {request && <Card><RequestSummary request={request}/></Card>}
-      {existingQuote && <Text>A quotation has already been submitted by your shop for this request. View it in My quotations.</Text>}
+      {hasExpiredQuote&&!hasWithdrawnQuote&&<Text>Your previous quotation expired. Review the request and submit a renewal with independently checked price and deposit terms.</Text>}
+      {hasCurrentQuote && <Text>Your shop has a quotation for the current request terms. View it in My quotations.</Text>}
+      {hasOutdatedQuote && !hasWithdrawnQuote && <Text>Your previous quotation is outdated. Submitting this replacement keeps the previous version in quotation history.</Text>}
+      {hasAcceptedQuote && <Text>An accepted quotation cannot be replaced.</Text>}
+      {hasWithdrawnQuote && <Text>Withdrawal is final for this request. The quotation remains in history and cannot be resubmitted or replaced.</Text>}
       {request && request.status !== 'open' && <Text>This request is closed and no longer accepts quotations.</Text>}
       <Card>
         <Text style={styles.heading}>Scope of work</Text>
@@ -325,8 +363,15 @@ function QuoteDraft({navigation, requestId}) {
         <Field label="Estimated completion (days)" value={form.completionDays} onChangeText={value => change('completionDays', value)} onBlur={() => touch('completionDays')} error={fieldError('completionDays')} keyboardType="number-pad" maxLength={3} editable={!disabled}/>
         <Field label="Warranty / guarantee terms" value={form.warranty} onChangeText={value => change('warranty', value)} onBlur={() => touch('warranty')} error={fieldError('warranty')} multiline maxLength={500} editable={!disabled}/>
         <Field label="Quotation valid for (days)" value={form.validForDays} onChangeText={value => change('validForDays', value)} onBlur={() => touch('validForDays')} error={fieldError('validForDays')} keyboardType="number-pad" maxLength={2} editable={!disabled}/>
-        <Text style={styles.muted}>Only the customer and your shop can view this quotation. Check the details before sending; submitted quotations cannot be edited or replaced.</Text>
-        <Button title="Send quotation" disabled={disabled} onPress={send}/>
+        <Text style={styles.heading}>Optional deposit</Text>
+        <Text style={styles.muted}>Set a required deposit for this quotation. Customers cannot change the amount; percentages are rounded to the nearest cent.</Text>
+        <Button title={`${form.depositType==='none'?'Selected: ':''}No deposit`} outline={form.depositType!=='none'} disabled={disabled} onPress={()=>{if(!disabled)setForm(current=>({...current,depositType:'none',depositValue:''}));}}/>
+        <Button title={`${form.depositType==='percentage'?'Selected: ':''}Percentage deposit`} outline={form.depositType!=='percentage'} disabled={disabled} onPress={()=>{if(!disabled)setForm(current=>({...current,depositType:'percentage',depositValue:''}));}}/>
+        <Button title={`${form.depositType==='fixed'?'Selected: ':''}Fixed deposit`} outline={form.depositType!=='fixed'} disabled={disabled} onPress={()=>{if(!disabled)setForm(current=>({...current,depositType:'fixed',depositValue:''}));}}/>
+        {form.depositType!=='none'&&<Field label={form.depositType==='percentage'?'Deposit percentage (whole %, 1–99)':'Fixed deposit amount (R)'} value={form.depositValue} onChangeText={value=>change('depositValue',value)} onBlur={()=>touch('depositValue')} error={fieldError('depositValue')} keyboardType={form.depositType==='percentage'?'number-pad':'decimal-pad'} maxLength={form.depositType==='percentage'?2:12} editable={!disabled}/>}
+        {form.depositType!=='none'&&<Text>Required deposit: {depositAmount>0?formatMoney(depositAmount):'Enter valid deposit terms'}</Text>}
+        <Text style={styles.muted}>Only the customer and your shop can view this quotation. Check the details before sending. A replacement is a separate historical quotation.</Text>
+        <Button title={hasExpiredQuote?'Submit renewal quotation':hasOutdatedQuote ? 'Submit replacement quotation' : 'Send quotation'} disabled={disabled} onPress={send}/>
       </Card>
       <Button title="Refresh request" disabled={saving || busy || offline} onPress={reload(refresh)}/>
     </>}
@@ -371,7 +416,7 @@ function QuotesList({navigation}) {
         <QuoteCard quote={quote}/>
         {!!quote.bookingId && <Button title="View booking" disabled={disabled} onPress={() => { if (!disabled) navigation.navigate('BookingDetail', {id: quote.bookingId}); }}/>}
         <Button title="View request" disabled={disabled} onPress={() => { if (!disabled) navigation.navigate('ShopRequest', {id: quote.serviceRequestId}); }}/>
-        {quote.status === 'submitted' && <ConfirmationButton title="Withdraw quotation" message="This withdraws your offer and keeps its history. A replacement quotation cannot be submitted for this request." disabled={disabled} danger onConfirm={() => withdraw(quote.id)}/>}
+        {quote.status === 'submitted' && <ConfirmationButton title="Withdraw quotation" message="Withdrawal is final for this request. The quotation remains in history and cannot be resubmitted or replaced." disabled={disabled} danger onConfirm={() => withdraw(quote.id)}/>}
       </View>;
     })}
     {!busy && data && !feed.items.length && <Text>You have not submitted a quotation yet.</Text>}

@@ -1,13 +1,16 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {StyleSheet} from 'react-native';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
-import ConfirmationButton from '../../../shared/components/ConfirmationButton';
 import {useAuth} from '../../auth/context/AuthContext';
 import {useMarketData} from '../hooks/useMarketData';
-import {marketApi} from '../services/marketApi';
 import {Page, Card, Button, Notice, useInfiniteCursor, formatMoney, QuoteCard} from '../components/MarketplaceUI';
 
 const available = (quote, now) => quote?.status === 'submitted' && Number(quote.validUntil) > now;
+const matchesRequestVersion = (quote, request) => {
+  const quoteVersion = Object.prototype.hasOwnProperty.call(quote || {}, 'termsVersion') ? quote.termsVersion : quote?.requestVersion;
+  const currentVersion = Number.isSafeInteger(request?.termsVersion) ? request.termsVersion : Number.isSafeInteger(request?.version) ? request.version : 1;
+  return Number.isSafeInteger(quoteVersion) && quoteVersion > 0 && quoteVersion === currentVersion;
+};
 
 // Reset both the selection and its cursor history when identity or request changes.
 export function QuoteComparisonScreen(props) {
@@ -16,20 +19,16 @@ export function QuoteComparisonScreen(props) {
 }
 
 function QuoteComparison({route, navigation}) {
-  const {user, offline} = useAuth(), id = route.params.id, [cursor,setCursor]=useState(null);
+  const {offline} = useAuth(), id = route.params.id, [cursor,setCursor]=useState(null);
   const {data, busy, error, refresh} = useMarketData('request', {id, quotesCursor: cursor});
   const quoteFeed=useInfiniteCursor(data,busy,setCursor,{itemsKey:'quotes',cursorKey:'quotesCursor'});
-  const [selection, setSelection] = useState(null), [saving, setSaving] = useState(false), [saveError, setSaveError] = useState('');
+  const [selection, setSelection] = useState(null);
   const [now, setNow] = useState(Date.now);
-  const lock = useRef(false), current = useRef({mounted: true, uid: user?.uid});
-  current.current.uid = user?.uid;
-  useEffect(() => {current.current.mounted = true; return () => {current.current.mounted = false;};}, []);
-
   // Keep the selected offer while its accumulated feed pages continue loading.
   const request = data?.request, quotes = quoteFeed.items;
   const selected = !busy && !offline && !error ? quotes.find(quote => quote.id === selection?.id) : null;
-  const disabled = busy || saving || offline || !!error;
-  const canAccept = !disabled && request?.status === 'open' && available(selected, Math.max(now, Date.now()));
+  const disabled = busy || offline || !!error;
+  const canAccept = !disabled && request?.status === 'open' && available(selected, Math.max(now, Date.now())) && matchesRequestVersion(selected,request);
   useEffect(() => {
     const currentSelection = selection && quotes.find(quote => quote.id === selection.id);
     if (offline || error || !busy && selection && currentSelection !== selection.quote) setSelection(null);
@@ -41,42 +40,27 @@ function QuoteComparison({route, navigation}) {
     return () => clearTimeout(timer);
   }, [data, now]);
 
-  async function accept() {
-    if (lock.current || !canAccept || !available(selected, Date.now())) return;
-    const uid = user?.uid;
-    lock.current = true; setSaving(true); setSaveError('');
-    try {
-      const booking = await marketApi('quoteAccept', {id: selected.id});
-      if (current.current.mounted && current.current.uid === uid) navigation.replace('BookingDetail', {id: booking.id});
-    } catch (e) {
-      if (current.current.mounted && current.current.uid === uid) {
-        setSaveError(e.message || 'Unable to accept this quotation. Please retry.');
-        throw e;
-      }
-    } finally {
-      lock.current = false;
-      if (current.current.mounted && current.current.uid === uid) setSaving(false);
-    }
-  }
-
   return <Page title="Compare quotes" navigation={navigation} onScroll={quoteFeed.onScroll} onLayout={quoteFeed.onLayout} onContentSizeChange={quoteFeed.onContentSizeChange}>
-    <Notice busy={busy || saving} error={saveError || error || (offline ? 'Connect to compare and accept quotations.' : '')}/>
+    <Notice busy={busy} error={error || (offline ? 'Connect to compare and accept quotations.' : '')}/>
     {request && <>
       <Card>
         <Text weight="semibold" style={styles.heading}>{request.title}</Text>
         <Text>Compare the full scope, total price, completion time and warranty before choosing one offer.</Text>
         <Text>Budget: {formatMoney(request.budgetMinCents)} – {formatMoney(request.budgetMaxCents)}</Text>
-        {request.status === 'open' && <Text>Accepting one quotation creates a booking awaiting the shop’s confirmation and appointment. Cancelling that booking will not reopen this request.</Text>}
+        {request.status === 'open' && <Text>Choose a quotation to review payment options. A booking is created only after you confirm a payment method. Cancelling a booking will not reopen this request.</Text>}
         {request.status === 'closed' && <Text>This request is closed. Its quotations are available to view only.</Text>}
         {request.status === 'booked' && <Text>A quotation has already been accepted for this request.</Text>}
         {request.bookingId && <Button title="View booking" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('BookingDetail', {id: request.bookingId});}}/>}
       </Card>
       {quotes.map(quote => {
-        const eligible = request.status === 'open' && available(quote, Math.max(now, Date.now()));
+        const currentTerms = matchesRequestVersion(quote,request);
+        const eligible = request.status === 'open' && available(quote, Math.max(now, Date.now())) && currentTerms;
         return <QuoteCard key={quote.id} quote={quote}>
+          {quote.status==='submitted'&&Number(quote.validUntil)<=Math.max(now,Date.now())&&<Text>This quotation has expired. Ask the shop to submit a renewal, then refresh quotations.</Text>}
           {!quote.warranty && <Text>Warranty: not specified</Text>}
+          {!currentTerms&&<Text>This quotation has no verifiable revision for the current request terms. Ask the shop to submit an updated quotation.</Text>}
           {request.status === 'open' && <Button title={`${selected?.id === quote.id ? 'Selected' : 'Select'}: ${quote.shopName || 'Shop quotation'}`} outline={selected?.id !== quote.id} disabled={disabled || !eligible}
-            onPress={() => {if (!disabled && eligible && available(quote, Date.now())) {setSelection({id: quote.id, quote}); setSaveError('');}}}/>}
+            onPress={() => {if (!disabled && eligible && available(quote, Date.now())) setSelection({id: quote.id, quote});}}/>}
         </QuoteCard>;
       })}
       {!busy && !quotes.length && <Text>No quotations yet.</Text>}
@@ -84,12 +68,12 @@ function QuoteComparison({route, navigation}) {
       {request.status === 'open' && <Card>
         <Text weight="semibold">{selected ? `Selected: ${selected.shopName || 'Shop quotation'} · ${formatMoney(selected.totalCents)}` : 'Select an available quotation from the list.'}</Text>
         {selected && !available(selected, Math.max(now, Date.now())) && <Text>This quotation has expired. Choose another offer or refresh the list.</Text>}
-        <ConfirmationButton key={selected?.id || 'none'} title="Continue to book" disabled={!canAccept}
-          message={selected ? `Accept ${selected.shopName || 'this shop'}’s quotation for ${formatMoney(selected.totalCents)}? This selects one offer and creates a booking awaiting shop confirmation. The shop will set a future appointment. Cancelling the booking does not reopen the request.` : 'Select an available quotation first.'}
-          onConfirm={accept}/>
+        {selected&&!matchesRequestVersion(selected,request)&&<Text>This quotation cannot be accepted against the current request terms. Ask the shop to submit an updated quotation.</Text>}
+        <Button title="Continue to payment choice" disabled={!canAccept}
+          onPress={()=>{if(canAccept&&available(selected,Date.now())&&matchesRequestVersion(selected,request))navigation.navigate('PaymentChoice',{quote:selected});}}/>
       </Card>}
     </>}
-    <Button title="Refresh quotations" outline disabled={busy || saving || offline} onPress={() => {if (!busy && !saving && !offline) {setSelection(null);quoteFeed.reset();setCursor(null);setSaveError(''); void refresh().catch(() => {});}}}/>
+    <Button title="Refresh quotations" outline disabled={busy || offline} onPress={() => {if (!busy && !offline) {setSelection(null);quoteFeed.reset();setCursor(null);void refresh().catch(() => {});}}}/>
   </Page>;
 }
 

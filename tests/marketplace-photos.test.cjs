@@ -85,7 +85,10 @@ test('picker cancellation and invalid file types or sizes keep uploads unavailab
  }
  choice={canceled:false,assets:[selected()]};await s.press('Choose photo','1');assert.ok(s.button('Upload photo','1'));assert.equal(s.state.calls.upload.length,0);
  await s.press('Discard selection','1');assert.equal(s.button('Upload photo','1'),undefined);
- assert.deepEqual(s.state.calls.picker[0],{type:['image/jpeg','image/png'],multiple:false,copyToCacheDirectory:true});
+ choice={canceled:false,assets:[]};await s.press('Choose photo','1');assert.equal(s.button('Upload photo','1'),undefined);
+ choice={canceled:false,assets:[{...selected('selected.webp'),mimeType:'image/webp'}]};await s.press('Choose photo','1');assert.ok(s.button('Upload photo','1'));
+ assert.equal(s.state.calls.upload.length,0);
+ assert.deepEqual(s.state.calls.picker[0],{type:['image/jpeg','image/png','image/webp'],multiple:false,copyToCacheDirectory:true});
 });
 
 test('picker responses after blur/refocus, account changes or external disable cannot select a stale file',async()=>{

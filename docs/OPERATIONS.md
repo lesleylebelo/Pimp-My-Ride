@@ -151,6 +151,15 @@ URL, secret key, and bucket are configured. Never put the Supabase secret in
 Expo configuration. Deploy/restart the backend after the release; no local-disk
 or new service setup is required.
 
+Showcase image deletion is intentionally disabled: replacing an image, removing
+a post, an upload-verification failure, or an uncertain client save outcome
+must not physically remove a storage object. The legacy `removeImage` API
+operation returns `failed-precondition`. This retention-first policy can leave
+unreferenced objects in the public bucket; do not delete them manually or run a
+cleanup job until a concurrency-safe asset reference/retirement design has
+been approved and deployed. No Firestore schema, index, or backfill change is
+part of this retention safeguard.
+
 The user confirmed the Firebase-hosted password-reset handler on 23 September
 2026. See [the flow decision](AUTH_FLOW_DECISION.md). Delivered reset emails,
 authorized domains, template contents and actual server password policy remain

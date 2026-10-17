@@ -4,6 +4,7 @@ const {createMarketplace,quoteId}=require('../marketplace.cjs');
 const M=require('../marketplace-domain.cjs');
 const {Timestamp}=require('firebase-admin/firestore');
 const B=require('../booking-domain.cjs');
+const {LOCAL_MOCK_ENV}=require('./helpers/mock-payments.cjs');
 const seed={
  'users/owner':{role:'owner',fullName:'Private customer name',phone:'private phone'},
  'users/other':{role:'owner'},
@@ -17,21 +18,33 @@ function queryable(db){
  const original=db.collection;db.queries=[];
  db.collection=function collection(path){
   const base=original(path);
-  function query(filters=[],cursor='',maximum=Infinity){return {
-   ...base,where:(key,operator,value)=>{assert.ok(operator==='=='||operator==='in');return query([...filters,[key,operator,value]],cursor,maximum);},orderBy:()=>query(filters,cursor,maximum),startAfter:id=>query(filters,id,maximum),limit:n=>query(filters,cursor,n),
-   get:async()=>{db.queries.push({path,filters,cursor,maximum});const docs=[...db.rows.entries()].filter(([p,value])=>p.startsWith(path+'/')&&p.slice(path.length+1).indexOf('/')===-1&&p.split('/').pop()>cursor&&filters.every(([key,operator,expected])=>operator==='in'?expected.includes(value[key]):value[key]===expected)).sort(([a],[b])=>a<b?-1:a>b?1:0).slice(0,maximum).map(([p])=>({id:p.split('/').pop(),exists:true,data:()=>db.rows.get(p)}));return {docs};},
-  };}
+  function query(filters=[],cursor=null,maximum=Infinity,orders=[]){
+   const keyValue=(entry,key)=>typeof key==='string'?entry[1][key]:entry[0].split('/').pop();
+   const compareValue=(a,b)=>{if(a instanceof Timestamp&&b instanceof Timestamp)return a.seconds-b.seconds||a.nanoseconds-b.nanoseconds;return a<b?-1:a>b?1:0;};
+   const compare=(a,b)=>(orders.length?orders:[[null,'asc']]).reduce((result,[key,direction])=>result||compareValue(keyValue(a,key),keyValue(b,key))*(direction==='desc'?-1:1),0);
+   return {...base,
+    where:(key,operator,value)=>{assert.ok(operator==='=='||operator==='in');return query([...filters,[key,operator,value]],cursor,maximum,orders);},
+    orderBy:(key,direction='asc')=>query(filters,cursor,maximum,[...orders,[key,direction]]),startAfter:value=>query(filters,value,maximum,orders),limit:n=>query(filters,cursor,n,orders),
+    get:async()=>{db.queries.push({path,filters,cursor,maximum});const cursorEntry=cursor?[path+'/'+(typeof cursor==='string'?cursor:cursor.id),typeof cursor==='string'?{}:cursor.data()]:null;
+     const docs=[...db.rows.entries()].filter(([p,value])=>p.startsWith(path+'/')&&!p.slice(path.length+1).includes('/')&&filters.every(([key,operator,expected])=>operator==='in'?expected.includes(value[key]):value[key]===expected)&&(!cursorEntry||compare([p,value],cursorEntry)>0)).sort(compare).slice(0,maximum).map(([p])=>({id:p.split('/').pop(),exists:true,data:()=>db.rows.get(p)}));return {docs};},
+   };
+  }
   return query();
  };
  return db;
 }
-function fixture(extra={}){
+function fixture(extra={},options={}){
  const db=queryable(memoryDb(structuredClone({...seed,...extra}))),users=new Map();let sequence=0;
  const auth={getUser:async uid=>users.get(uid)||{emailVerified:true,disabled:false}};
  const actor=async req=>({uid:req.auth.uid,profile:(await db.doc('users/'+req.auth.uid).get()).data()});
- const api=createMarketplace({db,auth,actor});
+ db.projectId='demo-pmr-security';
+ const api=createMarketplace({db,auth,actor,mockPaymentEnv:options.mockPaymentEnv===undefined?LOCAL_MOCK_ENV:options.mockPaymentEnv});
  const read=(uid,op,data={})=>api({auth:{uid},data:{op,...data}});
- const write=(uid,op,data={},key=`retry-${++sequence}`)=>read(uid,op,{requestId:key,...data});
+ const write=(uid,op,data={},key=`retry-${++sequence}`)=>{
+  const request=data.serviceRequestId&&db.rows.get(`serviceRequests/${data.serviceRequestId}`);
+  const attempt=op==='paymentMockResult'?db.rows.get('bookings/'+data.id+'/paymentAttempts/'+data.paymentAttemptId):null;
+  return read(uid,op,{requestId:key,...(op==='paymentMockResult'?{expectedBookingId:data.id,expectedAmountCents:attempt?.amountCents,expectedCurrency:attempt?.currency}:{}),...(op==='quoteAccept'&&!Object.hasOwn(data,'paymentMethod')?{paymentMethod:'pay_in_store'}:{}),...(op==='quoteSubmit'&&!Object.hasOwn(data,'termsVersion')?{termsVersion:request?.termsVersion||request?.version||1}:{}),...data});
+ };
  return {db,auth,users,api,read,write};
 }
 const vehicle={make:'Ford',model:'Fiesta',year:2022,colour:'Silver',registration:'abc 123 gp'};
@@ -46,8 +59,27 @@ test('owner can update an open request transactionally and retries are idempoten
  const first=await f.write('owner','requestUpdate',input,'update-request'),second=await f.write('owner','requestUpdate',input,'update-request');
  assert.deepEqual(first,second);
  const saved=f.db.rows.get(`serviceRequests/${id}`);
- assert.equal(saved.title,'Updated title');assert.equal(saved.city,'Pretoria');assert.equal(saved.version,2);
+ assert.equal(saved.title,'Updated title');assert.equal(saved.city,'Pretoria');assert.equal(saved.version,2);assert.equal(saved.termsVersion,2);
  assert.equal(audits(f).filter(([,value])=>value.action==='marketplace.requestUpdate').length,1);
+});
+
+test('an unchanged request save does not advance either revision or invalidate its quotation',async()=>{
+ const f=fixture(),offer=await offered(f),before=f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`);
+ await f.write('owner','requestUpdate',{id:offer.serviceRequestId,version:before.version,...requestData},'unchanged-request');
+ const saved=f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`);
+ assert.equal(saved.version,before.version);assert.equal(saved.termsVersion,before.termsVersion);
+ assert.equal(audits(f).filter(([,value])=>value.action==='marketplace.requestUpdate').length,0);
+ const accepted=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'});
+ assert.equal(accepted.id,offer.serviceRequestId);
+});
+
+test('a preferred-date-only edit advances the record revision but keeps the quotation terms revision',async()=>{
+ const f=fixture(),offer=await offered(f),before=f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`);
+ await f.write('owner','requestUpdate',{id:offer.serviceRequestId,version:before.version,...requestData,preferredDate:'2099-05-20'},'date-preference');
+ const saved=f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`);
+ assert.equal(saved.version,before.version+1);assert.equal(saved.termsVersion,before.termsVersion);
+ assert.equal(f.db.rows.get(`quotations/${offer.id}`).termsVersion,before.termsVersion);
+ assert.equal((await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'})).id,offer.serviceRequestId);
 });
 
 test('request updates reject stale versions and closed or booked requests',async()=>{
@@ -58,6 +90,186 @@ test('request updates reject stale versions and closed or booked requests',async
  await assert.rejects(()=>f.write('owner','requestUpdate',{id,version:2,title:'Closed update',description:requestData.description,categoryId:'paint',city:requestData.city,budgetMinCents:10000,budgetMaxCents:200000,preferredDate:'',visibility:'open'},'closed-update'),{code:'failed-precondition'});
  f.db.rows.get(`serviceRequests/${id}`).status='booked';
  await assert.rejects(()=>f.write('owner','requestUpdate',{id,version:2,title:'Booked update',description:requestData.description,categoryId:'paint',city:requestData.city,budgetMinCents:10000,budgetMaxCents:200000,preferredDate:'',visibility:'open'},'booked-update'),{code:'failed-precondition'});
+});
+test('quotes are bound to their request revision and cannot be accepted after a material request update',async()=>{
+ const f=fixture(),offer=await offered(f),before=f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`);
+ await f.write('owner','requestUpdate',{id:offer.serviceRequestId,version:before.version,title:'Changed scope',description:requestData.description,categoryId:'paint',city:requestData.city,budgetMinCents:10000,budgetMaxCents:200000,preferredDate:'',visibility:'open'});
+ assert.equal(f.db.rows.get(`quotations/${offer.id}`).termsVersion,1);
+ assert.equal(f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`).termsVersion,2);
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'}),{code:'failed-precondition'});
+ assert.equal(f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`).status,'open');
+ assert.equal([...f.db.rows.keys()].filter(path=>path.startsWith('bookings/')).length,0);
+});
+
+test('vehicle and category changes advance material terms and invalidate prior offers',async()=>{
+ for(const change of [
+  async(f,id,before)=>f.write('owner','requestUpdate',{id,version:before.version,...requestData,title:'Install a body kit',categoryId:'body'},'category-change'),
+  async(f,id,before)=>{
+   await f.write('owner','vehicleSave',{...vehicle,id:'car',version:1,make:'Honda'},'vehicle-change');
+   await f.write('owner','requestUpdate',{id,version:before.version,...requestData},'vehicle-snapshot-change');
+  },
+ ]){
+  const f=fixture({'serviceCategories/body':{name:'Body',description:'Body kits',archived:false}}),offer=await offered(f),id=offer.serviceRequestId,before=f.db.rows.get(`serviceRequests/${id}`);
+  await change(f,id,before);
+  assert.equal(f.db.rows.get(`serviceRequests/${id}`).termsVersion,2);
+  await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'}),{code:'failed-precondition'});
+ }
+});
+
+test('a shop can replace an outdated offer without overwriting quotation history',async()=>{
+ const f=fixture(),offer=await offered(f),before=f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`);
+ await f.write('owner','requestUpdate',{id:offer.serviceRequestId,version:before.version,...requestData,title:'Repair and repaint both doors'});
+ const old=f.db.rows.get(`quotations/${offer.id}`);
+ const result=await f.write('shop','quoteSubmit',{serviceRequestId:offer.serviceRequestId,...quoteData,scope:'Repair and repaint both doors',termsVersion:2});
+ assert.notEqual(result.id,offer.id);
+ const history=[...f.db.rows.entries()].filter(([path,value])=>path.startsWith('quotations/')&&value.serviceRequestId===offer.serviceRequestId);
+ assert.equal(history.length,2);
+ assert.equal(f.db.rows.get(`quotations/${offer.id}`).status,'superseded');
+ assert.equal(f.db.rows.get(`quotations/${offer.id}`).totalCents,old.totalCents);
+ assert.equal(f.db.rows.get(`quotations/${result.id}`).termsVersion,2);
+ assert.equal(f.db.rows.get(`quotationHeads/${quoteId(offer.serviceRequestId,'shop')}`).quoteId,result.id);
+ const current=(await f.read('owner','request',{id:offer.serviceRequestId})).quotes;
+ assert.deepEqual(new Set(current.map(quote=>quote.id)),new Set([offer.id,result.id]));
+ assert.equal((await f.write('owner','quoteAccept',{id:result.id,paymentMethod:'pay_in_store'})).id,offer.serviceRequestId);
+});
+
+test('legacy quotations without revision metadata are rejected until the shop submits a current replacement',async()=>{
+ const f=fixture(),offer=await offered(f),legacy=f.db.rows.get(`quotations/${offer.id}`);
+ delete legacy.requestVersion;delete legacy.termsVersion;
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'}),{code:'failed-precondition'});
+ assert.equal(f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`).status,'open');
+ const result=await f.write('shop','quoteSubmit',{serviceRequestId:offer.serviceRequestId,...quoteData,termsVersion:1});
+ assert.notEqual(result.id,offer.id);
+ assert.equal(f.db.rows.get(`quotations/${offer.id}`).status,'superseded');
+ assert.equal(f.db.rows.get(`quotations/${result.id}`).termsVersion,1);
+ assert.equal((await f.write('owner','quoteAccept',{id:result.id,paymentMethod:'pay_in_store'})).id,offer.serviceRequestId);
+});
+
+test('valid deterministic legacy quotations remain acceptable without a head',async()=>{
+ const f=fixture(),offer=await offered(f);
+ f.db.rows.delete(`quotationHeads/${quoteId(offer.serviceRequestId,'shop')}`);
+ assert.equal((await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'})).id,offer.serviceRequestId);
+});
+
+test('mismatched legacy quotation without a head fails closed',async()=>{
+ const f=fixture(),offer=await offered(f);
+ f.db.rows.delete(`quotationHeads/${quoteId(offer.serviceRequestId,'shop')}`);
+ f.db.rows.get(`quotations/${offer.id}`).shopId='competitor';
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'}),{code:'failed-precondition'});
+ assert.equal(f.db.rows.has(`bookings/${offer.serviceRequestId}`),false);
+});
+
+test('malformed, dangling and mismatched quotation heads block replacement and acceptance',async()=>{
+ const cases=[
+  head=>({...head,quoteId:''}),
+  head=>({...head,quoteId:'missing-quotation'}),
+  head=>({...head,serviceRequestId:'another-request'}),
+  head=>({...head,shopId:'competitor'}),
+ ];
+ for(const corrupt of cases){
+  const f=fixture(),offer=await offered(f),path=`quotationHeads/${quoteId(offer.serviceRequestId,'shop')}`;
+  f.db.rows.set(path,corrupt({quoteId:offer.id,serviceRequestId:offer.serviceRequestId,shopId:'shop'}));
+  await assert.rejects(()=>f.write('shop','quoteSubmit',{serviceRequestId:offer.serviceRequestId,...quoteData,termsVersion:1}),{code:'failed-precondition'});
+  await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'}),{code:'failed-precondition'});
+  assert.equal(f.db.rows.get(`quotations/${offer.id}`).status,'submitted');
+  assert.equal(f.db.rows.has(`bookings/${offer.serviceRequestId}`),false);
+ }
+});
+
+test('a quotation head cannot point to another shop offer',async()=>{
+ const f=fixture(),offer=await offered(f),competitor=await f.write('competitor','quoteSubmit',{serviceRequestId:offer.serviceRequestId,...quoteData});
+ f.db.rows.set(`quotationHeads/${quoteId(offer.serviceRequestId,'shop')}`,{quoteId:competitor.id,serviceRequestId:offer.serviceRequestId,shopId:'shop'});
+ await assert.rejects(()=>f.write('shop','quoteSubmit',{serviceRequestId:offer.serviceRequestId,...quoteData,termsVersion:1}),{code:'failed-precondition'});
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'}),{code:'failed-precondition'});
+ assert.equal(f.db.rows.get(`quotations/${offer.id}`).status,'submitted');
+ assert.equal(f.db.rows.get(`quotations/${competitor.id}`).status,'submitted');
+});
+
+test('stale current-head quotations require a replacement and superseded non-head offers cannot be accepted',async()=>{
+ const f=fixture(),offer=await offered(f),before=f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`);
+ await f.write('owner','requestUpdate',{id:offer.serviceRequestId,version:before.version,...requestData,title:'Changed material scope'});
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'}),{code:'failed-precondition'});
+ const replacement=await f.write('shop','quoteSubmit',{serviceRequestId:offer.serviceRequestId,...quoteData,termsVersion:2});
+ f.db.rows.get(`quotations/${offer.id}`).status='submitted';
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'}),{code:'failed-precondition'});
+ assert.equal((await f.write('owner','quoteAccept',{id:replacement.id,paymentMethod:'pay_in_store'})).id,offer.serviceRequestId);
+});
+
+test('a superseded quotation-head pointer is rejected without repairing or overwriting history',async()=>{
+ const f=fixture(),offer=await offered(f),before=f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`);
+ await f.write('owner','requestUpdate',{id:offer.serviceRequestId,version:before.version,...requestData,title:'Changed material scope'});
+ const replacement=await f.write('shop','quoteSubmit',{serviceRequestId:offer.serviceRequestId,...quoteData,termsVersion:2});
+ f.db.rows.set(`quotationHeads/${quoteId(offer.serviceRequestId,'shop')}`,{quoteId:offer.id,serviceRequestId:offer.serviceRequestId,shopId:'shop'});
+ await assert.rejects(()=>f.write('shop','quoteSubmit',{serviceRequestId:offer.serviceRequestId,...quoteData,termsVersion:2}),{code:'failed-precondition'});
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'}),{code:'failed-precondition'});
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:replacement.id,paymentMethod:'pay_in_store'}),{code:'failed-precondition'});
+ assert.equal(f.db.rows.get(`quotations/${offer.id}`).status,'superseded');
+ assert.equal(f.db.rows.get(`quotations/${replacement.id}`).status,'submitted');
+});
+
+test('concurrent acceptance and replacement cannot create an accepted non-head quotation',async()=>{
+ const f=fixture(),offer=await offered(f),before=f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`);
+ await f.write('owner','requestUpdate',{id:offer.serviceRequestId,version:before.version,...requestData,title:'Changed material scope'});
+ const results=await Promise.allSettled([
+  f.write('shop','quoteSubmit',{serviceRequestId:offer.serviceRequestId,...quoteData,termsVersion:2},'racing-replacement'),
+  f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'},'racing-acceptance'),
+ ]);
+ assert.equal(results.filter(result=>result.status==='fulfilled').length,1);
+ const head=f.db.rows.get(`quotationHeads/${quoteId(offer.serviceRequestId,'shop')}`);
+ assert.notEqual(head.quoteId,offer.id);
+ assert.equal(f.db.rows.get(`quotations/${head.quoteId}`).status,'submitted');
+ assert.equal(f.db.rows.has(`bookings/${offer.serviceRequestId}`),false);
+ assert.equal(f.db.rows.get(`quotations/${offer.id}`).status,'superseded');
+});
+
+test('quote submissions require an explicit current material-terms revision',async()=>{
+ const f=fixture(),serviceRequestId=await created(f);
+ await assert.rejects(()=>f.read('shop','quoteSubmit',{serviceRequestId,...quoteData,requestId:'missing-terms-version'}),{code:'invalid-argument'});
+ assert.equal([...f.db.rows.keys()].filter(path=>path.startsWith('quotations/')).length,0);
+});
+
+test('accepted quotation price and scope remain immutable in its booking and history',async()=>{
+ const f=fixture(),offer=await offered(f),savedQuote=f.db.rows.get(`quotations/${offer.id}`);
+ const accepted=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'});
+ const booking=f.db.rows.get(`bookings/${accepted.id}`);
+ await assert.rejects(()=>f.write('shop','quoteWithdraw',{id:offer.id}),{code:'failed-precondition'});
+ await assert.rejects(()=>f.write('shop','quoteSubmit',{serviceRequestId:offer.serviceRequestId,...quoteData}),{code:'failed-precondition'});
+ await assert.rejects(()=>f.write('owner','requestUpdate',{id:offer.serviceRequestId,version:1,...requestData,title:'Post-acceptance edit'}),{code:'failed-precondition'});
+ assert.equal(f.db.rows.get(`quotations/${offer.id}`).totalCents,savedQuote.totalCents);
+ assert.equal(f.db.rows.get(`quotations/${offer.id}`).scope,savedQuote.scope);
+ assert.equal(f.db.rows.get(`bookings/${accepted.id}`).totalCents,savedQuote.totalCents);
+ assert.equal(f.db.rows.get(`bookings/${accepted.id}`).scope,savedQuote.scope);
+ assert.equal(booking.quoteId,offer.id);
+});
+
+test('concurrent request update and quote acceptance cannot commit incompatible terms',async()=>{
+ const f=fixture(),offer=await offered(f),before=f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`);
+ const update=f.write('owner','requestUpdate',{id:offer.serviceRequestId,version:before.version,...requestData,title:'Updated scope'},'race-update');
+ const accept=f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'},'race-accept');
+ const [updated,accepted]=await Promise.allSettled([update,accept]);
+ assert.equal(Number(updated.status==='fulfilled')+Number(accepted.status==='fulfilled'),1);
+ const request=f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`),quote=f.db.rows.get(`quotations/${offer.id}`);
+ if(accepted.status==='fulfilled'){
+  const booking=f.db.rows.get(`bookings/${offer.serviceRequestId}`);
+  assert.equal(request.status,'booked');assert.equal(quote.status,'accepted');
+  assert.equal(booking.scope,quote.scope);assert.equal(booking.totalCents,quote.totalCents);
+  assert.equal(booking.requestTitle,requestData.title);
+ }else{
+  assert.equal(request.status,'open');assert.equal(request.termsVersion,2);assert.equal(quote.status,'submitted');
+  assert.equal(f.db.rows.has(`bookings/${offer.serviceRequestId}`),false);
+ }
+});
+
+test('lost acknowledgement during replacement retries the same new quotation idempotently',async()=>{
+ const f=fixture(),offer=await offered(f),before=f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`);
+ await f.write('owner','requestUpdate',{id:offer.serviceRequestId,version:before.version,...requestData,title:'Changed scope'});
+ let once=true;f.db.after=async()=>{if(once){once=false;throw Error('Synthetic lost replacement response');}};
+ const replacement={serviceRequestId:offer.serviceRequestId,...quoteData,termsVersion:2};
+ await assert.rejects(()=>f.write('shop','quoteSubmit',replacement,'replacement-once'),/lost replacement response/);
+ const first=await f.write('shop','quoteSubmit',replacement,'replacement-once');
+ const second=await f.write('shop','quoteSubmit',replacement,'replacement-once');
+ assert.deepEqual(first,second);assert.equal(f.db.rows.get(`quotations/${offer.id}`).status,'superseded');
+ assert.equal([...f.db.rows.keys()].filter(path=>path.startsWith('quotations/')).length,2);
 });
 test('vehicle creation and request creation are transactional, audited and safe on retry after a lost acknowledgement',async()=>{
  const f=fixture();let once=true;f.db.after=async()=>{if(once){once=false;throw Error('Synthetic lost response');}};
@@ -214,9 +426,9 @@ test('archived vehicles or categories hide unquotable requests but preserve owne
  }
 });
 
-async function offered(f,{visibility='open',shopId}={}){
+async function offered(f,{visibility='open',shopId,quote=quoteData}={}){
  const serviceRequestId=await created(f,{visibility,...(shopId?{shopId}:{})});
- const result=await f.write('shop','quoteSubmit',{serviceRequestId,...quoteData});
+ const result=await f.write('shop','quoteSubmit',{serviceRequestId,...quote});
  return {serviceRequestId,id:result.id};
 }
 async function booked(f){const offer=await offered(f),booking=await f.write('owner','quoteAccept',{id:offer.id});return {...offer,bookingId:booking.id};}
@@ -229,6 +441,7 @@ test('acceptance atomically selects one quote and creates private immutable book
  const request=f.db.rows.get('serviceRequests/'+offer.serviceRequestId),quote=f.db.rows.get('quotations/'+offer.id),saved=f.db.rows.get('bookings/'+result.id);
  assert.equal(request.status,'booked');assert.equal(request.acceptedQuoteId,offer.id);assert.equal(request.bookingId,result.id);
  assert.equal(quote.status,'accepted');assert.equal(quote.bookingId,result.id);assert.equal(saved.status,'pending_confirmation');
+ assert.equal(saved.paymentMethod,'pay_in_store');assert.equal(saved.paymentStatus,'due');assert.equal(saved.serviceStatus,'not_started');
  assert.deepEqual(saved.items,quoteData.items);assert.equal(saved.totalCents,100000);assert.equal(saved.scope,quoteData.scope);assert.equal(saved.shopName,'Trusted Motors');assert.equal(saved.city,'Johannesburg');assert.equal(saved.categoryName,'Paint');
  assert.deepEqual(saved.vehicle,{make:'Toyota',model:'Corolla',year:2020,colour:'Blue'});
  quote.items[0].amountCents=1;request.title='Changed later';f.db.rows.get('vehicles/car').colour='Red';
@@ -236,6 +449,199 @@ test('acceptance atomically selects one quote and creates private immutable book
  assert.equal(owner.items[0].amountCents,10000);assert.equal(owner.requestTitle,requestData.title);assert.equal(owner.vehicle.colour,'Blue');
  assert.equal(shop.ownerId,undefined);assert.equal(shop.vehicleId,undefined);assert.ok(!JSON.stringify(shop).includes('PRIVATE-REG'));assert.ok(!JSON.stringify(shop).includes('private phone'));
  assert.equal(bookingAudits(f).length,1);
+});
+
+test('simulated online payments use the accepted quotation total and separate payment, booking and service states',async()=>{
+ for(const outcome of ['successful','failed','cancelled','pending']){
+  const f=fixture(),offer=await offered(f),booking=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_now'});
+  const saved=f.db.rows.get(`bookings/${booking.id}`),attempt=f.db.rows.get(`bookings/${booking.id}/paymentAttempts/${saved.currentPaymentAttemptId}`);
+  assert.equal(booking.paymentAttemptId,saved.currentPaymentAttemptId);assert.equal(saved.totalCents,100000);assert.equal(saved.paidCents,0);assert.equal(saved.balanceDueCents,100000);assert.equal(attempt.amountCents,100000);assert.equal(attempt.currency,'ZAR');
+  assert.equal(saved.paymentStatus,'pending');assert.equal(saved.status,'pending_payment');assert.equal(saved.serviceStatus,'not_started');
+  await assert.rejects(()=>f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:saved.currentPaymentAttemptId,outcome,amountCents:1}),{code:'invalid-argument'});
+  await f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:saved.currentPaymentAttemptId,outcome},`resolve-${outcome}`);
+  const after=f.db.rows.get(`bookings/${booking.id}`);
+  assert.equal(after.paymentStatus,outcome==='successful'?'paid':outcome);
+  assert.equal(f.db.rows.get(`bookings/${booking.id}`).status,outcome==='successful'?'pending_confirmation':'pending_payment');
+  assert.equal(f.db.rows.get(`bookings/${booking.id}`).serviceStatus,'not_started');
+  assert.equal(after.paidCents,outcome==='successful'?100000:0);assert.equal(after.balanceDueCents,outcome==='successful'?0:100000);
+  assert.equal(f.db.rows.get(`paymentReceipts/${saved.currentPaymentAttemptId}`)?.testTransaction,outcome==='successful'?true:undefined);
+  const emails=[...f.db.rows.entries()].filter(([path,value])=>path.startsWith('emailOutbox/')&&value.bookingId===booking.id);
+  assert.ok(emails.every(([,value])=>value.deliveryStatus==='test_sink_only'&&value.simulated===true));
+ }
+});
+
+test('quotation deposits use integer-cent rounding, preserve the specified value, and reject invalid terms',async()=>{
+ const base={scope:'Test work',items:[{description:'Work',amountCents:101}],completionDays:1,warranty:'',validForDays:1};
+ const percentage=M.quotation({...base,depositType:'percentage',depositValue:50});
+ assert.equal(percentage.depositValue,50);assert.equal(percentage.depositAmountCents,51);
+ const fixed=M.quotation({...base,depositType:'fixed',depositValue:50});
+ assert.equal(fixed.depositValue,50);assert.equal(fixed.depositAmountCents,50);
+ const legacy=M.quotation(base);
+ assert.equal(legacy.depositType,'none');assert.equal(legacy.depositValue,null);assert.equal(legacy.depositAmountCents,null);
+ for(const terms of [
+  {depositType:'percentage',depositValue:0},
+  {depositType:'percentage',depositValue:100},
+  {depositType:'percentage',depositValue:1,items:[{description:'One cent',amountCents:1}]},
+  {depositType:'fixed',depositValue:0},
+  {depositType:'fixed',depositValue:101},
+  {depositType:'unexpected',depositValue:1},
+ ])assert.throws(()=>M.quotation({...base,...terms}),{code:'invalid-argument'});
+});
+
+test('accepted deposit terms remain immutable and a percentage deposit settles only its server-derived portion',async()=>{
+ const f=fixture(),offer=await offered(f,{quote:{...quoteData,depositType:'percentage',depositValue:25}});
+ const quote=f.db.rows.get(`quotations/${offer.id}`);assert.equal(quote.depositAmountCents,25000);
+ const booking=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_deposit'});
+ const saved=f.db.rows.get(`bookings/${booking.id}`),initial=f.db.rows.get(`bookings/${booking.id}/paymentAttempts/${booking.paymentAttemptId}`);
+ assert.deepEqual([saved.depositType,saved.depositValue,saved.depositAmountCents],['percentage',25,25000]);
+ assert.equal(initial.amountCents,25000);assert.equal(saved.paidCents,0);assert.equal(saved.balanceDueCents,100000);
+ quote.depositValue=80;quote.depositAmountCents=80000;
+ await f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:booking.paymentAttemptId,outcome:'successful'},'deposit-success');
+ let current=f.db.rows.get(`bookings/${booking.id}`);
+ assert.equal(current.paidCents,25000);assert.equal(current.balanceDueCents,75000);assert.equal(current.paymentStatus,'partially_paid');
+ assert.equal(current.status,'pending_confirmation');assert.equal(current.depositAmountCents,25000);
+ const paid=await f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:booking.paymentAttemptId,outcome:'successful'},'deposit-success');
+ assert.equal(paid.paymentStatus,'partially_paid');assert.equal(f.db.rows.get(`bookings/${booking.id}`).paidCents,25000);
+ await assert.rejects(()=>f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:booking.paymentAttemptId,outcome:'successful'},'deposit-replay'),{code:'failed-precondition'});
+});
+
+test('replacement quotations retain separate deposit terms and acceptance snapshots the replacement',async()=>{
+ const f=fixture(),offer=await offered(f,{quote:{...quoteData,depositType:'percentage',depositValue:25}});
+ const before=f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`);
+ await f.write('owner','requestUpdate',{id:offer.serviceRequestId,version:before.version,...requestData,title:'Updated work scope'},'deposit-terms-update');
+ const current=f.db.rows.get(`serviceRequests/${offer.serviceRequestId}`);
+ const replacement=await f.write('shop','quoteSubmit',{serviceRequestId:offer.serviceRequestId,termsVersion:current.termsVersion,...quoteData,depositType:'fixed',depositValue:30000});
+ const old=f.db.rows.get(`quotations/${offer.id}`),next=f.db.rows.get(`quotations/${replacement.id}`);
+ assert.equal(old.status,'superseded');assert.equal(old.depositType,'percentage');assert.equal(old.depositValue,25);assert.equal(old.depositAmountCents,25000);
+ assert.equal(next.depositType,'fixed');assert.equal(next.depositValue,30000);assert.equal(next.depositAmountCents,30000);
+ const booking=await f.write('owner','quoteAccept',{id:replacement.id,paymentMethod:'pay_deposit'});
+ const saved=f.db.rows.get(`bookings/${booking.id}`);
+ assert.equal(saved.depositType,'fixed');assert.equal(saved.depositValue,30000);assert.equal(saved.depositAmountCents,30000);
+ assert.equal(f.db.rows.get(`bookings/${booking.id}/paymentAttempts/${booking.paymentAttemptId}`).amountCents,30000);
+});
+
+test('balance payment attempts are server-priced, stale results fail, and concurrent settlement cannot double-count',async()=>{
+ const f=fixture(),offer=await offered(f,{quote:{...quoteData,depositType:'fixed',depositValue:27500}});
+ const booking=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_deposit'});
+ await f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:booking.paymentAttemptId,outcome:'successful'},'first-deposit');
+ const starts=await Promise.allSettled([f.write('owner','paymentStart',{id:booking.id},'start-balance-a'),f.write('owner','paymentStart',{id:booking.id},'start-balance-b')]);
+ assert.equal(starts.filter(result=>result.status==='fulfilled').length,1);
+ const started=starts.find(result=>result.status==='fulfilled').value,attempt=f.db.rows.get(`bookings/${booking.id}/paymentAttempts/${started.paymentAttemptId}`);
+ assert.equal(attempt.amountCents,72500);assert.equal(attempt.kind,'balance');assert.equal(attempt.status,'pending');
+ await assert.rejects(()=>f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:booking.paymentAttemptId,outcome:'successful'},'stale-deposit-result'),{code:'failed-precondition'});
+ const results=await Promise.allSettled([
+  f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:started.paymentAttemptId,outcome:'successful'},'balance-result-a'),
+  f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:started.paymentAttemptId,outcome:'successful'},'balance-result-b'),
+ ]);
+ assert.equal(results.filter(result=>result.status==='fulfilled').length,1);
+ const saved=f.db.rows.get(`bookings/${booking.id}`);
+ assert.equal(saved.paidCents,100000);assert.equal(saved.balanceDueCents,0);assert.equal(saved.paymentStatus,'paid');
+ assert.equal([...f.db.rows.keys()].filter(path=>path.startsWith(`paymentReceipts/${started.paymentAttemptId}`)).length,1);
+ await assert.rejects(()=>f.write('owner','paymentStart',{id:booking.id}),{code:'failed-precondition'});
+});
+
+test('shop may record only the server-calculated remaining balance once, without overpayment',async()=>{
+ const f=fixture(),offer=await offered(f,{quote:{...quoteData,depositType:'fixed',depositValue:30000}});
+ const booking=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_deposit'});
+ await f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:booking.paymentAttemptId,outcome:'successful'},'deposit-paid');
+ await assert.rejects(()=>f.write('owner','paymentRecordInStore',{id:booking.id,method:'simulated_cash'}),{code:'permission-denied'});
+ await f.write('shop','paymentRecordInStore',{id:booking.id,method:'simulated_eft'});
+ const saved=f.db.rows.get(`bookings/${booking.id}`),attempt=f.db.rows.get(`bookings/${booking.id}/paymentAttempts/${saved.currentPaymentAttemptId}`);
+ assert.equal(attempt.amountCents,70000);assert.equal(attempt.method,'simulated_eft');
+ assert.equal(saved.paidCents,100000);assert.equal(saved.balanceDueCents,0);assert.equal(saved.paymentStatus,'paid');
+ await assert.rejects(()=>f.write('shop','paymentRecordInStore',{id:booking.id,method:'simulated_cash'}),{code:'failed-precondition'});
+ assert.equal(f.db.rows.get(`bookings/${booking.id}`).paidCents,100000);
+});
+
+test('a corrupted attempt above the current balance fails closed without changing the ledger',async()=>{
+ const f=fixture(),offer=await offered(f,{quote:{...quoteData,depositType:'percentage',depositValue:25}});
+ const booking=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_deposit'});
+ await f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:booking.paymentAttemptId,outcome:'successful'},'pay-before-corruption');
+ const started=await f.write('owner','paymentStart',{id:booking.id});
+ f.db.rows.get(`bookings/${booking.id}/paymentAttempts/${started.paymentAttemptId}`).amountCents=75001;
+ await assert.rejects(()=>f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:started.paymentAttemptId,outcome:'successful'}),{code:'failed-precondition'});
+ const saved=f.db.rows.get(`bookings/${booking.id}`);
+ assert.equal(saved.paidCents,25000);assert.equal(saved.balanceDueCents,75000);
+ assert.equal(f.db.rows.has(`paymentReceipts/${started.paymentAttemptId}`),false);
+});
+
+test('payment actions reject a paid status when the saved balance is still outstanding',async()=>{
+ const f=fixture(),offer=await offered(f),booking=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'});
+ f.db.rows.get(`bookings/${booking.id}`).paymentStatus='paid';
+ await assert.rejects(()=>f.write('owner','paymentStart',{id:booking.id}),{code:'failed-precondition'});
+ assert.equal(f.db.rows.get(`bookings/${booking.id}`).balanceDueCents,100000);
+ assert.equal(f.db.rows.get(`bookings/${booking.id}`).paidCents,0);
+});
+
+test('failed deposit retry preserves the original attempt and cancellation blocks settlement for review',async()=>{
+ const f=fixture(),offer=await offered(f,{quote:{...quoteData,depositType:'percentage',depositValue:20}});
+ const booking=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_deposit'});
+ const oldAttemptId=booking.paymentAttemptId;
+ await f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:oldAttemptId,outcome:'failed'},'deposit-failure');
+ const retry=await f.write('owner','paymentRetry',{id:booking.id});
+ assert.equal(f.db.rows.get(`bookings/${booking.id}/paymentAttempts/${oldAttemptId}`).status,'failed');
+ assert.equal(f.db.rows.get(`bookings/${booking.id}/paymentAttempts/${retry.paymentAttemptId}`).amountCents,20000);
+ await assert.rejects(()=>f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:oldAttemptId,outcome:'successful'},'stale-deposit'),{code:'failed-precondition'});
+ await f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:retry.paymentAttemptId,outcome:'successful'},'retry-success');
+ await f.write('owner','bookingCancel',{id:booking.id,reason:'Academic cancellation test'});
+ const cancelled=f.db.rows.get(`bookings/${booking.id}`);
+ assert.equal(cancelled.status,'cancelled');assert.equal(cancelled.paidCents,20000);assert.equal(cancelled.balanceDueCents,80000);
+ assert.equal(cancelled.paymentReconciliationStatus,'refund_review_required');
+ await assert.rejects(()=>f.write('owner','paymentStart',{id:booking.id}),{code:'failed-precondition'});
+ await assert.rejects(()=>f.write('shop','paymentRecordInStore',{id:booking.id,method:'simulated_cash'}),{code:'failed-precondition'});
+});
+
+test('legacy quotations without deposits remain full-pay or in-store only',async()=>{
+ const f=fixture(),offer=await offered(f),quote=f.db.rows.get(`quotations/${offer.id}`);
+ delete quote.depositType;delete quote.depositValue;delete quote.depositAmountCents;
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_deposit'}),{code:'failed-precondition'});
+ const booking=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_now'});
+ const saved=f.db.rows.get(`bookings/${booking.id}`);
+ assert.equal(saved.depositType,'none');assert.equal(saved.depositAmountCents,null);
+ assert.equal(f.db.rows.get(`bookings/${booking.id}/paymentAttempts/${booking.paymentAttemptId}`).amountCents,saved.totalCents);
+});
+
+test('failed simulated payments can be retried and pay-in-store payments are recorded only by the selected shop',async()=>{
+ const f=fixture(),online=await offered(f),pending=await f.write('owner','quoteAccept',{id:online.id,paymentMethod:'pay_now'});
+ await f.write('owner','paymentMockResult',{id:pending.id,paymentAttemptId:pending.paymentAttemptId,outcome:'failed'});
+ const retry=await f.write('owner','paymentRetry',{id:pending.id});
+ assert.equal(retry.paymentStatus,'pending');assert.ok(retry.paymentAttemptId);assert.equal(f.db.rows.get(`bookings/${pending.id}`).totalCents,100000);
+ await assert.rejects(()=>f.write('competitor','paymentMockResult',{id:pending.id,paymentAttemptId:retry.paymentAttemptId,outcome:'successful'}),{code:'permission-denied'});
+ const store=await offered(f),booking=await f.write('owner','quoteAccept',{id:store.id,paymentMethod:'pay_in_store'});
+ assert.equal(f.db.rows.get(`bookings/${booking.id}`).paymentStatus,'due');assert.equal(f.db.rows.get(`bookings/${booking.id}`).balanceDueCents,100000);
+ await assert.rejects(()=>f.write('owner','paymentRecordInStore',{id:booking.id,method:'simulated_cash'}),{code:'permission-denied'});
+ await assert.rejects(()=>f.write('competitor','paymentRecordInStore',{id:booking.id,method:'simulated_cash'}),{code:'not-found'});
+ await f.write('shop','paymentRecordInStore',{id:booking.id,method:'simulated_cash'});
+ const saved=f.db.rows.get(`bookings/${booking.id}`),attempt=f.db.rows.get(`bookings/${booking.id}/paymentAttempts/${saved.currentPaymentAttemptId}`);
+ assert.equal(saved.paymentStatus,'paid');assert.equal(saved.paidCents,100000);assert.equal(saved.balanceDueCents,0);assert.equal(saved.status,'pending_confirmation');assert.equal(attempt.testTransaction,true);
+ assert.equal(f.db.rows.get(`paymentReceipts/${saved.currentPaymentAttemptId}`).receiptType,'SIMULATED_PAYMENT_RECEIPT');
+});
+
+test('service completion remains separate from booking confirmation and payment',async()=>{
+ const f=fixture(),offer=await offered(f),booking=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'});
+ await f.write('shop','bookingConfirm',{id:booking.id,...appointment});
+ await f.write('shop','bookingComplete',{id:booking.id});
+ const saved=f.db.rows.get(`bookings/${booking.id}`);
+ assert.equal(saved.status,'confirmed');assert.equal(saved.paymentStatus,'due');assert.equal(saved.serviceStatus,'completed');
+});
+
+test('a late simulated result after cancellation is rejected without changing payment history or accounting',async()=>{
+ const f=fixture(),offer=await offered(f),booking=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_now'});
+ await f.write('owner','bookingCancel',{id:booking.id,reason:'Cancelled before simulated payment completed'});
+ const before=JSON.stringify([...f.db.rows]);
+ for(const outcome of ['successful','failed','cancelled','pending'])await assert.rejects(()=>f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:booking.paymentAttemptId,outcome}),{code:'failed-precondition'});
+ assert.equal(JSON.stringify([...f.db.rows]),before);
+ assert.equal(f.db.rows.has(`paymentReceipts/${booking.paymentAttemptId}`),false);
+});
+
+test('booking reads expose only the participant email test-sink events and mark them undelivered',async()=>{
+ const f=fixture(),offer=await offered(f),booking=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'});
+ const owner=(await f.read('owner','booking',{id:booking.id})).testEmailEvents;
+ const shop=(await f.read('shop','booking',{id:booking.id})).testEmailEvents;
+ assert.equal(owner.length,1);assert.equal(shop.length,1);
+ assert.ok(owner.every(item=>item.deliveryStatus==='test_sink_only'&&item.simulated===true));
+ assert.ok(shop.every(item=>item.recipientUid==='shop'));
+ assert.ok(!JSON.stringify(owner).includes('@'));
 });
 
 test('acceptance retries survive a lost response, changed availability and cancellation without creating another booking',async()=>{
@@ -249,7 +655,7 @@ test('acceptance retries survive a lost response, changed availability and cance
  await f.write('owner','bookingCancel',{id:result.id,reason:'Shop is unavailable'},'cancel-once');
  assert.deepEqual(await f.write('owner','quoteAccept',{id:offer.id},'after-cancellation'),result);
  assert.equal(f.db.rows.get('bookings/'+result.id).status,'cancelled');assert.equal(f.db.rows.get('serviceRequests/'+offer.serviceRequestId).status,'booked');assert.equal(f.db.rows.get('quotations/'+offer.id).status,'accepted');
- assert.equal([...f.db.rows.keys()].filter(k=>k.startsWith('bookings/')).length,1);assert.equal(bookingAudits(f).filter(([,v])=>v.action==='marketplace.quoteAccept').length,1);
+ assert.equal([...f.db.rows.keys()].filter(k=>k.startsWith('bookings/')&&k.slice('bookings/'.length).indexOf('/')===-1).length,1);assert.equal(bookingAudits(f).filter(([,v])=>v.action==='marketplace.quoteAccept').length,1);
 });
 
 test('expired, withdrawn and closed offers cannot be accepted and failures leave no partial booking',async()=>{
@@ -371,4 +777,264 @@ test('deadlines that pass while Auth is being checked cannot commit acceptance o
  g.auth.getUser=async()=>{now+=2000;return {emailVerified:true,disabled:false};};
  await assert.rejects(()=>g.write('shop','bookingConfirm',{id:b.bookingId,appointmentDate:'2030-01-02',appointmentTime:'10:00'}),{code:'invalid-argument'});
  assert.equal(g.db.rows.get('bookings/'+b.bookingId).status,'pending_confirmation');
+});
+
+
+test('online balance settlement preserves a confirmed appointment and completed service',async()=>{
+ for(const serviceStatus of ['not_started','completed']){
+  const f=fixture(),offer=await offered(f,{quote:{...quoteData,depositType:'fixed',depositValue:25000}}),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_deposit'});
+  await f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful'});
+  await f.write('shop','bookingConfirm',{id:b.id,...appointment});
+  if(serviceStatus==='completed')await f.write('shop','bookingComplete',{id:b.id});
+  const before=f.db.rows.get('bookings/'+b.id),agreed={date:before.appointmentDate,time:before.appointmentTime,at:before.appointmentAt.toMillis(),confirmed:before.confirmedAt.toMillis()};
+  const attempt=await f.write('owner','paymentStart',{id:b.id});
+  await f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:attempt.paymentAttemptId,outcome:'successful'});
+  const after=f.db.rows.get('bookings/'+b.id);
+  assert.equal(after.status,'confirmed');assert.equal(after.serviceStatus,serviceStatus);assert.equal(after.paymentStatus,'paid');
+  assert.deepEqual({date:after.appointmentDate,time:after.appointmentTime,at:after.appointmentAt.toMillis(),confirmed:after.confirmedAt.toMillis()},agreed);
+  assert.equal(after.paidCents,100000);assert.equal(after.balanceDueCents,0);
+ }
+});
+
+test('in-store settlement following failed initial online payment permits separate appointment confirmation',async()=>{
+ const f=fixture(),offer=await offered(f),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_now'});
+ await f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'failed'});
+ const result=await f.write('shop','paymentRecordInStore',{id:b.id,method:'simulated_cash'},'store-after-failure');
+ assert.deepEqual(await f.write('shop','paymentRecordInStore',{id:b.id,method:'simulated_cash'},'store-after-failure'),result);
+ const saved=f.db.rows.get('bookings/'+b.id);
+ assert.equal(saved.status,'pending_confirmation');assert.equal(saved.paymentStatus,'paid');assert.equal(saved.paidCents,100000);assert.equal(saved.balanceDueCents,0);assert.equal(saved.appointmentAt,undefined);
+ assert.equal(f.db.rows.get('bookings/'+b.id+'/paymentAttempts/'+b.paymentAttemptId).status,'failed');
+ assert.equal(f.db.rows.get('paymentReceipts/'+result.paymentAttemptId).amountCents,100000);
+ await f.write('shop','bookingConfirm',{id:b.id,...appointment});assert.equal(f.db.rows.get('bookings/'+b.id).status,'confirmed');
+});
+
+test('every mock payment mutation fails closed without an explicitly authorised local demo environment',async()=>{
+ const configurations=[{},...Object.keys(LOCAL_MOCK_ENV).map(key=>({...LOCAL_MOCK_ENV,[key]:undefined})),
+  {...LOCAL_MOCK_ENV,NODE_ENV:'production'}, {...LOCAL_MOCK_ENV,PMR_MOCK_PAYMENTS_ENABLED:'false'},
+  {...LOCAL_MOCK_ENV,FIREBASE_PROJECT_ID:'real-project'}, {...LOCAL_MOCK_ENV,FIRESTORE_EMULATOR_HOST:'remote.example:8080'},
+  {...LOCAL_MOCK_ENV,FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:0'}, {...LOCAL_MOCK_ENV,GCLOUD_PROJECT:'real-project'}];
+ for(const mockPaymentEnv of configurations){
+  const f=fixture({}, {mockPaymentEnv});
+  assert.deepEqual((await f.read('owner','vehicles')).items.map(v=>v.id),['car']);
+  const offer=await offered(f); // request creation and quoting remain available
+  const before=JSON.stringify([...f.db.rows]);
+  for(const [uid,op,input] of [['owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'}],['owner','paymentStart',{id:'any'}],['owner','paymentRetry',{id:'any'}],['owner','paymentMockResult',{id:'any',paymentAttemptId:'any',outcome:'successful'}],['shop','paymentRecordInStore',{id:'any',method:'simulated_cash'}]]){
+   await assert.rejects(()=>f.write(uid,op,input),error=>error.code==='failed-precondition'&&/Mock payments are disabled/.test(error.message));
+  }
+  assert.equal(JSON.stringify([...f.db.rows]),before);
+ }
+ const f=fixture();f.db.projectId='real-project';const offer=await offered(f);
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id}),/Mock payments are disabled/);
+});
+
+test('malformed, incomplete and contradictory accounting is rejected without ledger writes',async()=>{
+ const cases=[{paidCents:'0',balanceDueCents:'100000'},{paidCents:null},{balanceDueCents:null},{paidCents:NaN},{balanceDueCents:Infinity},{paidCents:0.5},{balanceDueCents:99999.5},
+  {paidCents:-1,balanceDueCents:100001},{paidCents:100001,balanceDueCents:-1},{paidCents:Number.MAX_SAFE_INTEGER+1},{balanceDueCents:Number.MAX_SAFE_INTEGER+1},
+  {paidCents:1,balanceDueCents:100000},{paidCents:25000,balanceDueCents:75000,paymentStatus:'due'},
+  {paidCents:25000,balanceDueCents:75000,paymentStatus:'pending'},{paidCents:25000,balanceDueCents:75000,paymentStatus:'failed'},
+  {paidCents:0,balanceDueCents:100000,paymentStatus:'partially_paid'},{paidCents:100000,balanceDueCents:0,paymentStatus:'partially_paid'},
+  {paymentStatus:'unknown'},{paymentStatus:null},{totalCents:0},{totalCents:-1},{totalCents:100000001},{totalCents:Number.MAX_SAFE_INTEGER+1},{currency:'USD'},
+  {delete:'paidCents'},{delete:'balanceDueCents'},{delete:'paymentStatus'}];
+ for(const changes of cases){
+  const f=fixture(),offer=await offered(f),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'}),saved=f.db.rows.get('bookings/'+b.id);
+  const {delete:removed,...values}=changes;Object.assign(saved,values);if(removed)delete saved[removed];
+  const before=JSON.stringify([...f.db.rows]);
+  await assert.rejects(()=>f.write('owner','paymentStart',{id:b.id}),{code:'failed-precondition'});
+  await assert.rejects(()=>f.write('shop','paymentRecordInStore',{id:b.id,method:'simulated_cash'}),{code:'failed-precondition'});
+  await assert.rejects(()=>f.write('owner','bookingCancel',{id:b.id,reason:'Corrupt record must remain untouched'}),{code:'failed-precondition'});
+  assert.equal(JSON.stringify([...f.db.rows]),before);
+ }
+});
+
+test('legacy accounting defaults apply only when both fields are absent and status is supported',async()=>{
+ for(const status of [undefined,'due','pending','failed','cancelled','paid','partially_paid','invalid']){
+  const f=fixture(),offer=await offered(f),b=await f.write('owner','quoteAccept',{id:offer.id}),saved=f.db.rows.get('bookings/'+b.id);
+  delete saved.paidCents;delete saved.balanceDueCents;if(status===undefined)delete saved.paymentStatus;else saved.paymentStatus=status;
+  if(['partially_paid','invalid'].includes(status)){await assert.rejects(()=>f.write('owner','bookingCancel',{id:b.id,reason:'Legacy cancellation'}),{code:'failed-precondition'});continue;}
+  await f.write('owner','bookingCancel',{id:b.id,reason:'Legacy cancellation'});
+  const after=f.db.rows.get('bookings/'+b.id);assert.equal(after.status,'cancelled');assert.equal(after.paymentReconciliationStatus,status==='paid'?'refund_review_required':undefined);
+ }
+});
+
+test('legacy service completion requires a confirmed booking, selected shop and no previous completion evidence',async()=>{
+ for(const variant of ['eligible','owner','competitor','pending','cancelled','completedAt','malformed']){
+  const f=fixture(),b=await booked(f);await f.write('shop','bookingConfirm',{id:b.bookingId,...appointment});const saved=f.db.rows.get('bookings/'+b.bookingId);delete saved.serviceStatus;
+  if(variant==='pending')saved.status='pending_confirmation';if(variant==='cancelled')saved.status='cancelled';if(variant==='completedAt')saved.serviceCompletedAt=Timestamp.now();if(variant==='malformed')saved.serviceStatus=null;
+  if(variant!=='eligible'){await assert.rejects(()=>f.write(['owner','competitor'].includes(variant)?variant:'shop','bookingComplete',{id:b.bookingId}));continue;}
+  const before=JSON.stringify({paid:saved.paidCents,balance:saved.balanceDueCents,payment:saved.paymentStatus,appointment:saved.appointmentAt});
+  await f.write('shop','bookingComplete',{id:b.bookingId},'legacy-complete');
+  const after=f.db.rows.get('bookings/'+b.bookingId);assert.equal(after.status,'confirmed');assert.equal(after.serviceStatus,'completed');assert.ok(after.serviceCompletedAt);
+  assert.equal(JSON.stringify({paid:after.paidCents,balance:after.balanceDueCents,payment:after.paymentStatus,appointment:after.appointmentAt}),before);
+  await f.write('shop','bookingComplete',{id:b.bookingId},'legacy-complete');
+  await assert.rejects(()=>f.write('shop','bookingComplete',{id:b.bookingId}),{code:'failed-precondition'});
+ }
+});
+
+test('current attempt is independently returned outside history pages without crossing booking ownership',async()=>{
+ const f=fixture(),offer=await offered(f),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_now'}),saved=f.db.rows.get('bookings/'+b.id);
+ const prefix='bookings/'+b.id+'/paymentAttempts/',original=f.db.rows.get(prefix+b.paymentAttemptId);f.db.rows.delete(prefix+b.paymentAttemptId);
+ for(let i=0;i<26;i++)f.db.rows.set(prefix+'a'+String(i).padStart(2,'0'),{...original,status:'failed'});
+ f.db.rows.set(prefix+'z-current',original);saved.currentPaymentAttemptId='z-current';
+ const first=await f.read('owner','booking',{id:b.id});assert.equal(first.paymentAttempts.length,20);assert.equal(first.currentPaymentAttempt.id,'z-current');assert.equal(first.currentPaymentAttempt.status,'pending');assert.ok(first.paymentCursor);assert.ok(!first.paymentAttempts.some(a=>a.id==='z-current'));
+ const second=await f.read('owner','booking',{id:b.id,paymentCursor:first.paymentCursor});assert.equal(second.currentPaymentAttempt.id,'z-current');assert.equal(second.paymentCursor,null);
+ assert.equal(new Set([...first.paymentAttempts,...second.paymentAttempts].map(a=>a.id)).size,27);
+ assert.equal((await f.read('shop','booking',{id:b.id})).currentPaymentAttempt.id,'z-current');
+ for(const uid of ['other','competitor'])await assert.rejects(()=>f.read(uid,'booking',{id:b.id,paymentCursor:first.paymentCursor}),{code:'not-found'});
+});
+
+
+test('R250 checkout cannot settle the R750 balance and every acceptance replay is recovery-only',async()=>{
+ const f=fixture(),offer=await offered(f,{quote:{...quoteData,depositType:'fixed',depositValue:25000}}),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_deposit'},'original-checkout');
+ assert.equal(b.existingBooking,false);assert.equal(b.amountCents,25000);assert.equal(b.currency,'ZAR');
+ await f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful'});
+ const started=await f.write('owner','paymentStart',{id:b.id});assert.equal(started.amountCents,75000);assert.equal(started.paymentStatus,'partially_paid');assert.equal(started.paymentAttemptStatus,'pending');
+ const before=JSON.stringify([...f.db.rows]),originalPaths=new Set(f.db.rows.keys());
+ for(const key of ['original-checkout','new-checkout-key'])assert.deepEqual(await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_deposit'},key),{id:b.id,paymentAttemptId:null,existingBooking:true});
+ assert.equal(JSON.stringify([...f.db.rows].filter(([p])=>originalPaths.has(p))),before);
+ const added=[...f.db.rows.keys()].filter(p=>!originalPaths.has(p));assert.equal(added.length,1);assert.ok(added[0].startsWith('mutationReceipts/'));const afterReplay=JSON.stringify([...f.db.rows]);
+ await assert.rejects(()=>f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:started.paymentAttemptId,expectedAmountCents:25000,outcome:'successful'}),/Refresh the booking/);
+ await assert.rejects(()=>f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful'}),/Refresh the booking/);
+ assert.equal(JSON.stringify([...f.db.rows]),afterReplay);
+ const input={id:b.id,paymentAttemptId:started.paymentAttemptId,expectedBookingId:b.id,expectedAmountCents:75000,expectedCurrency:'ZAR',outcome:'successful'};
+ const paid=await f.write('owner','paymentMockResult',input,'fresh-balance-confirmation');assert.equal(paid.paymentStatus,'paid');assert.equal(paid.paymentAttemptStatus,'paid');
+ assert.deepEqual(await f.write('owner','paymentMockResult',input,'fresh-balance-confirmation'),paid);
+ assert.equal(f.db.rows.get('bookings/'+b.id).paidCents,100000);assert.equal(f.db.rows.get('paymentReceipts/'+started.paymentAttemptId).amountCents,75000);
+});
+
+test('result confirmation requires the exact booking, amount and currency, never a client override',async()=>{
+ const f=fixture(),offer=await offered(f),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_now'});
+ const input={id:b.id,paymentAttemptId:b.paymentAttemptId,expectedBookingId:b.id,expectedAmountCents:100000,expectedCurrency:'ZAR',outcome:'successful'};
+ for(const bad of [{expectedBookingId:'different'},{expectedAmountCents:1},{expectedAmountCents:-1},{expectedAmountCents:NaN},{expectedAmountCents:100000.5},{expectedCurrency:'USD'},{expectedBookingId:undefined},{expectedAmountCents:undefined},{expectedCurrency:undefined}]){
+  const before=JSON.stringify([...f.db.rows]);await assert.rejects(()=>f.read('owner','paymentMockResult',{...input,...bad,requestId:'bad-confirmation'}),{code:'failed-precondition'});assert.equal(JSON.stringify([...f.db.rows]),before);
+ }
+ await assert.rejects(()=>f.read('owner','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful',requestId:'old-mobile'}),/Refresh the booking/);
+ await assert.rejects(()=>f.write('other','paymentMockResult',input),{code:'not-found'});
+ await f.write('owner','paymentMockResult',input,'bound-confirmation');
+ await assert.rejects(()=>f.write('owner','paymentMockResult',{...input,expectedAmountCents:1},'bound-confirmation'),{code:'already-exists'});
+});
+
+test('historical acceptance receipts without replay metadata also resume without exposing an attempt',async()=>{
+ const f=fixture(),offer=await offered(f),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_now'},'legacy-accept');
+ const saved=[...f.db.rows.values()].find(v=>v.op==='marketplace:quoteAccept');saved.result={id:b.id,paymentAttemptId:b.paymentAttemptId};
+ assert.deepEqual(await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_now'},'legacy-accept'),{id:b.id,paymentAttemptId:null,existingBooking:true});
+});
+
+test('expired current quotation renewal preserves terms history and creates one fresh quotation head',async()=>{
+ const f=fixture(),old=await offered(f,{quote:{...quoteData,depositType:'percentage',depositValue:25}}),prior=f.db.rows.get('quotations/'+old.id);prior.validUntil=Timestamp.fromMillis(Date.now()-1);const oldTerms={scope:prior.scope,items:prior.items,total:prior.totalCents,deposit:prior.depositAmountCents,expiry:prior.validUntil.toMillis()};
+ const before=f.db.rows.get('serviceRequests/'+old.serviceRequestId),version=before.version,terms=before.termsVersion;
+ const input={...quoteData,serviceRequestId:old.serviceRequestId,termsVersion:terms,items:[{description:'Renewed work',amountCents:200000}],depositType:'fixed',depositValue:50000};
+ const renewed=await f.write('shop','quoteSubmit',input,'renew-once');assert.deepEqual(await f.write('shop','quoteSubmit',input,'renew-once'),renewed);assert.notEqual(renewed.id,old.id);
+ const history=f.db.rows.get('quotations/'+old.id),current=f.db.rows.get('quotations/'+renewed.id),request=f.db.rows.get('serviceRequests/'+old.serviceRequestId);
+ assert.equal(history.status,'superseded');assert.deepEqual({scope:history.scope,items:history.items,total:history.totalCents,deposit:history.depositAmountCents,expiry:history.validUntil.toMillis()},oldTerms);
+ assert.equal(current.totalCents,200000);assert.equal(current.depositAmountCents,50000);assert.ok(current.validUntil.toMillis()>Date.now());assert.equal(current.termsVersion,terms);
+ assert.equal(request.version,version);assert.equal(request.termsVersion,terms);assert.equal(request.quotationCount,1);assert.equal(f.db.rows.get('quotationHeads/'+quoteId(old.serviceRequestId,'shop')).quoteId,renewed.id);
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:old.id}),{code:'failed-precondition'});
+ const b=await f.write('owner','quoteAccept',{id:renewed.id,paymentMethod:'pay_deposit'});assert.equal(b.amountCents,50000);
+});
+
+test('concurrent renewals commit one replacement and cannot bypass withdrawal, booking or material revisions',async()=>{
+ const f=fixture(),old=await offered(f);f.db.rows.get('quotations/'+old.id).validUntil=Timestamp.fromMillis(Date.now()-1);
+ const input={...quoteData,serviceRequestId:old.serviceRequestId,termsVersion:1};
+ const outcomes=await Promise.allSettled([f.write('shop','quoteSubmit',input,'renew-a'),f.write('shop','quoteSubmit',input,'renew-b')]);assert.equal(outcomes.filter(r=>r.status==='fulfilled').length,1);assert.equal(outcomes.find(r=>r.status==='rejected').reason.code,'already-exists');
+ assert.equal([...f.db.rows.values()].filter(v=>v.serviceRequestId===old.serviceRequestId&&v.status==='submitted').length,1);
+ for(const variant of ['withdrawn','accepted','closed','stale-terms']){
+  const g=fixture(),q=await offered(g);g.db.rows.get('quotations/'+q.id).validUntil=Timestamp.fromMillis(Date.now()-1);
+  if(variant==='withdrawn')await g.write('shop','quoteWithdraw',{id:q.id});
+  if(variant==='accepted'){g.db.rows.get('quotations/'+q.id).validUntil=Timestamp.fromMillis(Date.now()+100000);await g.write('owner','quoteAccept',{id:q.id});}
+  if(variant==='closed')await g.write('owner','requestClose',{id:q.serviceRequestId});
+  if(variant==='stale-terms')g.db.rows.get('serviceRequests/'+q.serviceRequestId).termsVersion=2;
+  const before=JSON.stringify([...g.db.rows]);await assert.rejects(()=>g.write('shop','quoteSubmit',{...quoteData,serviceRequestId:q.serviceRequestId,termsVersion:1}));assert.equal(JSON.stringify([...g.db.rows]),before);
+ }
+});
+
+test('expired legacy quotations renew safely while other shops can only create their own offers',async()=>{
+ const f=fixture(),q=await offered(f),prior=f.db.rows.get('quotations/'+q.id);prior.validUntil=Timestamp.fromMillis(Date.now()-1);delete prior.termsVersion;delete prior.requestVersion;f.db.rows.delete('quotationHeads/'+quoteId(q.serviceRequestId,'shop'));
+ const competitor=await f.write('competitor','quoteSubmit',{...quoteData,serviceRequestId:q.serviceRequestId});assert.equal(f.db.rows.get('quotations/'+q.id).status,'submitted');assert.equal(f.db.rows.get('quotations/'+competitor.id).shopId,'competitor');
+ await assert.rejects(()=>f.write('owner','quoteSubmit',{...quoteData,serviceRequestId:q.serviceRequestId}),{code:'permission-denied'});
+ const renewed=await f.write('shop','quoteSubmit',{...quoteData,serviceRequestId:q.serviceRequestId});assert.notEqual(renewed.id,q.id);assert.equal(f.db.rows.get('quotations/'+q.id).status,'superseded');assert.equal(f.db.rows.get('quotations/'+renewed.id).termsVersion,1);
+});
+
+
+test('retry responses keep overall partial payment distinct from the pending retry attempt',async()=>{
+ const f=fixture(),q=await offered(f,{quote:{...quoteData,depositType:'fixed',depositValue:25000}}),b=await f.write('owner','quoteAccept',{id:q.id,paymentMethod:'pay_deposit'});
+ await f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful'});const a=await f.write('owner','paymentStart',{id:b.id});await f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:a.paymentAttemptId,outcome:'failed'});
+ const retry=await f.write('owner','paymentRetry',{id:b.id});assert.equal(retry.paymentStatus,'partially_paid');assert.equal(retry.paymentAttemptStatus,'pending');assert.equal(retry.amountCents,75000);assert.equal(retry.currency,'ZAR');assert.equal(f.db.rows.get('bookings/'+b.id).paidCents,25000);
+});
+
+const collectionRows=(f,name)=>[...f.db.rows.entries()].filter(([path])=>path.startsWith(name+'/')).map(([path,data])=>({id:path.split('/').pop(),...data}));
+test('Phase 3 receipts snapshot each deposit and settlement and never change after later payment or cancellation',async()=>{
+ for(const inStore of [false,true]){
+  const f=fixture(),offer=await offered(f,{quote:{...quoteData,depositType:'percentage',depositValue:25}}),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_deposit'});
+  const pay={id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful'};
+  await f.write('owner','paymentMockResult',pay,'deposit-result');
+  const first=(await f.read('owner','receipt',{id:b.paymentAttemptId})).receipt;
+  assert.equal(first.receiptReference,'TEST-'+b.paymentAttemptId);assert.equal(first.amountCents,25000);assert.equal(first.totalCents,100000);assert.equal(first.paidCentsAfter,25000);assert.equal(first.balanceDueCentsAfter,75000);
+  assert.equal(first.customer.id,'owner');assert.equal(first.shop.id,'shop');assert.equal(first.scope,quoteData.scope);assert.deepEqual(first.items,quoteData.items);assert.equal(first.method,'simulated_online');assert.ok(Number.isFinite(first.issuedAt));assert.match(first.notice,/SIMULATED \/ TEST/);
+  await f.write('owner','paymentMockResult',pay,'deposit-result');
+  await f.write('shop','bookingConfirm',{id:b.id,...appointment});
+  let final;
+  if(inStore)final=await f.write('shop','paymentRecordInStore',{id:b.id,method:'simulated_cash'},'settle');
+  else{final=await f.write('owner','paymentStart',{id:b.id});await f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:final.paymentAttemptId,outcome:'successful'},'settle');}
+  const last=(await f.read('shop','receipt',{id:final.paymentAttemptId})).receipt;
+  assert.equal(last.amountCents,75000);assert.equal(last.paidCentsAfter,100000);assert.equal(last.balanceDueCentsAfter,0);assert.equal(last.method,inStore?'simulated_cash':'simulated_online');
+  assert.equal(f.db.rows.get('bookings/'+b.id).status,'confirmed');
+  await f.write('owner','bookingCancel',{id:b.id,reason:'Test cancellation'});
+  assert.deepEqual((await f.read('shop','receipt',{id:b.paymentAttemptId})).receipt,first);
+  assert.equal(collectionRows(f,'paymentReceipts').length,2);
+  for(const uid of ['other','competitor'])await assert.rejects(()=>f.read(uid,'receipt',{id:b.paymentAttemptId}),{code:'not-found'});
+  for(const value of [first,last])assert.ok(!JSON.stringify(value).includes('private phone')&&!JSON.stringify(value).includes('private address'));
+  await assert.rejects(()=>f.read('owner','receipt',{id:b.paymentAttemptId,balanceDueCentsAfter:0}),{code:'invalid-argument'});
+ }
+});
+test('Phase 3 legacy receipts disclose missing historical snapshots without deriving current balances or methods',async()=>{
+ const f=fixture(),b=await booked(f),id='legacy';f.db.rows.set('paymentReceipts/'+id,{bookingId:b.bookingId,paymentAttemptId:id,amountCents:10000,currency:'ZAR',simulated:true,testTransaction:true,issuedAt:Timestamp.fromMillis(1000)});
+ f.db.rows.get('bookings/'+b.bookingId).balanceDueCents=123;
+ const receipt=(await f.read('owner','receipt',{id})).receipt;
+ assert.equal(receipt.historicalSnapshotUnavailable,true);assert.equal(receipt.totalCents,null);assert.equal(receipt.paidCentsAfter,null);assert.equal(receipt.balanceDueCentsAfter,null);assert.equal(receipt.method,null);assert.equal(receipt.amountCents,10000);assert.match(receipt.compatibilityNotice,/cannot be reconstructed/);
+});
+test('Phase 3 unsuccessful attempts never issue receipts and full and in-store payments do',async()=>{
+ for(const outcome of ['failed','cancelled','pending','successful']){
+  const f=fixture(),offer=await offered(f),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_now'});
+  await f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome});
+  assert.equal(collectionRows(f,'paymentReceipts').length,outcome==='successful'?1:0);
+  if(outcome!=='successful')await assert.rejects(()=>f.read('owner','receipt',{id:b.paymentAttemptId}),{code:'not-found'});
+ }
+ const f=fixture(),b=await booked(f),r=await f.write('shop','paymentRecordInStore',{id:b.bookingId,method:'simulated_eft'});
+ assert.equal((await f.read('owner','receipt',{id:r.paymentAttemptId})).receipt.balanceDueCentsAfter,0);
+});
+test('Phase 3 notifications are scoped, chronological with timestamp ties, paginated and read only by their recipient',async()=>{
+ const f=fixture();
+ for(let i=0;i<45;i++)await f.db.doc('notifications/n'+String(i).padStart(2,'0')).set({recipientUid:'owner',event:'booking_created',bookingId:'b',createdAt:Timestamp.fromMillis(Math.floor(i/3)*1000),readAt:null});
+ await f.db.doc('notifications/foreign').set({recipientUid:'other',createdAt:Timestamp.fromMillis(90000),readAt:null});
+ const first=await f.read('owner','notifications'),second=await f.read('owner','notifications',{cursor:first.cursor}),third=await f.read('owner','notifications',{cursor:second.cursor});
+ assert.deepEqual([...first.items,...second.items,...third.items].map(x=>x.id),Array.from({length:45},(_,i)=>'n'+String(44-i).padStart(2,'0')));assert.equal(first.items.length,20);assert.equal(second.items.length,20);assert.equal(third.items.length,5);assert.equal(third.cursor,null);
+ assert.equal(first.items[0].readAt,null);
+ await assert.rejects(()=>f.read('other','notifications',{cursor:first.cursor}),{code:'not-found'});
+ await assert.rejects(()=>f.write('other','notificationRead',{id:first.items[0].id}),{code:'not-found'});
+ const input={id:first.items[0].id};await f.write('owner','notificationRead',input,'mark-read');const time=f.db.rows.get('notifications/'+input.id).readAt;
+ await f.write('owner','notificationRead',input,'mark-read');await f.write('owner','notificationRead',input,'mark-read-again');
+ assert.deepEqual(f.db.rows.get('notifications/'+input.id).readAt,time);assert.ok((await f.read('owner','notifications')).items[0].readAt);assert.equal(collectionRows(f,'notifications').length,46);
+});
+test('Phase 3 event targets, renewal, test outbox templates and mutation replay are authoritative and idempotent',async()=>{
+ const f=fixture(),id=await created(f,{visibility:'direct',shopId:'shop'});
+ assert.deepEqual(collectionRows(f,'notifications')[0].target,{type:'request',id});
+ let quote=await f.write('shop','quoteSubmit',{serviceRequestId:id,...quoteData},'submit');
+ await f.write('shop','quoteSubmit',{serviceRequestId:id,...quoteData},'submit');
+ f.db.rows.get('quotations/'+quote.id).validUntil=Timestamp.fromMillis(1);
+ quote=await f.write('shop','quoteSubmit',{serviceRequestId:id,...quoteData},'renew');
+ await f.write('shop','quoteSubmit',{serviceRequestId:id,...quoteData},'renew');
+ assert.equal(collectionRows(f,'notifications').filter(n=>n.event==='quotation_renewed').length,1);
+ const b=await f.write('owner','quoteAccept',{id:quote.id,paymentMethod:'pay_now'},'accept');await f.write('owner','quoteAccept',{id:quote.id,paymentMethod:'pay_now'},'accept');
+ const pay={id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful'};await f.write('owner','paymentMockResult',pay,'payment');await f.write('owner','paymentMockResult',pay,'payment');
+ await f.write('shop','bookingConfirm',{id:b.id,...appointment},'confirm');await f.write('shop','bookingConfirm',{id:b.id,...appointment},'confirm');
+ await f.write('shop','bookingComplete',{id:b.id},'complete');await f.write('shop','bookingComplete',{id:b.id},'complete');
+ await f.write('owner','bookingCancel',{id:b.id,reason:'Test'},'cancel');await f.write('owner','bookingCancel',{id:b.id,reason:'Test'},'cancel');
+ const notifications=collectionRows(f,'notifications');
+ for(const event of ['quotation_accepted','booking_created','simulated_payment_paid','booking_confirmed','service_completed','booking_cancelled'])assert.equal(notifications.filter(n=>n.event===event).length,2,event);
+ const paid=notifications.find(n=>n.event==='simulated_payment_paid');assert.deepEqual(paid.target,{type:'receipt',id:b.paymentAttemptId,bookingId:b.id});assert.equal(paid.amountCents,100000);assert.match(paid.body,/ZAR 1000.00/);
+ const renewed=notifications.find(n=>n.event==='quotation_renewed');assert.equal(renewed.recipientUid,'owner');assert.deepEqual(renewed.target,{type:'quotation',id});
+ const emails=collectionRows(f,'emailOutbox');assert.equal(emails.length,10);
+ for(const email of emails){assert.equal(email.transport,'test_outbox');assert.equal(email.deliveryStatus,'test_sink_only');assert.match(email.subject,/SIMULATED \/ TEST/);assert.match(email.body,/NOT REAL PAYMENT/);assert.match(email.deliveryDescription,/No email sent/);assert.ok(!JSON.stringify(email).includes('@')&&!JSON.stringify(email).includes('private phone'));}
+ assert.match(emails.find(e=>e.event==='booking_created').subject,/awaiting appointment/);assert.match(emails.find(e=>e.event==='booking_confirmed').body,/09:30 SAST/);
+ assert.equal((await f.read('other','notifications')).items.length,0);
 });

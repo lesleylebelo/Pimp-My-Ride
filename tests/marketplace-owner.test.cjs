@@ -75,7 +75,20 @@ test('garage appends vehicles while scrolling',async t=>{
   const tree=await mount(context,'GarageScreen');
   t.after(()=>unmount(tree));
   assert.equal(button(tree,'Next'),undefined);await scrollToBottom(tree);assert.ok(context.reads.some(([op,input])=>op==='vehicles'&&input.cursor==='next-vehicles'));
-  assert.ok(says(tree,'Ford Fiesta'));
+  assert.ok(says(tree,'Toyota Corolla'));assert.ok(says(tree,'Ford Fiesta'));
+  const reads=context.reads.length;await scrollToBottom(tree);assert.equal(context.reads.length,reads);
+});
+
+test('garage loads another page when its content does not fill the viewport',async t=>{
+  const context=setup({read:(_op,input)=>({items:input.cursor?[secondVehicle]:[vehicle],cursor:input.cursor?null:'short-garage-page'})});
+  const tree=await mount(context,'GarageScreen');t.after(()=>unmount(tree));
+  const page=tree.root.findAllByType('View').find(node=>node.props.onScroll);
+  assert.equal(typeof page.props.onLayout,'function');assert.equal(typeof page.props.onContentSizeChange,'function');
+  await act(async()=>page.props.onContentSizeChange(400,900));
+  assert.equal(context.reads.some(([_op,input])=>input.cursor),false);
+  await act(async()=>page.props.onLayout({nativeEvent:{layout:{height:800}}}));
+  assert.ok(context.reads.some(([_op,input])=>input.cursor==='short-garage-page'));
+  assert.ok(says(tree,'Toyota Corolla'));assert.ok(says(tree,'Ford Fiesta'));
 });
 
 test('garage archive/restore require confirmation with the displayed version',async t=>{

@@ -153,7 +153,7 @@ test('verification resend failures clear entered passwords and never claim succe
  }
 });
 
-test('navigation refuses unverified user objects for every role and opens the sign-in stack',async()=>{
+test('navigation refuses unverified user objects for every role and opens the guest stack',async()=>{
  const placeholder=()=>null;
  const screenMocks=Object.fromEntries([
   '../features/auth/screens/AccountScreen','../features/marketplace/OwnerNavigator',
@@ -177,5 +177,5 @@ test('navigation refuses unverified user objects for every role and opens the si
    initialRoutes.push(tree.root.findByType('StackNavigator').props.initialRouteName);
   }finally{await act(async()=>tree.unmount());}
  }
- assert.deepEqual(initialRoutes,['SignIn','SignIn','SignIn']);
+ assert.deepEqual(initialRoutes,['Splash','Splash','Splash']);
 });

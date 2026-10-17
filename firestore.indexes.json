@@ -1,6 +1,15 @@
 {
   "indexes": [
     {
+      "collectionGroup": "notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "recipientUid", "order": "ASCENDING"},
+        {"fieldPath": "createdAt", "order": "DESCENDING"},
+        {"fieldPath": "__name__", "order": "DESCENDING"}
+      ]
+    },
+    {
       "collectionGroup": "users",
       "queryScope": "COLLECTION",
       "fields": [
