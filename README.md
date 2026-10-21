@@ -11,6 +11,9 @@ This repository contains the ongoing development of the PimpMyRide mobile applic
 
 ## Setup and current handover
 
+Smart quotation recommendations, scoring rules, distance handling and limitations are
+documented in [docs/SMART_QUOTATIONS.md](docs/SMART_QUOTATIONS.md).
+
 For the dedicated **synthetic team-testing branch**, follow
 [docs/TEAM_TESTING.md](docs/TEAM_TESTING.md). That procedure needs no production
 credentials or `.env` file. Do not use the general production configuration

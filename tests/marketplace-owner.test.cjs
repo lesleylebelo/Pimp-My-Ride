@@ -208,3 +208,15 @@ test('owner request details use a read-only request gallery only when attachment
  const tree=await mount(context,'OwnerRequestScreen',params),gallery=tree.root.findByType('PhotoGallery');assert.equal(gallery.props.target,'request');assert.equal(gallery.props.id,request.id);assert.notEqual(gallery.props.editable,true);assert.equal(gallery.props.onSelectionChange,undefined);
  current={...request,photoIds:[]};await act(async()=>tree.update(React.createElement(context.screens.OwnerRequestScreen,{route:{params},navigation:context.navigation})));assert.equal(tree.root.findAllByType('PhotoGallery').length,0);await unmount(tree);
 });
+
+test('customer enters exact mandatory services and duplicate requirements block submission',async()=>{
+ const context=setup({read:op=>({items:op==='vehicles'?[vehicle]:op==='categories'?[category]:[shop]})});
+ const tree=await mount(context,'RequestFormScreen',{vehicleId:vehicle.id,vehicle});
+ await press(tree,'Paint');await fillRequest(tree);
+ await change(tree,'Mandatory services (optional, one per line)','Preparation\npaint\nPaint');
+ assert.equal(button(tree,'Submit request').props.disabled,true);
+ await press(tree,'Submit request');assert.equal(context.calls.length,0);
+ await change(tree,'Mandatory services (optional, one per line)','Preparation\nPaint');
+ await press(tree,'Submit request');assert.deepEqual(context.calls[0][1].mandatoryServices,['Preparation','Paint']);
+ await unmount(tree);
+});

@@ -158,9 +158,12 @@ function RequestDraft({route, navigation}) {
   const vehicleFeed=useInfiniteCursor(vehicles.data,vehicles.busy,setVehicleCursor,{autoLoad:false}),categoryFeed=useInfiniteCursor(categories.data,categories.busy,setCategoryCursor,{autoLoad:false}),shopFeed=useInfiniteCursor(shops.data,shops.busy,setShopCursor,{autoLoad:false});
   const [form, setForm] = useState(() => ({vehicleId: request?.vehicleId || route.params?.vehicleId || '', title: request?.title || '', description: request?.description || '', categoryId: request?.categoryId || '', city: request?.city || '', budgetMin: request?.budgetMinCents === undefined ? '' : String(request.budgetMinCents / 100), budgetMax: request?.budgetMaxCents === undefined ? '' : String(request.budgetMaxCents / 100), preferredDate: request?.preferredDate || '', visibility: request?.visibility || 'open', shopId: request?.shopId || '', photoIds: request?.photoIds || []}));
   const [selected, setSelected] = useState(() => ({vehicle: route.params?.vehicle || null, category: null, shop: null}));
+  const [mandatoryServicesText, setMandatoryServicesText] = useState((request?.mandatoryServices || []).join('\n'));
   const [touched, setTouched] = useState({}), [submitted, setSubmitted] = useState(false);
   const [uploadingAttachment,setUploadingAttachment]=useState(false);
   const mutation = useMutation(), errors = requestErrors(form), disabled = mutation.saving || mutation.offline || uploadingAttachment;
+  const mandatoryServices = mandatoryServicesText.split('\n').map(value => value.trim()).filter(Boolean);
+  if (mandatoryServices.length > 20 || mandatoryServices.some(value => value.length > 200) || new Set(mandatoryServices.map(value => value.toLowerCase())).size !== mandatoryServices.length) errors.mandatoryServices = 'Use up to 20 unique service requirements, each at most 200 characters.';
   const selectorLayouts=useRef({}),scrollPosition=useRef(0),viewportHeight=useRef(0);
   const loadNearbySelectors=()=>{const top=scrollPosition.current, bottom=top+viewportHeight.current;for(const [kind,feed] of [['vehicle',vehicleFeed],['category',categoryFeed],['shop',shopFeed]]){const section=selectorLayouts.current[kind];if(section&&section.bottom>=top-260&&section.top<=bottom+260&&(kind!=='shop'||form.visibility==='direct'))feed.loadNext();}};
   const loadMore=event=>{scrollPosition.current=event.nativeEvent.contentOffset.y;viewportHeight.current=event.nativeEvent.layoutMeasurement.height;loadNearbySelectors();};
@@ -176,7 +179,7 @@ function RequestDraft({route, navigation}) {
     if (disabled || hasErrors(errors)) return;
     const {budgetMin, budgetMax, shopId, photoIds, ...input} = form;
     try {
-      const result = await mutation.run(editing ? 'requestUpdate' : 'requestCreate', {...input, budgetMinCents: parseMoney(budgetMin), budgetMaxCents: parseMoney(budgetMax), ...(form.visibility === 'direct' ? {shopId} : {}), ...(editing ? {photoIds, id: request.id, version: request.version || 1} : (photoIds.length ? {photoIds} : {}))});
+      const result = await mutation.run(editing ? 'requestUpdate' : 'requestCreate', {...input, ...(mandatoryServices.length || request?.mandatoryServices ? {mandatoryServices} : {}), budgetMinCents: parseMoney(budgetMin), budgetMaxCents: parseMoney(budgetMax), ...(form.visibility === 'direct' ? {shopId} : {}), ...(editing ? {photoIds, id: request.id, version: request.version || 1} : (photoIds.length ? {photoIds} : {}))});
       if (result) navigation.replace('OwnerRequest', {id: result.id});
     } catch (_) {}
   }
@@ -206,6 +209,7 @@ function RequestDraft({route, navigation}) {
       <Field label="Request title" placeholder="e.g. satin black vinyl wrap" value={form.title} onChangeText={value => edit('title', value)} onBlur={() => setTouched(previous => ({...previous, title: true}))} maxLength={100} editable={!disabled} error={fieldError('title')}/>
       <Field label="Description" placeholder="Tell the shop what you're looking for…" value={form.description} onChangeText={value => edit('description', value)} onBlur={() => setTouched(previous => ({...previous, description: true}))} maxLength={300} multiline editable={!disabled} error={fieldError('description')} helperText={`${form.description.length}/300 characters`}/>
       <Field label="City" value={form.city} onChangeText={value => edit('city', value)} onBlur={() => setTouched(previous => ({...previous, city: true}))} maxLength={100} editable={!disabled} error={fieldError('city')}/>
+      <Field label="Mandatory services (optional, one per line)" value={mandatoryServicesText} onChangeText={setMandatoryServicesText} multiline maxLength={4020} editable={!disabled} error={errors.mandatoryServices} helperText="Up to 20 unique requirements, each at most 200 characters. Shops confirm each requirement for recommendations."/>
       <Text style={styles.budgetLabel}>BUDGET RANGE  ·  ZAR</Text>
       <View style={styles.budgetRow}>
         <Field style={styles.budgetField} label="Minimum budget (ZAR)" placeholder="R 0" value={form.budgetMin} onChangeText={value => edit('budgetMin', value)} onBlur={() => setTouched(previous => ({...previous, budgetMin: true}))} keyboardType="decimal-pad" maxLength={12} editable={!disabled} error={fieldError('budgetMin')} inputStyle={styles.budgetInput}/>

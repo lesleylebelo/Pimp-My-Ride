@@ -5,6 +5,7 @@ const {mutation}=require('./mutations.cjs');
 const {createMockPaymentProvider}=require('./payment-provider.cjs');
 const {assertMockPaymentsEnabled}=require('./mock-payment-gate.cjs');
 const C=require('./marketplace-communications.cjs');
+const {readRecommendations}=require('./quote-recommendation-read.cjs');
 const PAGE_SIZE=20;
 const stamp=()=>FieldValue.serverTimestamp();
 const quoteId=(requestId,shopId)=>createHash('sha256').update(`${requestId}\n${shopId}`).digest('hex');
@@ -12,8 +13,8 @@ const serialize=value=>value instanceof Timestamp?value.toMillis():Array.isArray
 const row=doc=>({id:doc.id,...serialize(doc.data())});
 const allowed={
  vehicles:['cursor','archived'],vehicleSave:['id','version','make','model','year','colour','registration'],vehicleArchive:['id','version','archived'],
- categories:['cursor'],shops:['cursor'],requestCreate:['vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','photoIds'],requestUpdate:['id','version','vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','photoIds'],
- requests:['feed','cursor'],request:['id','quotesCursor'],requestClose:['id'],quoteSubmit:['serviceRequestId','termsVersion','scope','items','completionDays','warranty','validForDays','depositType','depositValue'],quotes:['cursor'],quoteWithdraw:['id'],
+ categories:['cursor'],shops:['cursor'],requestCreate:['vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','photoIds','mandatoryServices','serviceLocation'],requestUpdate:['id','version','vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','photoIds','mandatoryServices','serviceLocation'],
+ requests:['feed','cursor'],request:['id','quotesCursor'],requestClose:['id'],quoteSubmit:['serviceRequestId','termsVersion','scope','items','completionDays','warranty','validForDays','depositType','depositValue','scopeConfirmed','allChargesIncluded','coveredServices'],quotes:['cursor'],quoteWithdraw:['id'],
  quoteAccept:['id','paymentMethod'],paymentMockResult:['id','paymentAttemptId','expectedBookingId','expectedAmountCents','expectedCurrency','outcome'],paymentRetry:['id'],paymentStart:['id'],paymentRecordInStore:['id','method'],bookingComplete:['id'], bookings:['cursor'],booking:['id','paymentCursor'],notifications:['cursor'],notificationRead:['id'],receipt:['id'],bookingConfirm:['id','appointmentDate','appointmentTime'],bookingCancel:['id','reason'],
 };
 const mutations=new Set(['vehicleSave','vehicleArchive','requestCreate','requestUpdate','requestClose','quoteSubmit','quoteWithdraw','quoteAccept','paymentMockResult','paymentRetry','paymentStart','paymentRecordInStore','bookingComplete','bookingConfirm','bookingCancel','notificationRead']);
@@ -29,8 +30,9 @@ const materialRequestTerms=value=>({
  budgetMinCents:value.budgetMinCents,budgetMaxCents:value.budgetMaxCents,
  visibility:value.visibility,shopId:value.shopId,vehicleId:value.vehicleId,
  vehicle:M.vehicleSnapshot(value.vehicle||{}),photoIds:value.photoIds||[],
+ mandatoryServices:value.mandatoryServices||[],serviceLocation:value.serviceLocation||null,
 });
-const requestEditFields=['title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','vehicleId','vehicle','photoIds','photos','categoryName'];
+const requestEditFields=['title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','vehicleId','vehicle','photoIds','photos','categoryName','mandatoryServices','serviceLocation'];
 const sameRequestTerms=(left,right)=>sameValue(materialRequestTerms(left),materialRequestTerms(right));
 const quoteMatchesTerms=(quote,request)=>{
  const version=termsVersion(request);
@@ -159,7 +161,10 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
    const id=D.id(input.id),snapshot=await db.doc(`serviceRequests/${id}`).get(),visible=await visibleRequest(snapshot,a),value=visible.value;
    if(role==='owner'){
     const result=await page(db.collection('quotations').where('serviceRequestId','==',id),input.quotesCursor);
-    return {request:requestFor({id,...serialize(value)},role),quotes:result.docs.map(row),quotesCursor:result.cursor};
+    let recommendations;
+    try{recommendations=await readRecommendations({db,request:{...value,id},quoteId,eligible,authEligible});}
+    catch(error){recommendations={entries:[],rankedIds:[],recommendedId:null,limitation:'Recommendations are temporarily unavailable. Review individual quotations or refresh.'};}
+    return {request:requestFor({id,...serialize(value)},role),quotes:result.docs.map(row),quotesCursor:result.cursor,recommendations};
    }
    if(input.quotesCursor)D.fail('Shop quotation paging is unavailable.');
    const [head,legacy]=await Promise.all([db.doc(`quotationHeads/${quoteId(id,a.uid)}`).get(),db.doc(`quotations/${quoteId(id,a.uid)}`).get()]);
@@ -210,10 +215,11 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
    });
   }
   if(op==='requestUpdate'){
-   const changes=M.serviceRequest(input),ref=db.doc(`serviceRequests/${D.id(input.id)}`);
+   const ref=db.doc(`serviceRequests/${D.id(input.id)}`);
    return receipt.atomic(async tx=>{
     await current(tx,a.uid,'owner');
     const snapshot=await tx.get(ref),value=ownRequest(snapshot,a.uid);
+    const changes=M.serviceRequest({...input,mandatoryServices:input.mandatoryServices===undefined?value.mandatoryServices:input.mandatoryServices,serviceLocation:input.serviceLocation===undefined?value.serviceLocation:input.serviceLocation});
     if(value.status!=='open')D.fail('Only an open service request can be edited.','failed-precondition');
     const currentVersion=recordVersion(value),currentTermsVersion=termsVersion(value);
     if(M.integer(input.version,'Request version',1,Number.MAX_SAFE_INTEGER)!==currentVersion)D.fail('This request changed. Refresh it before saving.','failed-precondition');
@@ -280,6 +286,7 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
     if(!value||(value.visibility!=='open'&&!(value.visibility==='direct'&&value.shopId===a.uid)))D.fail('Service request not found.','not-found');
     if(value.status!=='open')D.fail('This service request is closed.','failed-precondition');
     if(expectedTermsVersion!==termsVersion(value))D.fail('This request changed while you were preparing the quotation. Refresh it and review the current terms.','failed-precondition');
+    if(changes.coveredServices.some(service=>!(value.mandatoryServices||[]).includes(service)))D.fail('Choose service requirements from the current request.');
     const head=await quotationHead(tx,serviceRequestId,a.uid,headDoc,legacyDoc),priorId=head.id,priorDoc=head.doc,prior=head.quote;
     if(head.hasHead&&prior.status!=='submitted'&&prior.status!=='accepted'&&prior.status!=='withdrawn')D.fail('The current quotation history is inconsistent. Refresh and contact support.','failed-precondition');
     if(head.hasHead&&prior.status==='superseded')D.fail('The current quotation history is inconsistent. Refresh and contact support.','failed-precondition');

@@ -1,6 +1,14 @@
 const D=require('./domain.cjs');
 const MAX_CENTS=100000000;
 const own=(object,key)=>Object.prototype.hasOwnProperty.call(object,key);
+const {coordinates}=require('./quote-recommendations.cjs');
+function serviceList(value){
+ if(value===undefined)return [];
+ if(!Array.isArray(value)||value.length>20)D.fail('Enter at most 20 service requirements.');
+ const result=value.map(item=>D.text(item,'Service requirement',200));
+ if(new Set(result.map(item=>item.toLowerCase())).size!==result.length)D.fail('Service requirements must be unique.');
+ return result;
+}
 function fields(input,allowed){
  if(!input||typeof input!=='object'||Array.isArray(input))D.fail('Enter valid request details.');
  const extras=Object.keys(input).filter(key=>!allowed.includes(key));
@@ -26,7 +34,9 @@ function serviceRequest(input){
  if(max<min)D.fail('Maximum budget must be at least the minimum budget.');
  if(!['open','direct'].includes(input.visibility))D.fail('Choose an open or direct request.');
  if(input.visibility==='open'&&own(input,'shopId')&&input.shopId!==null&&input.shopId!=='')D.fail('An open request cannot target a shop.');
- return {title:D.text(input.title,'Title',100),description:D.text(input.description,'Description',300),categoryId:D.id(input.categoryId),city:D.text(input.city,'City',100),budgetMinCents:min,budgetMaxCents:max,preferredDate:date(input.preferredDate),visibility:input.visibility,shopId:input.visibility==='direct'?D.id(input.shopId):null};
+ const serviceLocation=input.serviceLocation==null?null:coordinates(input.serviceLocation);
+ if(input.serviceLocation!=null&&!serviceLocation)D.fail('Enter valid service-location latitude and longitude.');
+ return {title:D.text(input.title,'Title',100),description:D.text(input.description,'Description',300),categoryId:D.id(input.categoryId),city:D.text(input.city,'City',100),budgetMinCents:min,budgetMaxCents:max,preferredDate:date(input.preferredDate),visibility:input.visibility,shopId:input.visibility==='direct'?D.id(input.shopId):null,mandatoryServices:serviceList(input.mandatoryServices),serviceLocation};
 }
 function quotation(input){
  if(!Array.isArray(input.items)||!input.items.length||input.items.length>10)D.fail('Add between 1 and 10 quotation line items.');
@@ -44,7 +54,8 @@ function quotation(input){
  }else if(depositType!=='none')D.fail('Choose no deposit, a percentage, or a fixed deposit amount.');
  if(depositType!=='none'&&(depositAmountCents<=0||depositAmountCents>=totalCents))D.fail('The deposit must be positive and less than the quotation total.');
  if(depositType==='none'&&input.depositValue!==undefined&&input.depositValue!==null)D.fail('A quotation without a deposit cannot include a deposit value.');
- return {scope:D.text(input.scope,'Scope of work',2000),items,totalCents,currency:'ZAR',completionDays:integer(input.completionDays,'Completion days',1,365),warranty:optional(input.warranty,'Warranty',500),validForDays:integer(input.validForDays,'Validity days',1,90),depositType,depositValue,depositAmountCents};
+ return {scope:D.text(input.scope,'Scope of work',2000),items,totalCents,currency:'ZAR',completionDays:integer(input.completionDays,'Completion days',1,365),warranty:optional(input.warranty,'Warranty',500),validForDays:integer(input.validForDays,'Validity days',1,90),depositType,depositValue,depositAmountCents,
+ scopeConfirmed:input.scopeConfirmed===undefined?false:bool(input.scopeConfirmed,'Scope confirmation'),allChargesIncluded:input.allChargesIncluded===undefined?false:bool(input.allChargesIncluded,'Full-price confirmation'),coveredServices:serviceList(input.coveredServices)};
 }
 const vehicleSnapshot=value=>Object.fromEntries(['make','model','year','colour'].map(key=>[key,value[key]]));
 module.exports={fields,integer,optional,bool,vehicle,serviceRequest,quotation,vehicleSnapshot,requireFutureDate};

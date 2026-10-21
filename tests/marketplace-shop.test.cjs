@@ -243,7 +243,7 @@ test('quote submission validates actual fields, computes cents, prevents duplica
   let pending;
   await act(async () => { const send = button(tree, 'Send quotation').props.onPress; pending = send(); void send(); });
   assert.equal(state.calls.length, 1);
-  assert.deepEqual(state.calls[0], {op: 'quoteSubmit', input: {serviceRequestId: request.id, termsVersion: 1, scope: 'Prepare and repaint bonnet', items: [{description: 'Materials and labour', amountCents: 12345}, {description: 'Finishing', amountCents: 55}], completionDays: 7, warranty: '', validForDays: 14,depositType:'percentage',depositValue:33}});
+  assert.deepEqual(state.calls[0], {op: 'quoteSubmit', input: {serviceRequestId: request.id, termsVersion: 1, scope: 'Prepare and repaint bonnet', items: [{description: 'Materials and labour', amountCents: 12345}, {description: 'Finishing', amountCents: 55}], completionDays: 7, warranty: '', validForDays: 14,depositType:'percentage',depositValue:33,scopeConfirmed:false,allChargesIncluded:false,coveredServices:[]}});
   await act(async () => { reject(new Error('Connection lost. Please retry.')); await pending; });
   assert.match(text(tree), /Connection lost/);
   assert.equal(input(tree, 'Work included').props.value, 'Prepare and repaint bonnet');
@@ -345,4 +345,33 @@ test('withdrawn and accepted offers never expose renewal even when their expiry 
   const {screens,navigation}=setup({data:{request,quotes:[{...quote,status,validUntil:Date.now()-1}]}}),tree=await mount(screens.ShopRequestScreen,{navigation,route:{params:{id:request.id}}});
   assert.equal(button(tree,'Renew expired quotation'),undefined);assert.equal(button(tree,'Prepare another quotation'),undefined);await act(async()=>tree.unmount());
  }
+});
+
+test('shop explicitly declares full scope, mandatory services and complete charges', async () => {
+  const {state,screens,navigation}=setup({data:{request:{...request,mandatoryServices:['Preparation','Paint']},quotes:[]}});
+  const tree=await mount(screens.QuoteFormScreen,{navigation,route:{params:{request}}});
+  await validQuote(tree);
+  await act(async()=>button(tree,'Confirm: full requested scope included').props.onPress());
+  await act(async()=>button(tree,'Include: Preparation').props.onPress());
+  await act(async()=>button(tree,'Confirm: total includes all required fees and taxes').props.onPress());
+  await act(async()=>button(tree,'Send quotation').props.onPress());
+  assert.equal(state.calls[0].input.scopeConfirmed,true);
+  assert.equal(state.calls[0].input.allChargesIncluded,true);
+  assert.deepEqual(state.calls[0].input.coveredServices,['Preparation']);
+  await act(async()=>tree.unmount());
+});
+
+test('a material request refresh clears prior scope and fee confirmations before a shop submits',async()=>{
+ const {state,screens,navigation}=setup({data:{request:{...request,mandatoryServices:['Paint']},quotes:[]}});
+ const props={navigation,route:{params:{request}}};
+ const tree=await mount(screens.QuoteFormScreen,props);await validQuote(tree);
+ await act(async()=>button(tree,'Confirm: full requested scope included').props.onPress());
+ await act(async()=>button(tree,'Include: Paint').props.onPress());
+ await act(async()=>button(tree,'Confirm: total includes all required fees and taxes').props.onPress());
+ state.data={request:{...request,version:2,termsVersion:2,mandatoryServices:['Paint','Preparation']},quotes:[]};
+ await act(async()=>tree.update(React.createElement(screens.QuoteFormScreen,props)));
+ assert.ok(button(tree,'Confirm: full requested scope included'));assert.ok(button(tree,'Include: Paint'));
+ await act(async()=>button(tree,'Send quotation').props.onPress());
+ assert.equal(state.calls[0].input.termsVersion,2);assert.equal(state.calls[0].input.scopeConfirmed,false);assert.equal(state.calls[0].input.allChargesIncluded,false);assert.deepEqual(state.calls[0].input.coveredServices,[]);
+ await act(async()=>tree.unmount());
 });

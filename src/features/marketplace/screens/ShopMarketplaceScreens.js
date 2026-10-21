@@ -59,6 +59,7 @@ function RequestSummary({request, detailed = false}) {
     <Text>Status: {request.status} · {request.visibility === 'direct' ? 'Direct request' : 'Open request'}</Text>
     {detailed && <>
       <Text>{request.description}</Text>
+      {(request.mandatoryServices || []).map(service => <Text key={service}>Required: {service}</Text>)}
       {!!request.vehicle?.colour && <Text>Vehicle colour: {request.vehicle.colour}</Text>}
       <Text>Preferred date: {dateLabel(request.preferredDate)}</Text>
       <Text>Budget: {request.budgetMinCents == null && request.budgetMaxCents == null ? 'Not specified' : `${request.budgetMinCents == null ? 'No minimum' : formatMoney(request.budgetMinCents)} – ${request.budgetMaxCents == null ? 'No maximum' : formatMoney(request.budgetMaxCents)}`}</Text>
@@ -287,12 +288,16 @@ function QuoteDraft({navigation, requestId}) {
   const {offline} = useAuth();
   // Reload the request: navigation parameters never decide whether quoting is allowed.
   const {data, busy, error, refresh} = useMarketData('request', {id: requestId});
-  const [form, setForm] = useState({scope: '', items: [{description: '', amount: ''}], completionDays: '7', warranty: '', validForDays: '14', depositType:'none',depositValue:''});
+  const [form, setForm] = useState({scope: '', items: [{description: '', amount: ''}], completionDays: '7', warranty: '', validForDays: '14', depositType:'none',depositValue:'',scopeConfirmed:false,allChargesIncluded:false,coveredServices:[]});
   const [touched, setTouched] = useState({}), [submitted, setSubmitted] = useState(false);
   const [saving, setSaving] = useState(false), [failure, setFailure] = useState(''), [sent, setSent] = useState(false);
   const lock = useRef(false), active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const request = data?.request, quotes = data?.quotes || [];
+  const coverageRevision = request ? requestTermsVersion(request) : null;
+  useEffect(() => {
+    if (coverageRevision !== null) setForm(current => ({...current,scopeConfirmed:false,allChargesIncluded:false,coveredServices:[]}));
+  }, [coverageRevision, request?.id]);
   const now=useQuoteExpiry(quotes);
   const hasExpiredQuote=quotes.some(quote=>quote.status==='submitted'&&quoteExpired(quote,now));
   const hasCurrentQuote = quotes.some(quote => quote.status === 'submitted' && quoteMatchesRequest(quote, request) && !quoteExpired(quote,now));
@@ -320,13 +325,14 @@ function QuoteDraft({navigation, requestId}) {
         serviceRequestId: requestId,
         termsVersion: requestTermsVersion(request),
         scope: form.scope.trim(),
+        scopeConfirmed: form.scopeConfirmed, allChargesIncluded: form.allChargesIncluded, coveredServices: form.coveredServices,
         items: form.items.map(item => ({description: item.description.trim(), amountCents: parseMoney(item.amount)})),
         completionDays: Number(form.completionDays), warranty: form.warranty.trim(), validForDays: Number(form.validForDays),
         depositType:form.depositType,depositValue:form.depositType==='percentage'?Number(form.depositValue):form.depositType==='fixed'?parseMoney(form.depositValue):null,
       });
       if (active.current) {
         setSent(true);
-        setForm({scope: '', items: [{description: '', amount: ''}], completionDays: '7', warranty: '', validForDays: '14', depositType:'none',depositValue:''});
+        setForm({scope: '', items: [{description: '', amount: ''}], completionDays: '7', warranty: '', validForDays: '14', depositType:'none',depositValue:'',scopeConfirmed:false,allChargesIncluded:false,coveredServices:[]});
       }
     } catch (e) { if (active.current) setFailure(errorMessage(e)); }
     finally { lock.current = false; if (active.current) setSaving(false); }
@@ -338,7 +344,7 @@ function QuoteDraft({navigation, requestId}) {
       <Text>The customer can now review your quotation. This does not create a booking.</Text>
       <Button title="My quotations" onPress={() => navigation.navigate('ShopQuotes')}/>
     </Card> : <>
-      {request && <Card><RequestSummary request={request}/></Card>}
+      {request && <Card><RequestSummary request={request} detailed/></Card>}
       {hasExpiredQuote&&!hasWithdrawnQuote&&<Text>Your previous quotation expired. Review the request and submit a renewal with independently checked price and deposit terms.</Text>}
       {hasCurrentQuote && <Text>Your shop has a quotation for the current request terms. View it in My quotations.</Text>}
       {hasOutdatedQuote && !hasWithdrawnQuote && <Text>Your previous quotation is outdated. Submitting this replacement keeps the previous version in quotation history.</Text>}
@@ -348,6 +354,9 @@ function QuoteDraft({navigation, requestId}) {
       <Card>
         <Text style={styles.heading}>Scope of work</Text>
         <Field label="Work included" value={form.scope} onChangeText={value => change('scope', value)} onBlur={() => touch('scope')} error={fieldError('scope')} multiline maxLength={2000} editable={!disabled}/>
+        <Text>For recommendations, confirm the full request description, vehicle and any photo requirements are covered. Leave unconfirmed for partial work.</Text>
+        <Button title={`${form.scopeConfirmed ? 'Confirmed' : 'Confirm'}: full requested scope included`} outline={!form.scopeConfirmed} disabled={disabled} onPress={() => {if (!disabled) change('scopeConfirmed', !form.scopeConfirmed);}}/>
+        {(request?.mandatoryServices || []).map(service => <Button key={service} title={`${form.coveredServices.includes(service) ? 'Included' : 'Include'}: ${service}`} outline={!form.coveredServices.includes(service)} disabled={disabled} onPress={() => {if (!disabled) change('coveredServices', form.coveredServices.includes(service) ? form.coveredServices.filter(value => value !== service) : [...form.coveredServices, service]);}}/>)}
         <Text style={styles.heading}>Price breakdown</Text>
         <Text style={styles.muted}>Enter the full amount for each line, including any applicable charges. All prices are in South African rand.</Text>
         {form.items.map((item, index) => <View key={index} style={styles.lineItem}>
@@ -358,6 +367,7 @@ function QuoteDraft({navigation, requestId}) {
         <Notice error={fieldError('items')}/>
         <Button title="Add line item" disabled={disabled || form.items.length >= 10} onPress={() => { if (!disabled) setForm(current => current.items.length < 10 ? {...current, items: [...current.items, {description: '', amount: ''}]} : current); }}/>
         <Text style={styles.heading}>Total: {formatMoney(total)}</Text>
+        <Button title={`${form.allChargesIncluded ? 'Confirmed' : 'Confirm'}: total includes all required fees and taxes`} outline={!form.allChargesIncluded} disabled={disabled} onPress={() => {if (!disabled) change('allChargesIncluded', !form.allChargesIncluded);}}/>
       </Card>
       <Card>
         <Field label="Estimated completion (days)" value={form.completionDays} onChangeText={value => change('completionDays', value)} onBlur={() => touch('completionDays')} error={fieldError('completionDays')} keyboardType="number-pad" maxLength={3} editable={!disabled}/>

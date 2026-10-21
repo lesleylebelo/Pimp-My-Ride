@@ -1039,3 +1039,87 @@ test('Phase 3 event targets, renewal, test outbox templates and mutation replay 
  assert.match(emails.find(e=>e.event==='booking_created').subject,/awaiting appointment/);assert.match(emails.find(e=>e.event==='booking_confirmed').body,/09:30 SAST/);
  assert.equal((await f.read('other','notifications')).items.length,0);
 });
+
+test('owner receives authoritative rankings across pages without exposing competitors to shops',async()=>{
+ const f=fixture(),id=await created(f);
+ const full={...quoteData,serviceRequestId:id,scopeConfirmed:true,allChargesIncluded:true,coveredServices:[]};
+ const a=await f.write('shop','quoteSubmit',full),b=await f.write('competitor','quoteSubmit',{...full,items:[{description:'Full work',amountCents:120000}]});
+ const before=f.db.rows.size;
+ const result=await f.read('owner','request',{id});
+ assert.equal(result.recommendations.recommendedId,a.id);assert.deepEqual(result.recommendations.rankedIds,[a.id,b.id]);assert.equal(result.recommendations.distanceUsed,false);
+ assert.equal(f.db.rows.size,before);
+ const next=await f.read('owner','request',{id,quotesCursor:a.id});assert.deepEqual(next.recommendations.rankedIds,result.recommendations.rankedIds);
+ const shop=await f.read('shop','request',{id});assert.equal(shop.recommendations,undefined);assert.deepEqual(shop.quotes.map(q=>q.id),[a.id]);
+ await assert.rejects(()=>f.read('other','request',{id}),{code:'not-found'});
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:a.id,score:100,recommendedId:a.id}),{code:'invalid-argument'});
+ // A customer may freely accept the lower-ranked valid offer using existing payment checks.
+ const booked=await f.write('owner','quoteAccept',{id:b.id,paymentMethod:'pay_in_store'});
+ assert.equal(booked.id,id);assert.equal(f.db.rows.get('bookings/'+id).totalCents,120000);
+ assert.equal((await f.read('owner','request',{id})).recommendations.recommendedId,null);
+});
+
+test('recommendation reads exclude non-current heads, blocked shops and disabled Auth users',async()=>{
+ const f=fixture(),id=await created(f);
+ const full={...quoteData,serviceRequestId:id,scopeConfirmed:true,allChargesIncluded:true};
+ const a=await f.write('shop','quoteSubmit',full),b=await f.write('competitor','quoteSubmit',full);
+ assert.ok((await f.read('owner','request',{id})).recommendations.recommendedId);
+ const head=f.db.rows.get('quotationHeads/'+quoteId(id,'shop'));head.quoteId='missing';
+ assert.equal((await f.read('owner','request',{id})).recommendations.recommendedId,null);
+ head.quoteId=a.id;f.users.set('competitor',{emailVerified:true,disabled:true});
+ assert.equal((await f.read('owner','request',{id})).recommendations.recommendedId,null);
+ f.users.clear();f.db.rows.get('users/competitor').accountStatus='blocked';
+ assert.equal((await f.read('owner','request',{id})).recommendations.recommendedId,null);
+});
+
+test('mandatory requirements and explicit service coordinates are validated and versioned',async()=>{
+ const f=fixture(),id=await created(f);
+ const a=await f.write('shop','quoteSubmit',{...quoteData,serviceRequestId:id,scopeConfirmed:true,allChargesIncluded:true});
+ const before=f.db.rows.get('serviceRequests/'+id);
+ await f.write('owner','requestUpdate',{...requestData,id,version:before.version,mandatoryServices:['Preparation','Paint'],serviceLocation:{latitude:-26.2,longitude:28.04}});
+ assert.equal(f.db.rows.get('serviceRequests/'+id).termsVersion,2);
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:a.id}),{code:'failed-precondition'});
+ await assert.rejects(()=>f.write('shop','quoteSubmit',{...quoteData,serviceRequestId:id,coveredServices:['Unrequested']}),{code:'invalid-argument'});
+ await assert.rejects(()=>f.write('owner','requestCreate',{...requestData,serviceLocation:{latitude:'0',longitude:0}}),{code:'invalid-argument'});
+ await assert.rejects(()=>f.write('owner','requestCreate',{...requestData,mandatoryServices:['Paint','paint']}),{code:'invalid-argument'});
+ const updated=f.db.rows.get('serviceRequests/'+id);
+ await f.write('owner','requestUpdate',{...requestData,id,version:updated.version,title:'Updated title'});
+ assert.deepEqual(f.db.rows.get('serviceRequests/'+id).mandatoryServices,['Preparation','Paint']);
+ assert.deepEqual(f.db.rows.get('serviceRequests/'+id).serviceLocation,{latitude:-26.2,longitude:28.04});
+});
+
+test('recommendation failures preserve the normal quotation list and suppress a winner',async()=>{
+ const f=fixture(),offer=await offered(f);
+ f.auth.getUser=async()=>{throw new Error('Private upstream details');};
+ const result=await f.read('owner','request',{id:offer.serviceRequestId});
+ assert.deepEqual(result.quotes.map(quote=>quote.id),[offer.id]);
+ assert.equal(result.recommendations.recommendedId,null);
+ assert.match(result.recommendations.limitation,/temporarily unavailable/);
+ assert.equal(JSON.stringify(result).includes('Private upstream details'),false);
+});
+
+test('the recommendation read is bounded and never names a winner from a truncated comparison',async()=>{
+ const f=fixture(),id=await created(f);
+ for(let index=0;index<501;index++)f.db.rows.set('quotations/bounded-'+index,{...quoteData,serviceRequestId:id,status:'submitted'});
+ const result=await f.read('owner','request',{id});
+ assert.equal(result.quotes.length,20);assert.ok(result.quotesCursor);
+ assert.equal(result.recommendations.recommendedId,null);assert.match(result.recommendations.limitation,/Too many quotations/);
+ assert.ok(f.db.queries.some(query=>query.path==='quotations'&&query.maximum===501));
+});
+
+test('rankings include offers outside the visible page and derive live service/shop coordinates',async()=>{
+ const f=fixture(),id=await created(f),saved=f.db.rows.get('serviceRequests/'+id);
+ saved.serviceLocation={latitude:-26.2,longitude:28.04};
+ const full={...quoteData,serviceRequestId:id,scopeConfirmed:true,allChargesIncluded:true};
+ const a=await f.write('shop','quoteSubmit',full),b=await f.write('competitor','quoteSubmit',full);
+ f.db.rows.get('users/shop').shop.coordinates={latitude:-28,longitude:28};
+ f.db.rows.get('users/competitor').shop.coordinates=saved.serviceLocation;
+ for(let index=0;index<25;index++)f.db.rows.set('quotations/000-history-'+String(index).padStart(2,'0'),{...full,status:'superseded'});
+ const result=await f.read('owner','request',{id});
+ assert.ok(result.quotes.every(quote=>quote.status==='superseded'));
+ assert.equal(result.recommendations.recommendedId,b.id);assert.equal(result.recommendations.distanceUsed,true);
+ f.db.rows.get('users/shop').shop.coordinates=saved.serviceLocation;
+ delete f.db.rows.get('users/competitor').shop.coordinates;
+ const missing=await f.read('owner','request',{id});assert.equal(missing.recommendations.distanceUsed,false);
+ assert.equal(missing.recommendations.entries.find(entry=>entry.id===a.id).distanceKm,0);
+ assert.equal(missing.recommendations.entries.find(entry=>entry.id===b.id).distanceKm,null);
+});
