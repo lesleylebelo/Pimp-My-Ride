@@ -148,3 +148,28 @@ test('comparison makes expired and superseded history ineligible while the renew
  await press(tree,'Select: Renewed Customs');await press(tree,'Continue to payment choice');assert.equal(c.moves[0][2].quote.id,'renewed');
  c.state.first={...c.state.first,quotes:[{...old,status:'superseded'},renewed]};await act(async()=>tree.update(React.createElement(c.Screen,{route:{params:{id:'request-one'}},navigation:c.navigation})));assert.equal(button(tree,'Select: First Customs').props.disabled,true);await unmount(tree);
 });
+
+test('recommendations show server rankings, total price, distance, coverage and preserve free choice',async()=>{
+ const c=setup();
+ c.state.first.recommendations={recommendedId:'quote-two',eligibleCount:2,distanceUsed:false,distanceNote:'Distance excluded for every score.',nextExpiry:Date.now()+600000,entries:[
+  {id:'quote-one',shopName:'First Customs',eligible:true,rank:2,totalCents:75000,distanceKm:null,coverage:{matched:1,required:1}},
+  {id:'quote-two',shopName:'Second Customs',eligible:true,rank:1,totalCents:80000,distanceKm:2.34,coverage:{matched:1,required:1},explanations:['Best overall value','Fully matches requested services (shop confirmed)']},
+ ]};
+ const tree=await mount(c);
+ assert.ok(says(tree,'Recommended quotation: Second Customs'));assert.ok(says(tree,'Rank 1 of 2'));assert.ok(says(tree,'R800.00'));assert.ok(says(tree,'2.3 km (straight-line)'));assert.ok(says(tree,'Distance unavailable'));assert.ok(says(tree,'1/1 mandatory services'));assert.ok(says(tree,'Advisory only'));
+ assert.equal(button(tree,'Continue to payment choice').props.disabled,true);
+ await press(tree,'Select: First Customs');await press(tree,'Continue to payment choice');
+ assert.equal(c.moves[0][2].quote.id,'quote-one');assert.equal(c.calls.length,0);
+ c.state.first={...c.state.first,recommendations:{...c.state.first.recommendations,recommendedId:null,eligibleCount:1,entries:[]}};
+ await rerender(c,tree);assert.equal(says(tree,'Recommended quotation:'),false);await unmount(tree);
+});
+
+test('stale, offline and failed comparisons suppress recommendation badges',async()=>{
+ const c=setup();const entry={id:'quote-one',shopName:'First Customs',rank:1,explanations:['Best overall value'],totalCents:75000,coverage:{required:0,matched:0}};
+ c.state.first.recommendations={recommendedId:'quote-one',eligibleCount:2,nextExpiry:Date.now()-1,entries:[entry]};
+ const tree=await mount(c);assert.equal(says(tree,'Recommended quotation:'),false);
+ c.state.first.recommendations={...c.state.first.recommendations,nextExpiry:Date.now()+600000};
+ await rerender(c,tree);assert.ok(says(tree,'Recommended quotation:'));
+ c.state.auth.offline=true;await rerender(c,tree);assert.equal(says(tree,'Recommended quotation:'),false);
+ c.state.auth.offline=false;c.state.error='Refresh failed';await rerender(c,tree);assert.equal(says(tree,'Recommended quotation:'),false);await unmount(tree);
+});
