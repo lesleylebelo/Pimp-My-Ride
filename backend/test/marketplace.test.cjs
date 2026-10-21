@@ -1123,3 +1123,26 @@ test('rankings include offers outside the visible page and derive live service/s
  assert.equal(missing.recommendations.entries.find(entry=>entry.id===a.id).distanceKm,0);
  assert.equal(missing.recommendations.entries.find(entry=>entry.id===b.id).distanceKm,null);
 });
+
+test('shop-location saves recalculate distances and origin-only request edits invalidate old quotations',async()=>{
+ const f=fixture(),id=await created(f);
+ await f.write('owner','requestUpdate',{...requestData,id,version:1,serviceLocation:{latitude:0,longitude:0}});
+ const full={...quoteData,serviceRequestId:id,scopeConfirmed:true,allChargesIncluded:true};
+ const a=await f.write('shop','quoteSubmit',full),b=await f.write('competitor','quoteSubmit',full);
+ const {createServices}=require('../services.cjs');
+ const auth={getUser:async uid=>({...await f.auth.getUser(uid),metadata:{creationTime:'2020-01-01'},tokensValidAfterTime:'2020-01-01'})};
+ const services=createServices({db:f.db,auth,storage:{}});
+ const locate=(uid,coordinates,expectedCoordinates,requestId)=>services.completeProfile({auth:{uid,token:{email_verified:true,auth_time:Date.now()/1000}},data:{op:'shopLocationSave',coordinates,expectedCoordinates,requestId}});
+ await locate('shop',{latitude:0,longitude:1},null,'set-shop-location');await locate('competitor',{latitude:0,longitude:2},null,'set-other-location');
+ const first=(await f.read('owner','request',{id})).recommendations;
+ assert.equal(first.recommendedId,a.id);assert.ok(Math.abs(first.entries.find(q=>q.id===a.id).distanceKm-111.195)<0.01);
+ await locate('shop',{latitude:0,longitude:3},{latitude:0,longitude:1},'move-shop-location');
+ assert.equal((await f.read('owner','request',{id})).recommendations.recommendedId,b.id);
+ await locate('shop',null,{latitude:0,longitude:3},'remove-shop-location');assert.equal((await f.read('owner','request',{id})).recommendations.distanceUsed,false);
+ const before=f.db.rows.get('serviceRequests/'+id);
+ await f.write('owner','requestUpdate',{...requestData,id,version:before.version,serviceLocation:{latitude:1,longitude:0}});
+ assert.equal(f.db.rows.get('serviceRequests/'+id).termsVersion,before.termsVersion+1);
+ assert.equal((await f.read('owner','request',{id})).recommendations.recommendedId,null);
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:b.id}),{code:'failed-precondition'});
+ await assert.rejects(()=>f.write('other','requestUpdate',{...requestData,id,version:before.version+1,serviceLocation:null}),{code:'not-found'});
+});

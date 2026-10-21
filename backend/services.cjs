@@ -8,6 +8,7 @@ const {createPresence}=require('./presence.cjs');
 const {createMarketplace}=require('./marketplace.cjs');
 const {createPhotos}=require('./photos.cjs');
 const {createPosts}=require('./posts.cjs');
+const {saveShopLocation}=require('./shop-location.cjs');
 function createServices({db,auth,storage,photoStorage,requestStorage=photoStorage,postStorage=photoStorage,mockPaymentEnv=process.env}){
 const reviews=createReviews({db,auth,storage});
 const stamp=()=>FieldValue.serverTimestamp();
@@ -104,7 +105,7 @@ async function adminApi(request){
   const changes=D.editable(input);if(p.role==='shop')changes.shop=D.shop(input.shop);
   return receipt.atomic(async tx=>{const current=await tx.get(ref);D.protect(a.uid,uid,current.data());
    if(current.data().reviewOperation)D.fail('Wait for the shop review to finish before editing.','failed-precondition');
-   tx.update(ref,{...changes,updatedAt:stamp()});tx.create(db.collection('auditLogs').doc(),audit(a.uid,op,uid,{fields:Object.keys(changes)}));return {ok:true};});
+   tx.update(ref,{...changes,...(changes.shop?{shop:{...current.data().shop,...changes.shop}}:{}),updatedAt:stamp()});tx.create(db.collection('auditLogs').doc(),audit(a.uid,op,uid,{fields:Object.keys(changes)}));return {ok:true};});
  }
  if(op==='review')return reviews.review({actor:a.uid,uid,status:input.status,reason:input.reason,operationId:receipt.id,payloadFingerprint:receipt.fingerprint});
  if(op==='status'){
@@ -152,6 +153,7 @@ async function adminApi(request){
 }
 const sessionEvent=createPresence({db,actor});
 async function completeProfile(request){
+ if(request.data?.op==='shopLocationSave')return saveShopLocation({db,actor,request});
  if(!request.auth)D.fail('Sign in to continue.','unauthenticated');
  const uid=request.auth.uid,input=request.data||{},u=await auth.getUser(uid);
  if(u.disabled)D.fail('Account is disabled.','permission-denied');

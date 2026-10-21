@@ -472,3 +472,23 @@ test('Find Jobs lists newest requests first across tied timestamps and keeps dir
  assert.equal((await call('shop-two','requests',{feed:'direct'})).items.length,0);
  assert.equal((await call('shop-one','requests',{feed:'direct'})).items[0].id,'private-newest');
 });
+
+test('shop location ownership and request coordinate versioning work with real emulator Auth and Firestore',async()=>{
+ const v=await call('alice','vehicleSave',vehicle),r=await call('alice','requestCreate',{...details,vehicleId:v.id,serviceLocation:{latitude:0,longitude:0}});
+ const full={...quote,serviceRequestId:r.id,scopeConfirmed:true,allChargesIncluded:true};
+ const a=await call('shop-one','quoteSubmit',full),b=await call('shop-two','quoteSubmit',full);
+ const locate=(uid,coordinates,expectedCoordinates,key)=>services.completeProfile({auth:identity(uid),data:{op:'shopLocationSave',coordinates,expectedCoordinates,requestId:key}});
+ await locate('shop-one',{latitude:0,longitude:1},null,'emulator-first-location');await locate('shop-two',{latitude:0,longitude:2},null,'emulator-second-location');
+ let ranked=(await call('alice','request',{id:r.id})).recommendations;
+ assert.equal(ranked.recommendedId,a.id);assert.ok(Math.abs(ranked.entries.find(q=>q.id===a.id).distanceKm-111.195)<0.01);
+ await locate('shop-one',{latitude:0,longitude:3},{latitude:0,longitude:1},'emulator-move-location');
+ ranked=(await call('alice','request',{id:r.id})).recommendations;assert.equal(ranked.recommendedId,b.id);
+ await assert.rejects(()=>locate('alice',{latitude:1,longitude:1},null,'emulator-owner-location'),{code:'permission-denied'});
+ await assert.rejects(()=>services.completeProfile({auth:identity('shop-one'),data:{op:'shopLocationSave',uid:'shop-two',coordinates:null,expectedCoordinates:null,requestId:'forged-location-target'}}),{code:'invalid-argument'});
+ assert.equal((await db.doc('users/shop-one').get()).data().shop.city,'Johannesburg');
+ const before=(await db.doc('serviceRequests/'+r.id).get()).data();
+ await call('alice','requestUpdate',{...details,id:r.id,version:before.version,serviceLocation:{latitude:1,longitude:0}});
+ assert.equal((await db.doc('serviceRequests/'+r.id).get()).data().termsVersion,before.termsVersion+1);
+ assert.equal((await call('alice','request',{id:r.id})).recommendations.recommendedId,null);
+ await assert.rejects(()=>call('alice','quoteAccept',{id:b.id}),{code:'failed-precondition'});
+});

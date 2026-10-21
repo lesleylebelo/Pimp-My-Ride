@@ -24,7 +24,17 @@
       "expo-status-bar",
       "expo-secure-store",
       "expo-web-browser",
-      "expo-asset"
+      "expo-asset",
+      ["expo-location", {
+        "locationWhenInUsePermission": "Allow PimpMyRide to select your workshop or service location when you choose Use current location.",
+        "locationAlwaysPermission": false,
+        "locationAlwaysAndWhenInUsePermission": false,
+        "motionUsagePermission": false,
+        "isIosBackgroundLocationEnabled": false,
+        "isAndroidBackgroundLocationEnabled": false,
+        "isAndroidForegroundServiceEnabled": false,
+        "isAndroidMotionActivityEnabled": false
+      }]
     ]
   }
 }

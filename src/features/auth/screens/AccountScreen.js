@@ -9,6 +9,7 @@ import {authError} from '../utils/authErrors';
 import {accountStage} from '../utils/registration';
 import PrimaryButton from '../../../shared/components/PrimaryButton';
 import VerificationDocuments from '../components/VerificationDocuments';
+import BusinessLocation from '../components/BusinessLocation';
 import { useTheme } from '../../../shared/theme/ThemeContext';
 
 export default function AccountScreen({ navigation }) {
@@ -17,6 +18,7 @@ export default function AccountScreen({ navigation }) {
  const styles = makeStyles(theme);
  const [busy,setBusy]=useState(false),[message,setMessage]=useState(''),[resendAt,setResendAt]=useState(0);
  const [uploadBusy,setUploadBusy]=useState(false),[documentRefresh,setDocumentRefresh]=useState(0);
+ const [locationBusy,setLocationBusy]=useState(false);
  const actionLock=useRef(false),uploadLock=useRef(false);
  const onUploadBusy=useCallback(value=>{uploadLock.current=value;setUploadBusy(value);},[]);
  const stage=accountStage(user,profile);
@@ -59,7 +61,8 @@ export default function AccountScreen({ navigation }) {
     {(stage==='incomplete'||stage==='invalid') && <Text style={styles.body}>Your sign-in account exists, but its profile is missing or invalid. Profile setup is not part of sign-in. For an incomplete signup, return to Create account and submit the original details to retry saving the profile; otherwise contact support.</Text>}
     {stage==='ready' && <Text style={styles.body}>Your authentication is working. This is a temporary welcome screen; marketplace features will be built next.</Text>}
 
-    {stage!=='restricted' && user?.emailVerified && profile?.role==='shop' && <VerificationDocuments uid={user.uid} offline={offline} canUpload={profile.verificationStatus==='pending'} disabled={busy} onBusyChange={onUploadBusy} refreshKey={documentRefresh}/>}
+    {stage!=='restricted' && user?.emailVerified && profile?.role==='shop' && <BusinessLocation disabled={busy || uploadBusy || !!error || !!profile.reviewOperation || !!profile.statusOperation} onBusyChange={setLocationBusy}/>}
+    {stage!=='restricted' && user?.emailVerified && profile?.role==='shop' && <VerificationDocuments uid={user.uid} offline={offline} canUpload={profile.verificationStatus==='pending'} disabled={busy || locationBusy} onBusyChange={onUploadBusy} refreshKey={documentRefresh}/>}
 
     {offline && <Text style={styles.body}>Previously loaded customer and approved shop landing pages are available offline for up to 24 hours. Sign-in, verification, uploads and administrator access need a connection.</Text>}
 
@@ -67,12 +70,12 @@ export default function AccountScreen({ navigation }) {
 
     <PrimaryButton
       title={`Switch to ${mode === 'dark' ? 'light' : 'dark'} mode`}
-      disabled={busy||uploadBusy}
+      disabled={busy||uploadBusy||locationBusy}
       onPress={toggleTheme}
     />
     <PrimaryButton
       title="Sign out"
-      disabled={busy||uploadBusy}
+      disabled={busy||uploadBusy||locationBusy}
       onPress={()=>action(logout)}
       style={{ backgroundColor: theme.errorSurface, borderColor: theme.errorSurface }}
       textStyle={{ color: theme.error }}
