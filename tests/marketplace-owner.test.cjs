@@ -220,3 +220,13 @@ test('customer enters exact mandatory services and duplicate requirements block 
  await press(tree,'Submit request');assert.deepEqual(context.calls[0][1].mandatoryServices,['Preparation','Paint']);
  await unmount(tree);
 });
+
+test('customer confirms a service location in the existing request form and can clear it on edit',async()=>{
+ const c=setup({read:op=>({items:op==='vehicles'?[vehicle]:op==='categories'?[category]:[shop]})});
+ const existing={...request,vehicleId:vehicle.id,categoryId:'paint',version:3,termsVersion:2,serviceLocation:{latitude:-25.7,longitude:28.2}};
+ const tree=await mount(c,'RequestFormScreen',{request:existing});
+ await press(tree,'Choose service location');await change(tree,'Service location latitude','-26.2');await change(tree,'Service location longitude','28.04');
+ await press(tree,'Preview coordinates');assert.equal(c.calls.length,0);await press(tree,'Confirm selected location');await press(tree,'Save request');
+ assert.equal(c.calls[0][0],'requestUpdate');assert.deepEqual(c.calls[0][1].serviceLocation,{latitude:-26.2,longitude:28.04});assert.equal(c.calls[0][1].version,3);assert.equal(c.calls[0][1].city,'Pretoria');
+ await press(tree,'Remove service location');await press(tree,'Save request');assert.equal(c.calls[1][1].serviceLocation,null);await unmount(tree);
+});

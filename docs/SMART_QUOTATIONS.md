@@ -68,14 +68,14 @@ origin. Destination is the shop profile's saved `shop.coordinates` with the same
 Coordinates must be finite numbers within latitude +/-90 and longitude +/-180; numeric
 strings, missing values and out-of-range coordinates are rejected. The Haversine formula
 uses mean Earth radius 6371.0088 km and reports **straight-line** distance, never road distance.
-No geocoding, map subscriptions or device-location permission are introduced.
+Comparison itself needs no device-location permission. Location selection is described in
+[SHOP_LOCATIONS.md](SHOP_LOCATIONS.md); no geocoding or map subscriptions are introduced.
 
-Existing forms and profile validation store city/address/services text rather than precise
-shop coordinates. Text addresses and vehicle/customer cities are never converted into
-coordinates. Normal existing data will therefore display **Distance unavailable** and use
-the conservative two-factor comparison. The request API validates optional explicit service
-coordinates; a shop coordinate-management UI is outside this change. No location backfill
-or production-data migration was performed.
+The shop account's Business Location section saves `shop.coordinates`, and the service-request
+form saves `serviceLocation`. Both support current location, a map pin and manual coordinates,
+with explicit confirmation. Text addresses and cities are preserved and never converted into
+coordinates. Records without coordinates still show **Distance unavailable** and use the
+conservative two-factor comparison. No location backfill or live-data migration was performed.
 
 Scores recalculate on every owner request fetch, including subsequent quotation pages,
 refresh and screen focus. The comparison additionally refreshes every 30 seconds while
@@ -110,9 +110,9 @@ Verified locally with Node **22.23.3**:
 
 | Check | Result |
 | --- | --- |
-| Application suite (`node --test tests/*.test.cjs`) | 329 passed, 0 failed |
-| Existing backend suite (`npm test --prefix backend`) | 220 passed, 0 failed |
-| Existing Auth/Firestore emulator security runner | 69 passed, 0 failed across five suites |
+| Application suite (`node --test tests/*.test.cjs`) | 340 passed, 0 failed |
+| Existing backend suite (`npm test --prefix backend`) | 226 passed, 0 failed |
+| Existing Auth/Firestore emulator security runner | 70 passed, 0 failed across five suites |
 | Expo web export (offline, dotenv loading disabled) | Passed |
 | `git diff --check` | Passed |
 
