@@ -12,7 +12,8 @@ function closed(message='The upload was closed safely. Refresh photos, then sele
 function requireEligible(a,role=a.profile?.role){if(!['owner','shop'].includes(role)||!P.eligible(a.profile,role))D.fail('An active vehicle owner or approved shop account is required.','permission-denied');}
 function ownVehicle(doc,uid,manage=false){const value=doc.data();if(!value||value.ownerId!==uid)D.fail('Vehicle not found.','not-found');if(manage&&value.archived)D.fail('Restore the vehicle before changing its photos.','failed-precondition');return value;}
 function sameVersion(vehicle,version){if(revision(vehicle)!==version)D.fail('Vehicle photos changed. Refresh them before saving.','failed-precondition');}
-function createPhotos({db,auth,storage,actor}){
+function createPhotos({db,auth,storage,requestStorage=storage,actor}){
+ const storeFor=record=>{const adapter=record.purpose==='request'?requestStorage:storage;return adapter.forReference?adapter.forReference(record):adapter;};
  const audit=(tx,uid,action,target,details={})=>tx.create(db.collection('auditLogs').doc(),{actor:uid,action:`photos.${action}`,target,details,createdAt:stamp()});
  async function authEligible(uid){try{const user=await auth.getUser(uid);return user.emailVerified===true&&!user.disabled;}catch(error){if(error.code==='auth/user-not-found')return false;throw error;}}
  async function currentOwner(tx,uid){const profile=(await tx.get(db.doc(`users/${uid}`))).data();if(!P.eligible(profile,'owner')||!await authEligible(uid))D.fail('Vehicle owner access changed.','permission-denied');}
@@ -21,6 +22,13 @@ function createPhotos({db,auth,storage,actor}){
    if(a.profile.role!=='owner')D.fail('Vehicle not found.','not-found');
    const value=ownVehicle(await db.doc(`vehicles/${id}`).get(),a.uid);
    return {ownerId:a.uid,vehicleId:id,photoIds:Object.values(value.photoSlots||{}),vehicle:value,canManage:!value.archived};
+  }
+  if(target==='attachment'){
+   if(a.profile.role!=='owner')D.fail('Photo not found.','not-found');
+   const asset=(await db.doc('marketplacePhotos/'+id).get()).data();
+   if(!asset||asset.ownerId!==a.uid||asset.purpose!=='request')D.fail('Photo not found.','not-found');
+   ownVehicle(await db.doc('vehicles/'+D.id(asset.vehicleId)).get(),a.uid);
+   return {ownerId:a.uid,vehicleId:asset.vehicleId,photoIds:[id],canManage:false};
   }
   if(target!=='request')D.fail('Choose a vehicle or service request.');
   const value=(await db.doc(`serviceRequests/${id}`).get()).data();if(!value)D.fail('Service request not found.','not-found');
@@ -40,7 +48,7 @@ function createPhotos({db,auth,storage,actor}){
   }
   return {ownerId:value.ownerId,vehicleId:value.vehicleId,photoIds:P.photoIds(value.photoIds),photos:value.photos||[],canManage:false};
  }
- function checkedAsset(doc,target){const asset=doc.data();if(!asset||asset.ownerId!==target.ownerId||asset.vehicleId!==target.vehicleId||asset.path!==`photos/${asset.ownerId}/${asset.vehicleId}/${doc.id}`)D.fail('Photo not found.','not-found');return asset;}
+ function checkedAsset(doc,target){const asset=doc.data();if(!asset||asset.ownerId!==target.ownerId||asset.vehicleId!==target.vehicleId||asset.path!==P.assetPath(asset,doc.id))D.fail('Photo not found.','not-found');return asset;}
  async function photosApi(request){
   const a=await actor(request);requireEligible(a);const input=request.data||{},op=input.op;
   const fields={list:[],view:['photoId'],remove:['slot','version','requestId']};
@@ -70,20 +78,22 @@ function createPhotos({db,auth,storage,actor}){
   // Recheck current access just before minting each short-lived bearer URL.
   const fresh=await actor(request);requireEligible(fresh);const latest=await targetFor(fresh,input.target,id);
   if(!latest.photoIds.includes(photoId))D.fail('Photo changed. Refresh its details.','not-found');
-  const issuedAt=Date.now(),url=await storage.signedUrl(asset.path,60);
+  const issuedAt=Date.now(),url=await storeFor(asset).signedUrl(asset.path,60);
   await db.collection('auditLogs').add({actor:a.uid,action:'photos.viewed',target:id,details:{type:input.target,assetId:photoId},createdAt:stamp()});
   return {url,expiresAt:issuedAt+60000};
  }
  async function checkPhotoUpload(request){
   const a=await actor(request);requireEligible(a,'owner');
+  if(request.target!==undefined&&request.target!=='request')D.fail('Choose a supported upload target.');
   D.id(request.vehicleId);P.slot(request.slot);P.version(request.version);D.id(request.requestId);
   ownVehicle(await db.doc(`vehicles/${request.vehicleId}`).get(),a.uid,true);return a;
  }
  async function uploadPhoto(request){
   const a=await checkPhotoUpload(request),file=P.validatePhoto(request.file),vehicleId=request.vehicleId,slot=request.slot,version=request.version;
-  const fingerprint=P.hash(JSON.stringify({vehicleId,slot,version,name:file.name,size:file.size,contentType:file.contentType,contentHash:file.contentHash}));
+  const isRequest=request.target==='request',adapter=isRequest?requestStorage:storage,mediaFields={...(adapter.bucket?{bucket:adapter.bucket}:{}),...(isRequest?{purpose:'request'}:{})};
+  const fingerprint=P.hash(JSON.stringify({...(isRequest?{target:'request'}:{}),vehicleId,slot,version,name:file.name,size:file.size,contentType:file.contentType,contentHash:file.contentHash}));
   const attempt=db.doc(`storagePhotosUploadAttempts/${P.hash(`${a.uid}\n${request.requestId}`)}`),vehicleRef=db.doc(`vehicles/${vehicleId}`),workerToken=randomUUID();
-  const freshAssetId=randomUUID(),path=`photos/${a.uid}/${vehicleId}/${freshAssetId}`;
+  const freshAssetId=randomUUID(),path=`${isRequest?'requests':'photos'}/${a.uid}/${vehicleId}/${freshAssetId}`;
   function checkRecord(record){if(record&&(record.uid!==a.uid||record.fingerprint!==fingerprint))D.fail('This upload key was already used with different data.','already-exists');}
   const succeeded=record=>!!record?.result&&['referenced','cleanupPending'].includes(record.state);
   function outcome(record){checkRecord(record);if(succeeded(record))return {done:true,result:record.result};if(record?.state==='cleanupPending')throw closed();if(record?.state==='uploading'&&record.workerToken===workerToken)return {done:false,record};D.fail('The upload is still pending or its outcome is unknown. Refresh and retry the same photo shortly.','unavailable');}
@@ -98,7 +108,7 @@ function createPhotos({db,auth,storage,actor}){
      D.fail('The upload is still in progress. Refresh and retry the same photo shortly.','unavailable');
     }
     await currentOwner(tx,a.uid);const vehicle=ownVehicle(await tx.get(vehicleRef),a.uid,true);
-    const record={provider:'supabase',uid:a.uid,vehicleId,slot,assetId:freshAssetId,path,fingerprint,workerToken,state:'uploading',createdAt:stamp(),updatedAt:stamp()};
+    const record={provider:'supabase',...mediaFields,uid:a.uid,vehicleId,slot,assetId:freshAssetId,path,fingerprint,workerToken,state:'uploading',createdAt:stamp(),updatedAt:stamp()};
     // Fence a stale key durably before allowing a new one. A concurrent retry
     // cannot subsequently reserve that key, even if this response is lost.
     if(revision(vehicle)!==version){tx.create(attempt,{...record,state:'cleanupPending',reason:'stale-version'});return {closed:true};}
@@ -120,19 +130,19 @@ function createPhotos({db,auth,storage,actor}){
    return {unknown:true};
   });}
   try{
-   await storage.upload(owned.path,file.buffer,file.contentType);
+   await storeFor(owned).upload(owned.path,file.buffer,file.contentType);
    return await db.runTransaction(async tx=>{
     await currentOwner(tx,a.uid);
     const [vehicleDoc,ledger]=await Promise.all([tx.get(vehicleRef),tx.get(attempt)]),vehicle=ownVehicle(vehicleDoc,a.uid,true),saved=ledger.data();
     if(saved?.state!=='uploading'||saved.workerToken!==workerToken||!(saved.createdAt instanceof Timestamp)||saved.createdAt.toMillis()<=Date.now()-LEASE_MS)D.fail('The upload lease expired or was closed. Refresh before trying again.','failed-precondition');sameVersion(vehicle,version);
-    const previousId=vehicle.photoSlots?.[slot];let previousRef,previous;
+    const previousId=isRequest?null:vehicle.photoSlots?.[slot];let previousRef,previous;
     if(previousId){const prior=await tx.get(db.doc(`marketplacePhotos/${D.id(previousId)}`)),value=checkedAsset(prior,{ownerId:a.uid,vehicleId});previousRef=db.doc(`storagePhotosUploadAttempts/${D.id(value.uploadAttemptId)}`);previous=await tx.get(previousRef);if(previous.data()?.path!==value.path||previous.data()?.assetId!==previousId)previousRef=null;}
     // Previous-asset reads can take time too. Do not publish if the lease
     // expires while resolving replacement metadata in this transaction.
     if(saved.createdAt.toMillis()<=Date.now()-LEASE_MS)D.fail('The upload lease expired. Refresh before trying again.','failed-precondition');
-    const slots={...vehicle.photoSlots,[slot]:owned.assetId},result={ok:true,id:owned.assetId,slot,version:version+1};
-    tx.create(assetRef,{provider:'supabase',ownerId:a.uid,vehicleId,slot,path:owned.path,name:file.name,size:file.size,contentType:file.contentType,uploadedAt:stamp(),uploadAttemptId:attempt.id});
-    tx.update(vehicleRef,{photoSlots:slots,photoIds:Object.values(slots),photoRevision:version+1,updatedAt:stamp()});
+    const slots={...vehicle.photoSlots,[slot]:owned.assetId},result={ok:true,id:owned.assetId,slot,version:isRequest?version:version+1};
+    tx.create(assetRef,{provider:'supabase',...(owned.bucket?{bucket:owned.bucket}:{}),...(isRequest?{purpose:'request'}:{}),ownerId:a.uid,vehicleId,slot,path:owned.path,name:file.name,size:file.size,contentType:file.contentType,uploadedAt:stamp(),uploadAttemptId:attempt.id});
+    if(!isRequest)tx.update(vehicleRef,{photoSlots:slots,photoIds:Object.values(slots),photoRevision:version+1,updatedAt:stamp()});
     tx.update(attempt,{state:'referenced',result,updatedAt:stamp()});
     if(previousRef)tx.update(previousRef,{state:'cleanupPending',reason:'replaced',updatedAt:stamp()});
     audit(tx,a.uid,'uploaded',vehicleId,{assetId:owned.assetId,slot,replaced:!!previousId});return result;

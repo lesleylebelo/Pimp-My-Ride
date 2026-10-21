@@ -50,11 +50,13 @@ No Figma writes or broad visual redesign occurred.
   1–90 days of validity. Amounts are integer cents, totals are computed on the
   server, currency is ZAR, and the maximum is R1,000,000. No floating-point price
   arithmetic or client-supplied total is trusted by the backend.
-- One quote per shop/request is enforced by a deterministic document identity.
-  A submitted quote can become `withdrawn`; it cannot be edited/replaced or
-  resubmitted in this slice. The validity deadline is displayed as expired when
-  appropriate; no scheduler changes its stored status. Customers can read offers
-  together, but selection/acceptance, booking and payments are not implemented.
+- A current quote head identifies each shop's latest offer for a request.
+  Outdated submitted offers can be superseded by a separate replacement record;
+  quotation history is retained, and an accepted offer cannot be replaced.
+  Withdrawal is terminal for that shop/request pair: no further offer can be
+  submitted after withdrawal. The validity deadline is displayed as expired
+  when appropriate; no scheduler changes its stored status. The later
+  BOOKING_MILESTONE.md documents the acceptance and booking extension.
 - Photos, portfolios, camera/GPS/maps, chat and marketplace notifications remain
   future work. Existing private verification-document upload behavior is retained.
 

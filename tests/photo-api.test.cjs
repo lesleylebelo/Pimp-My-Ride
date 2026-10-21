@@ -86,3 +86,21 @@ test('an account switch during a blob read or native response prevents delivery 
  await assert.rejects(()=>s.uploadVehiclePhoto('car','1',0,{...file(),uri:'blob:local'},'owner'),/account changed/);assert.equal(s.calls.length,0);
  const native=setup();native.respond(async()=>{native.auth.currentUser={uid:'other'};return {ok:true};});await assert.rejects(()=>native.uploadVehiclePhoto('car','1',0,file(),'owner'),/account changed/);assert.equal(native.calls.length,1);
 });
+
+test('web vehicle uploads accept supported WebP data URLs and use the actual blob',async()=>{
+ const blob={size:4,type:'image/webp'};const s=setup({platform:'web',fetchFile:async()=>({ok:true,blob:async()=>blob})});
+ await s.uploadVehiclePhoto('car','1',0,{uri:'data:image/webp;base64,YWJjZA==',name:'test.webp',size:4,mimeType:'image/webp'},'owner');
+ assert.deepEqual(s.calls[0][1].fields,[['file',blob,'test.webp']]);
+});
+
+test('request uploads use their own route, preserve uncertain retry identity and cannot become Garage uploads',async()=>{
+ const s=setup();let uncertain=true;s.respond(async()=>{if(uncertain)throw Error('Synthetic lost acknowledgement');return {id:'request-asset'};});
+ await assert.rejects(()=>s.uploadRequestPhoto('car',3,file(), 'owner'),/lost acknowledgement/);
+ uncertain=false;await s.uploadRequestPhoto('car',4,file(), 'owner');
+ assert.match(s.calls[0][0],/^photos\/requests\/car\?/);
+ assert.equal(uploadParams(s.calls[0]).get('requestId'),uploadParams(s.calls[1]).get('requestId'));
+ assert.equal(uploadParams(s.calls[1]).get('version'),'3');
+ await s.uploadVehiclePhoto('car','1',4,file(),'owner');assert.match(s.calls[2][0],/^photos\/vehicles\/car\/1\?/);
+ assert.notEqual(uploadParams(s.calls[2]).get('requestId'),uploadParams(s.calls[0]).get('requestId'));
+ s.auth.currentUser={uid:'other'};await assert.rejects(()=>s.uploadRequestPhoto('car',4,file(),'owner'),/account changed/);
+});

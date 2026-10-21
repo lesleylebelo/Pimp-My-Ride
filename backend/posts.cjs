@@ -20,7 +20,10 @@ function cursorValue(value){
  if(value===undefined||value===null||value==='')return null;
  try{
   const parsed=JSON.parse(Buffer.from(value,'base64url').toString('utf8'));
-  if(!parsed||!Number.isSafeInteger(parsed.createdAt)||parsed.createdAt<1||typeof parsed.id!=='string'||! /^[A-Za-z0-9_-]{1,128}$/.test(parsed.id))throw Error();
+  if(!parsed||!Number.isFinite(parsed.createdAt)||parsed.createdAt<1||parsed.createdAt>253402300799999||typeof parsed.id!=='string'||! /^[A-Za-z0-9_-]{1,128}$/.test(parsed.id))throw Error();
+  if(Object.hasOwn(parsed,'seconds')||Object.hasOwn(parsed,'nanoseconds')){
+   if(!Number.isSafeInteger(parsed.seconds)||parsed.seconds<0||parsed.seconds>253402300799||!Number.isInteger(parsed.nanoseconds)||parsed.nanoseconds<0||parsed.nanoseconds>=1000000000)throw Error();
+  }
   return parsed;
  }catch{validation({cursor:'The feed cursor is invalid. Refresh the feed.'});}
 }
@@ -56,11 +59,12 @@ function createPosts({db,auth,actor,storage}){
   if(a.profile.role==='shop'&&(!await auth.getUser(a.uid).then(user=>user.emailVerified&&!user.disabled).catch(error=>{if(error.code==='auth/user-not-found')return false;throw error;})))D.fail('An active, verified shop is required.','permission-denied');
   return profile;
  }
- async function image(path,uid){
+ async function image(path,uid,existing=[]){
   if(typeof path!=='string'||!path.startsWith(`posts/${uid}/`))D.fail('Choose an uploaded post photo.');
-  const details=await storage.inspect(path);
+  const original=existing.find(item=>item?.path===path),store=original&&storage.forReference?storage.forReference(original):storage;
+  const details=await store.inspect(path);
   if(!details||!['image/jpeg','image/png','image/webp'].includes(details.contentType)||details.size<=0||details.size>5*1024*1024)D.fail('An uploaded photo is unavailable. Upload it again.');
-  return {path,url:storage.publicUrl(path),contentType:details.contentType,size:details.size};
+  return {path,...(original?.bucket?{bucket:original.bucket}:original?{}:storage.bucket?{bucket:storage.bucket}:{}),...(store.publicUrl?{url:store.publicUrl(path)}:{}),contentType:details.contentType,size:details.size};
  }
  async function requireShop(request){
   const a=await actor(request);
@@ -99,10 +103,10 @@ function createPosts({db,auth,actor,storage}){
    ...(Object.hasOwn(input,'vehicle')?{vehicle:{make:(input.vehicle.make||'').trim(),model:(input.vehicle.model||'').trim(),year:input.vehicle.year?Number(input.vehicle.year):null}}:{})
   };
  }
- async function restImages(paths,uid){
+ async function restImages(paths,uid,existing=[]){
   if(!Array.isArray(paths)||paths.length<1||paths.length>MAX_SHOWCASE_IMAGES)validation({images:'Choose between 1 and 10 photos.'});
   if(paths.some(path=>typeof path!=='string')||new Set(paths).size!==paths.length)validation({images:'Choose each uploaded photo once.'});
-  return Promise.all(paths.map(path=>image(path,uid)));
+  return Promise.all(paths.map(path=>image(path,uid,existing)));
  }
  function publicPost(id,data,profile){
   const shop=shopSnapshot(data.shopId||data.authorId,profile,data);
@@ -127,13 +131,14 @@ function createPosts({db,auth,actor,storage}){
   const cursor=cursorValue(query.cursor),collection=db.collection('posts');
   let base=collection.where('status','==','published').where('authorRole','==','shop');
   if(service!=='All')base=base.where('category','==',service);
-  if(shopId)base=base.where('shopId','==',shopId);
+  // Historical shop posts have authorId but may predate the shopId alias.
+  if(shopId)base=base.where('authorId','==',shopId);
   let current=cursor,skip=query.page===undefined?0:(Number(query.page)-1)*limit,matched=0;
   const items=[],scanSize=Math.min(100,Math.max(limit*2,40));
   let hasMore=false;
   while(items.length<limit){
    let queryRef=base.orderBy('createdAt','desc').orderBy(FieldPath.documentId(),'desc');
-   if(current)queryRef=queryRef.startAfter(Timestamp.fromMillis(current.createdAt),current.id);
+   if(current)queryRef=queryRef.startAfter(current.seconds===undefined?Timestamp.fromMillis(current.createdAt):new Timestamp(current.seconds,current.nanoseconds),current.id);
    const snapshot=await queryRef.limit(scanSize).get();
    if(!snapshot.docs.length)break;
    const profiles=new Map();
@@ -142,7 +147,8 @@ function createPosts({db,auth,actor,storage}){
    }));
    for(let index=0;index<snapshot.docs.length;index++){
     const doc=snapshot.docs[index],data=doc.data(),id=data.shopId||data.authorId,shop=shopSnapshot(id,profiles.get(id),data),vehicle=postVehicle(data.vehicle);
-    current={createdAt:doc.get('createdAt').toMillis(),id:doc.id};
+    const created=doc.get('createdAt');
+    current={createdAt:created.toMillis(),seconds:created.seconds,nanoseconds:created.nanoseconds,id:doc.id};
     if(q&&!`${data.title||''} ${data.description||''} ${shop.name} ${vehicle.make} ${vehicle.model}`.toLocaleLowerCase().includes(q))continue;
     if(matched++<skip)continue;
     items.push(publicPost(doc.id,data,profiles.get(id)));
@@ -163,17 +169,21 @@ function createPosts({db,auth,actor,storage}){
  }
  async function createShowcase(request){
   const a=await requireShop(request),input=request.data||{};
-  if(Object.keys(input).some(key=>!['title','description','serviceCategory','category','vehicle','images'].includes(key)))validation({post:'Remove unsupported post fields.'});
+  if(Object.keys(input).some(key=>!['title','description','serviceCategory','category','vehicle','images','requestId'].includes(key)))validation({post:'Remove unsupported post fields.'});
   const fields=validateShowcase(input);
   const images=await restImages(input.images,a.uid),ref=db.collection('posts').doc(),profile=a.profile,now=stamp();
   const shop=shopSnapshot(a.uid,profile,{});
   const data={authorId:a.uid,shopId:a.uid,authorRole:'shop',type:'showcase',...fields,images,
    authorName:shop.name,authorAvatar:shop.avatar,city:shop.city,province:shop.province,
    status:'published',createdAt:now,updatedAt:now};
-  await db.runTransaction(async tx=>{
-   tx.create(ref,data);audit(tx,a.uid,'create',ref.id);
+  const result=await mutation(db,a.uid,'posts:showcaseCreate',input).atomic(async tx=>{
+   tx.create(ref,data);audit(tx,a.uid,'create',ref.id);return {id:ref.id};
   });
-  return {post:publicPost(ref.id,{...data,createdAt:Timestamp.now(),updatedAt:Timestamp.now()},profile)};
+  // A lost acknowledgement must replay the same post, including when the
+  // response read failed after commit. Never resurrect a subsequently removed post.
+  const saved=(await db.doc(`posts/${result.id}`).get()).data();
+  if(!saved||saved.status!=='published'||saved.authorId!==a.uid)D.fail('The original post is no longer available. Refresh My Posts.','failed-precondition');
+  return {post:publicPost(result.id,saved,profile)};
  }
  async function updateShowcase(request){
   const a=await requireShop(request),id=validPostId(request.id),ref=db.doc(`posts/${id}`),snapshot=await ref.get(),current=snapshot.data();
@@ -183,18 +193,14 @@ function createPosts({db,auth,actor,storage}){
   if(Object.keys(input).some(key=>!editable.includes(key)))validation({post:'Remove unsupported post fields.'});
   if(!Object.keys(input).length)validation({post:'Provide at least one field to update.'});
   const fields=validateShowcase(input,{partial:true});
-  const images=Object.hasOwn(input,'images')?await restImages(input.images,a.uid):current.images||[];
-  const oldPaths=[...(current.cleanupImages||[]),...(current.images||[]).map(item=>item.path).filter(Boolean)],newPaths=new Set(images.map(item=>item.path));
-  const cleanupPaths=[...new Set(oldPaths.filter(path=>!newPaths.has(path)))];
-  const changes={...fields,...(Object.hasOwn(input,'images')?{images}:{}),...(cleanupPaths.length?{cleanupImages:cleanupPaths}:{}),updatedAt:stamp()};
+  const images=Object.hasOwn(input,'images')?await restImages(input.images,a.uid,current.images||[]):current.images||[];
+  const changes={...fields,...(Object.hasOwn(input,'images')?{images}:{}),updatedAt:stamp()};
   await db.runTransaction(async tx=>{
    const latest=(await tx.get(ref)).data();
    if(!latest||latest.status!=='published')D.fail('Post not found.','not_found');
    if((latest.shopId||latest.authorId)!==a.uid)D.fail('You can only edit your own showcase posts.','forbidden');
    tx.update(ref,changes);audit(tx,a.uid,'update',id);
   });
-  for(const path of cleanupPaths)await storage.remove(path);
-  if(cleanupPaths.length)await ref.update({cleanupImages:FieldValue.delete()});
   return {post:publicPost(id,{...current,...changes,updatedAt:Timestamp.now()},a.profile)};
  }
  async function deleteShowcase(request){
@@ -206,11 +212,8 @@ function createPosts({db,auth,actor,storage}){
    const latest=(await tx.get(ref)).data();
    if(!latest||latest.status!=='published')D.fail('Post not found.','not_found');
    if((latest.shopId||latest.authorId)!==a.uid)D.fail('You can only delete your own showcase posts.','forbidden');
-   tx.update(ref,{status:'removed',cleanupImages:[...new Set([...(latest.cleanupImages||[]),...(latest.images||[]).map(image=>image.path).filter(Boolean)])],updatedAt:stamp()});audit(tx,a.uid,'remove',id);
+   tx.update(ref,{status:'removed',updatedAt:stamp()});audit(tx,a.uid,'remove',id);
   });
-  const paths=[...(current.cleanupImages||[]),...(current.images||[]).map(image=>image.path)].filter(path=>typeof path==='string'&&path.startsWith(`posts/${a.uid}/`));
-  for(const path of new Set(paths))await storage.remove(path);
-  if(current.cleanupImages?.length)await ref.update({cleanupImages:FieldValue.delete()});
   return {id,deleted:true};
  }
  async function postsApi(request){
@@ -270,8 +273,7 @@ function createPosts({db,auth,actor,storage}){
   if(op==='removeImage'){
    await author(a);const path=input.path;
    if(typeof path!=='string'||!path.startsWith(`posts/${a.uid}/`))D.fail('Photo not found.','not-found');
-   await storage.remove(path);
-   return {ok:true};
+   D.fail('Showcase photos are retained to protect post data; automatic deletion is unavailable.','failed-precondition');
   }
   D.id(input.requestId);
   const receipt=mutation(db,a.uid,`posts:${op}`,input);
@@ -291,7 +293,7 @@ function createPosts({db,auth,actor,storage}){
    const vehicle=input.vehicle===undefined?(current?.vehicle||''):typeof input.vehicle==='string'?input.vehicle.trim():D.fail('Enter a valid vehicle.', 'invalid-argument');
    if(vehicle.length>120)D.fail('Vehicle must be at most 120 characters.');
    if(!Array.isArray(input.images)||input.images.length<1||input.images.length>MAX_SHOWCASE_IMAGES)D.fail('Choose between one and ten post photos.');
-   const images=await Promise.all(input.images.map(path=>image(path,a.uid)));
+   const images=await Promise.all(input.images.map(path=>image(path,a.uid,current?.images||[])));
    const id=op==='create'?posts.doc().id:D.id(input.id),ref=posts.doc(id);
    const fields={authorId:a.uid,authorRole,type:authorRole==='shop'?'showcase':'build',title,description,images,category,...(authorRole==='shop'?{projectStatus}:{}),vehicle,
     authorName:authorName(profile,authorRole),authorAvatar:null,city:authorRole==='shop'?(profile.shop?.city||''):(profile.city||''),province:authorRole==='shop'?(profile.shop?.province||''):(profile.province||''),status:'published',updatedAt:stamp()};
@@ -322,9 +324,22 @@ function createPosts({db,auth,actor,storage}){
   const path=`posts/${a.uid}/${randomUUID()}`;
   await storage.upload(path,file.buffer,file.contentType);
   const details=await storage.inspect(path);
-  if(details.size!==file.size||details.contentType!==file.contentType){await storage.remove(path);D.fail('The uploaded photo could not be verified. Choose it again.','failed-precondition');}
-  return {path,url:storage.publicUrl(path),size:file.size,contentType:file.contentType};
+  if(!details||details.size!==file.size||details.contentType!==file.contentType)D.fail('The uploaded photo could not be verified. Choose it again.','failed-precondition');
+  return {path,...(storage.bucket?{bucket:storage.bucket}:{}),...(storage.publicUrl?{url:storage.publicUrl(path)}:{}),size:file.size,contentType:file.contentType};
  }
- return {postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage};
+ async function viewPostImage(request){
+  const a=await actor(request);
+  if(!['owner','shop'].includes(a.profile.role))D.fail('Only customers and shops can view showcase photos.','forbidden');
+  const id=validPostId(request.id),input=request.data||{};
+  if(Object.keys(input).some(key=>key!=='path'))validation({image:'Only the saved photo path is accepted.'});
+  const post=(await db.doc('posts/'+id).get()).data();
+  if(!post||post.status!=='published'||post.authorRole!=='shop')D.fail('Post not found.','not_found');
+  const asset=Array.isArray(post.images)&&post.images.find(item=>item?.path===input.path);
+  if(!asset||typeof asset.path!=='string'||!asset.path.startsWith('posts/'+(post.shopId||post.authorId)+'/'))D.fail('Photo not found.','not_found');
+  const store=storage.forReference?storage.forReference(asset):storage,issuedAt=Date.now();
+  const url=store.signedUrl?await store.signedUrl(asset.path):store.publicUrl(asset.path);
+  return {url,expiresAt:issuedAt+60000};
+ }
+ return {postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage};
 }
 module.exports={createPosts,categories,authorName,PAGE_SIZE};

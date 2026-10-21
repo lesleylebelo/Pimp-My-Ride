@@ -36,10 +36,45 @@ test('aborted connections retain timeout classification and safe stage diagnosti
  assert.deepEqual(s.warnings,[['[PimpMyRide connection]',{stage:'health',origin:'https://api.example.test',reason:'timeout'}]]);
  assert.equal(s.calls.length,1);
 });
+
+test('a stalled status or upload response body times out and never reports success',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout'],now:1800000000000});
+ for(const mode of ['status','upload','rest']){
+  const multipart=mode==='upload';
+  const s=setup(async url=>url.endsWith('/health')?{ok:true,json:async()=>({ok:true})}:{ok:true,status:200,text:()=>new Promise(()=>{})},{dev:true});
+  const request=mode==='rest'?s.apiMethodRequest('posts'):s.apiRequest('photos',{}, {multipart});
+  const rejected=assert.rejects(request,{code:'api/connection-timeout',connectionStage:multipart?'upload':'request'});
+  for(let i=0;i<20;i++)await Promise.resolve();
+  assert.equal(s.calls.length,2);
+  t.mock.timers.tick(multipart?60000:45000);
+  await rejected;
+  assert.equal(s.calls[1].options.signal.aborted,true);
+  assert.equal(s.calls.length,2);
+ }
+});
+
+test('a health fetch that never settles releases the waiting indicator at its deadline',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout'],now:1800000000000});
+ const s=setup(()=>new Promise(()=>{})),waiting=[];
+ s.onBackendWaiting(value=>waiting.push(value));
+ const rejected=assert.rejects(s.apiRequest('photos',{}),{code:'api/connection-timeout',connectionStage:'health'});
+ for(let i=0;i<20;i++)await Promise.resolve();
+ t.mock.timers.tick(4000);assert.deepEqual(waiting,[true]);
+ t.mock.timers.tick(86000);await rejected;
+ assert.deepEqual(waiting,[true,false]);assert.equal(s.calls.length,1);
+});
 test('backend wakes before sending the Firebase token; normal responses are unwrapped',async()=>{
  const s=setup(async url=>({ok:true,json:async()=>url.endsWith('/health')?{ok:true}:{data:{ok:true}}}));
  assert.deepEqual(await s.apiRequest('admin',{op:'dashboard'}),{ok:true});assert.equal(s.calls.length,2);
  assert.equal(s.calls[0].options.headers,undefined);assert.equal(s.calls[1].options.headers.Authorization,'Bearer firebase-token');assert.equal(JSON.parse(s.calls[1].options.body).op,'dashboard');
+});
+
+test('multipart uploads preserve FormData and let native fetch supply its boundary',async()=>{
+ const body={syntheticMultipart:true};
+ const s=setup(async url=>({ok:true,json:async()=>url.endsWith('/health')?{ok:true}:{data:{ok:true}}}));
+ assert.deepEqual(await s.apiRequest('photos/vehicles/test/1',body,{multipart:true,expectedUid:'u'}),{ok:true});
+ assert.equal(s.calls[1].options.body,body);
+ assert.deepEqual(s.calls[1].options.headers,{Authorization:'Bearer firebase-token'});
 });
 test('REST posts requests preserve method, encode filters and send JSON only for mutations',async()=>{
  const s=setup(async(url,options)=>({ok:true,json:async()=>url.endsWith('/health')?{ok:true}:{data:{id:'post-1'}},text:async()=>url.endsWith('/health')?JSON.stringify({ok:true}):JSON.stringify({data:{id:'post-1'}})}));

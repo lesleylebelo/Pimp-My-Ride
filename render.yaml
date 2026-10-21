@@ -21,6 +21,14 @@ services:
       - key: SUPABASE_BUCKET
         value: verification
       - key: SUPABASE_PHOTO_BUCKET
+        value: vehicle-images
+      - key: SUPABASE_REQUEST_BUCKET
+        value: request-images
+      - key: SUPABASE_POSTS_BUCKET
+        value: showcase-images
+      - key: SUPABASE_LEGACY_PHOTO_BUCKET
         value: marketplace-photos
+      - key: SUPABASE_LEGACY_POSTS_BUCKET
+        value: public-posts
       - key: CORS_ORIGINS
         value: http://localhost:8081,http://127.0.0.1:8081

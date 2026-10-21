@@ -8,7 +8,7 @@ const {createPresence}=require('./presence.cjs');
 const {createMarketplace}=require('./marketplace.cjs');
 const {createPhotos}=require('./photos.cjs');
 const {createPosts}=require('./posts.cjs');
-function createServices({db,auth,storage,photoStorage,postStorage=photoStorage}){
+function createServices({db,auth,storage,photoStorage,requestStorage=photoStorage,postStorage=photoStorage,mockPaymentEnv=process.env}){
 const reviews=createReviews({db,auth,storage});
 const stamp=()=>FieldValue.serverTimestamp();
 const audit=(actor,action,target,details={})=>({actor,action,target,details,createdAt:stamp()});
@@ -167,9 +167,9 @@ async function completeProfile(request){
  });
 }
 const {listDocuments,checkUpload,uploadDocument}=createDocuments({db,storage,actor});
-const marketplace=createMarketplace({db,auth,actor});
-const {photosApi,checkPhotoUpload,uploadPhoto}=createPhotos({db,auth,storage:photoStorage,actor});
-const {postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage}=createPosts({db,auth,actor,storage:postStorage});
-return {adminApi,sessionEvent,completeProfile,listDocuments,checkUpload,uploadDocument,marketplace,photosApi,checkPhotoUpload,uploadPhoto,postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage};
+const marketplace=createMarketplace({db,auth,actor,mockPaymentEnv});
+const {photosApi,checkPhotoUpload,uploadPhoto}=createPhotos({db,auth,storage:photoStorage,requestStorage,actor});
+const {postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage}=createPosts({db,auth,actor,storage:postStorage});
+return {adminApi,sessionEvent,completeProfile,listDocuments,checkUpload,uploadDocument,marketplace,photosApi,checkPhotoUpload,uploadPhoto,postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage};
 }
 module.exports={createServices};

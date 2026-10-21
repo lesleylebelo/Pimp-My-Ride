@@ -90,7 +90,8 @@ Do not deploy until separately instructed. These are review steps for the owner:
    `npm start` (`node server.cjs`); Node: 22.x; health path: `/health`.
 2. Verify `NODE_ENV`, `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON`,
    `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SUPABASE_BUCKET`,
-   `SUPABASE_PHOTO_BUCKET`, optional `SUPABASE_POSTS_BUCKET`, and `CORS_ORIGINS`
+   `SUPABASE_PHOTO_BUCKET`, `SUPABASE_REQUEST_BUCKET`, `SUPABASE_POSTS_BUCKET`,
+   `SUPABASE_LEGACY_PHOTO_BUCKET`, `SUPABASE_LEGACY_POSTS_BUCKET`, and `CORS_ORIGINS`
    privately. `PORT` is provided by Render. No emulator variables may be present
    in production. Do not copy values into issues, screenshots, or this document.
 3. `CORS_ORIGINS` is an exact comma-separated HTTP(S) origin list with no paths,
@@ -114,42 +115,38 @@ observations, not verification of the current revision or backend credentials.
 
 ## Shop showcase posts
 
-Showcase metadata is stored in Firestore `posts` documents; photo binaries live
-in the existing Supabase `public-posts` bucket (configurable with
-`SUPABASE_POSTS_BUCKET`). There is no SQL database or relational migration in
-this project. The REST API accepts authenticated `GET /api/posts`,
-`GET/PATCH/DELETE /api/posts/:id`, and `POST /api/posts`; photos continue to
-upload through `POST /api/posts/images`. Keep the posts bucket public for
-customer image URLs and do not use Render local disk.
+Showcase metadata is stored in Firestore `posts`. New photo binaries use the
+private `showcase-images` bucket (`SUPABASE_POSTS_BUCKET`). New persisted image
+references include `bucket`, `path`, content type and size, never a signed URL.
+The authenticated REST API supports `GET /api/posts`,
+`GET/PATCH/DELETE /api/posts/:id`, `POST /api/posts`,
+`POST /api/posts/images`, and `POST /api/posts/:id/images/view`.
+The last route checks the published post and image membership before returning
+a transient 60-second URL. Cards, detail and edit previews renew it while focused.
+Do not make the new bucket public or use Render local disk.
 
-Before release, deploy the Firestore composites in `firestore.indexes.json`:
+Untagged historical paths retain the separately configured legacy bucket
+`SUPABASE_LEGACY_POSTS_BUCKET` (historical default `public-posts`). Existing
+HTTPS URL-only media stays readable; editing invalid/URL-only references fails
+safely. No copy, migration, deletion, old bucket creation or privacy change runs.
+Confirm actual historical overrides before configuring a running server.
 
-```text
-firebase deploy --only firestore:indexes --project YOUR_FIREBASE_PROJECT_ID
-```
+Firestore composite changes require a separate exact additive proposal and
+approval. Do not deploy the whole index file or run legacy migration scripts
+as part of bucket setup. None was applied during this review.
 
-The legacy showcase documents are readable without a data change, but a
-production-safe, additive compatibility migration fills `shopId` and
-`serviceCategory` for shop-authored posts. Run a dry-run first, then inspect the
-planned count and execute with explicit `--apply`:
+See [the existing-project bucket review](EXISTING_MEDIA_BUCKET_REVIEW_20261019.md)
+for proposed bucket settings, approval boundaries and the pending real-upload plan.
+These are local source changes, not deployed configuration.
 
-```text
-node scripts/migrate-showcase-posts.cjs YOUR_FIREBASE_PROJECT_ID
-node scripts/migrate-showcase-posts.cjs YOUR_FIREBASE_PROJECT_ID --apply
-```
-
-Use Firebase Application Default Credentials (`gcloud auth application-default
-login`) or set `FIREBASE_SERVICE_ACCOUNT_JSON` in the PowerShell process that
-runs the script. Confirm the project ID before applying. The migration is
-idempotent and only adds compatibility fields plus `updatedAt`; it does not
-delete or move posts or files.
-
-In Supabase, create/retain a **public** bucket matching `SUPABASE_POSTS_BUCKET`
-(default `public-posts`), with image uploads allowed for the backend service
-role. Render needs no additional environment variable if the existing Supabase
-URL, secret key, and bucket are configured. Never put the Supabase secret in
-Expo configuration. Deploy/restart the backend after the release; no local-disk
-or new service setup is required.
+Showcase image deletion is intentionally disabled: replacing an image, removing
+a post, an upload-verification failure, or an uncertain client save outcome
+must not physically remove a storage object. The legacy `removeImage` API
+operation returns `failed-precondition`. This retention-first policy can leave
+unreferenced objects in new private or historical public media buckets; do not delete them manually or run a
+cleanup job until a concurrency-safe asset reference/retirement design has
+been approved and deployed. No Firestore schema, index, or backfill change is
+part of this retention safeguard.
 
 The user confirmed the Firebase-hosted password-reset handler on 23 September
 2026. See [the flow decision](AUTH_FLOW_DECISION.md). Delivered reset emails,
@@ -224,20 +221,28 @@ not log, cache or share it. Verification documents and vehicle/request photos
 are implemented as separate private storage scopes. Portfolios, chat attachments,
 avatars and job-progress photos remain unimplemented.
 
-For photos, configure the server-only `SUPABASE_PHOTO_BUCKET`, default
-`marketplace-photos`. Keep `SUPABASE_BUCKET=verification` for documents. The photo
+For vehicles, configure server-only `SUPABASE_PHOTO_BUCKET=vehicle-images`;
+for direct request attachments use `SUPABASE_REQUEST_BUCKET=request-images`.
+Keep `SUPABASE_BUCKET=verification` for documents. Untagged legacy vehicle
+references use `SUPABASE_LEGACY_PHOTO_BUCKET` (historical `marketplace-photos`);
+confirm previous overrides before activating the new configuration. The photo
 bucket name is also declared as a nonsecret default in `render.yaml`; this local
 change has not configured or deployed a running service. The photo
-bucket must be private, accept only `image/jpeg` and `image/png`, and have a
+bucket must be private, accept only `image/jpeg`, `image/png` and `image/webp`, and have a
 5 MiB (5,242,880-byte) file limit. `backend/photo-storage-setup.sql` contains a
-bucket mutation followed by a policy query. It has not been executed; run setup
+create-missing-only proposal for all three private media buckets, followed by
+metadata and policy queries. It has not been executed; run setup
 only under separate environment/release authorization. Inspect all matching
 `storage.objects` policies, including broad policies for other buckets. No
 anonymous or authenticated client storage policy is required by this server-only
 flow. The API's private-flag check cannot establish deployed policy safety.
 
 The photo library allows five current slots per vehicle. Requests can attach
-zero to five current assets, retaining immutable references through booking
+zero to five assets: selected Garage photos or new request-only uploads via
+`POST /api/photos/requests/:vehicleId?version=...&requestId=...`. Direct uploads
+use the same durable retry ledger and create no Garage slot changes. They may
+be previewed by their owner through `target: attachment`; shops only receive
+access through an attached eligible request. References remain immutable through booking
 history. Garage replacement/removal preserves published attachments and stored
 objects. Photo viewing rechecks current access and returns a 60-second bearer
 URL. An issued URL can still be used until expiry after logout/restriction;
@@ -300,3 +305,11 @@ uses those SDKs for operations. `storage.rules` is retained and labelled as a
 historical artifact; verify live legacy bucket/function usage before removal or
 policy changes. Untracked ignored legacy dependencies are not deleted. There
 were no paid upgrades, commits, pushes, deployments or live test writes by Codex.
+
+### Existing-project local real-media preparation
+
+Use [LOCAL_REAL_MEDIA_CREDENTIALS.md](LOCAL_REAL_MEDIA_CREDENTIALS.md) for ignored
+server-only configuration and the offline `check:local-config` / guarded
+`start:local` commands. [MEDIA_PREREQUISITES_20261019.md](MEDIA_PREREQUISITES_20261019.md)
+records the designated vehicle/category, six confirmed missing composite indexes
+and separate approval boundaries. No local startup or upload approval is implied.

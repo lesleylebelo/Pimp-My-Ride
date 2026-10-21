@@ -20,7 +20,7 @@ export function usePostsFeed({view='feed',source='all',authorId,cursor=null,serv
     return result;
    });
    setNextCursor(data.cursor||null);
-  }catch(e){if(current===generation.current)setError(e.message||'Unable to load posts. Try again.');}
+  }catch(e){if(current===generation.current){if(next)requested.current.delete(next);setError(e.message||'Unable to load posts. Try again.');}}
   finally{if(current===generation.current)setBusy(false);}
  },[uid,offline,view,source,authorId,service,q,shopId,limit]);
  useEffect(()=>{

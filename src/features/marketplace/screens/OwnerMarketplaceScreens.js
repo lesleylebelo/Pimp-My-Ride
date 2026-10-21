@@ -8,6 +8,8 @@ import {marketApi} from '../services/marketApi';
 import {useMarketData} from '../hooks/useMarketData';
 import {Page, Card, Field, Button, Notice, StatusTag, useInfiniteCursor, formatMoney, QuoteCard} from '../components/MarketplaceUI';
 import PhotoGallery from '../components/PhotoGallery';
+import RequestPhotoUploads from '../components/RequestPhotoUploads';
+import PrivatePhoto from '../components/PrivatePhoto';
 import {vehicleErrors, requestErrors, parseMoney} from '../utils/validation';
 import {useTheme} from '../../../shared/theme/ThemeContext';
 
@@ -45,8 +47,8 @@ export function GarageScreen({navigation}) {
   const styles=makeStyles(theme);
   const [archived, setArchived] = useState(false), [cursor, setCursor] = useState(null);
   const [message, setMessage] = useState('');
-  const {data, busy, error, refresh} = useMarketData('vehicles', {cursor, archived});
-  const feed = useInfiniteCursor(data, busy, setCursor);
+  const {data, busy, error, refresh} = useMarketData('vehicles', {cursor, archived}, setCursor);
+  const feed = useInfiniteCursor(data, busy, setCursor, {pageCursor:cursor});
   const mutation = useMutation(), disabled = busy || mutation.saving || mutation.offline;
   async function archive(vehicle) {
     const result = await mutation.run('vehicleArchive', {id: vehicle.id, version: vehicle.version, archived: !vehicle.archived});
@@ -55,7 +57,7 @@ export function GarageScreen({navigation}) {
       await refresh().catch(() => {});
     }
   }
-  return <Page title="My Garage" subtitle="Manage your vehicles in one place" navigation={navigation}>
+  return <Page title="My Garage" subtitle="Manage your vehicles in one place" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
     <Text>Add your vehicles, then choose one when requesting a service.</Text>
     <Button title="Add vehicle" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm');}}/>
     <View style={styles.row}>{[false, true].map(value => <Button key={String(value)} title={value ? 'Archived vehicles' : 'Active vehicles'} outline={archived !== value} disabled={disabled} onPress={() => {if (!disabled) {feed.reset();setArchived(value);setCursor(null);}}}/>)}</View>
@@ -64,6 +66,7 @@ export function GarageScreen({navigation}) {
     {feed.items.map(vehicle => <Card key={vehicle.id}>
       <Text weight="semibold" style={styles.heading}>{vehicleName(vehicle)}</Text>
       <Text>{vehicle.colour} · {vehicle.registration}</Text>
+      {!!vehicle.photoIds?.length&&<PrivatePhoto target="vehicle" id={vehicle.id}/>}
       <Button title={`Photos for ${vehicle.make} ${vehicle.model}`} outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehiclePhotos', {id: vehicle.id});}}/>
       {!archived && <><Button title={`Edit ${vehicle.make} ${vehicle.model}`} outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm', {vehicle});}}/>
         <Button title={`Request service for ${vehicle.make} ${vehicle.model}`} disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('RequestForm', {vehicleId: vehicle.id, vehicle});}}/></>}
@@ -104,8 +107,8 @@ export function OwnerRequestsScreen({navigation}) {
   const {theme}=useTheme();
   const styles=makeStyles(theme);
   const {offline} = useAuth(), [cursor, setCursor] = useState(null);
-  const {data, busy, error, refresh} = useMarketData('requests', {feed: 'mine', cursor});
-  const feed = useInfiniteCursor(data, busy, setCursor);
+  const {data, busy, error, refresh} = useMarketData('requests', {feed: 'mine', cursor}, setCursor);
+  const feed = useInfiniteCursor(data, busy, setCursor, {pageCursor:cursor});
   const disabled = busy || offline;
   return <Page title="My Requests" subtitle="Track your service requests" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
     <Button title="Create service request" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('RequestForm');}}/>
@@ -156,7 +159,8 @@ function RequestDraft({route, navigation}) {
   const [form, setForm] = useState(() => ({vehicleId: request?.vehicleId || route.params?.vehicleId || '', title: request?.title || '', description: request?.description || '', categoryId: request?.categoryId || '', city: request?.city || '', budgetMin: request?.budgetMinCents === undefined ? '' : String(request.budgetMinCents / 100), budgetMax: request?.budgetMaxCents === undefined ? '' : String(request.budgetMaxCents / 100), preferredDate: request?.preferredDate || '', visibility: request?.visibility || 'open', shopId: request?.shopId || '', photoIds: request?.photoIds || []}));
   const [selected, setSelected] = useState(() => ({vehicle: route.params?.vehicle || null, category: null, shop: null}));
   const [touched, setTouched] = useState({}), [submitted, setSubmitted] = useState(false);
-  const mutation = useMutation(), errors = requestErrors(form), disabled = mutation.saving || mutation.offline;
+  const [uploadingAttachment,setUploadingAttachment]=useState(false);
+  const mutation = useMutation(), errors = requestErrors(form), disabled = mutation.saving || mutation.offline || uploadingAttachment;
   const selectorLayouts=useRef({}),scrollPosition=useRef(0),viewportHeight=useRef(0);
   const loadNearbySelectors=()=>{const top=scrollPosition.current, bottom=top+viewportHeight.current;for(const [kind,feed] of [['vehicle',vehicleFeed],['category',categoryFeed],['shop',shopFeed]]){const section=selectorLayouts.current[kind];if(section&&section.bottom>=top-260&&section.top<=bottom+260&&(kind!=='shop'||form.visibility==='direct'))feed.loadNext();}};
   const loadMore=event=>{scrollPosition.current=event.nativeEvent.contentOffset.y;viewportHeight.current=event.nativeEvent.layoutMeasurement.height;loadNearbySelectors();};
@@ -190,6 +194,7 @@ function RequestDraft({route, navigation}) {
       <Text>Choose up to five photos. Published requests keep these attachments even if you later change your garage photos.</Text>
       <Button title="Manage vehicle photos" outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehiclePhotos', {id: form.vehicleId});}}/>
       <PhotoGallery target="vehicle" id={form.vehicleId} selectedIds={form.photoIds} onSelectionChange={ids => edit('photoIds', ids)} disabled={disabled}/>
+      <RequestPhotoUploads key={form.vehicleId} vehicleId={form.vehicleId} selectedIds={form.photoIds} onSelectionChange={ids=>setForm(previous=>({...previous,photoIds:ids}))} disabled={mutation.saving||mutation.offline} onBusyChange={setUploadingAttachment}/>
       <Text>{form.photoIds.length} photos selected</Text>
       {!!form.photoIds.length && <Button title="Clear photo selection" outline disabled={disabled} onPress={() => edit('photoIds', [])}/>}
     </Card>}

@@ -17,10 +17,14 @@ function storageConfig(env=process.env) {
  if((url.protocol!=='https:'&&!localHttp)||url.username||url.password||url.search||url.hash)throw Error('SUPABASE_URL must be an HTTPS endpoint without credentials, query parameters or fragments.');
  const buckets={
   bucket:env.SUPABASE_BUCKET||'verification',
-  photoBucket:env.SUPABASE_PHOTO_BUCKET||'marketplace-photos',
-  postsBucket:env.SUPABASE_POSTS_BUCKET||'public-posts',
+  photoBucket:env.SUPABASE_PHOTO_BUCKET||'vehicle-images',
+  requestBucket:env.SUPABASE_REQUEST_BUCKET||'request-images',
+  legacyPhotoBucket:env.SUPABASE_LEGACY_PHOTO_BUCKET||'marketplace-photos',
+  legacyPostsBucket:env.SUPABASE_LEGACY_POSTS_BUCKET||'public-posts',
+  postsBucket:env.SUPABASE_POSTS_BUCKET||'showcase-images',
  };
  for(const [name,bucket] of Object.entries(buckets))if(typeof bucket!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/.test(bucket))throw Error(`Invalid ${name} configuration.`);
+ if(new Set(Object.values(buckets)).size!==Object.keys(buckets).length)throw Error('Verification, new media and legacy buckets must be distinct.');
  return {url:urlValue.replace(/\/+$/,''),key,...buckets};
 }
 function validateEmulatorHost(name,value) {
@@ -29,4 +33,9 @@ function validateEmulatorHost(name,value) {
  const port=match?Number(match[3]):0;
  if(!match||port<1||port>65535)throw Error(`${name} must be a host and port, such as localhost:8080.`);
 }
-module.exports={corsOrigins,storageConfig,validateEmulatorHost};
+function listenHost(env=process.env){
+ const host=env.HOST||'0.0.0.0';
+ if(!['127.0.0.1','0.0.0.0','::1'].includes(host))throw Error('HOST must be 127.0.0.1, ::1 or 0.0.0.0.');
+ return host;
+}
+module.exports={corsOrigins,storageConfig,validateEmulatorHost,listenHost};

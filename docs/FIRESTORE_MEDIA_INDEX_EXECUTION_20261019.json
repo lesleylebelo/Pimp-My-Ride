@@ -1,0 +1,396 @@
+{
+  "date": "2026-10-19",
+  "projectId": "pimp-my-ride-a26fc",
+  "database": "(default)",
+  "approvalScope": "Six exact missing composite index additions only",
+  "method": "Individual create-only index REST calls",
+  "preflight": {
+    "reportMatches": true,
+    "localConfigMatches": true,
+    "liveComparisonPerformed": true,
+    "additiveOnly": true,
+    "existingIndexCount": 3
+  },
+  "createdIndexes": [
+    {
+      "query": "Discover category",
+      "collectionGroup": "posts",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "authorRole",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "category",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ],
+      "name": "projects/pimp-my-ride-a26fc/databases/(default)/collectionGroups/posts/indexes/CICAgOi39IkK",
+      "state": "READY",
+      "createdThisRun": true
+    },
+    {
+      "query": "Discover shop / My Posts",
+      "collectionGroup": "posts",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "authorRole",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "authorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ],
+      "name": "projects/pimp-my-ride-a26fc/databases/(default)/collectionGroups/posts/indexes/CICAgJjF9oIK",
+      "state": "READY",
+      "createdThisRun": true
+    },
+    {
+      "query": "Discover category and shop",
+      "collectionGroup": "posts",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "authorRole",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "category",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "authorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ],
+      "name": "projects/pimp-my-ride-a26fc/databases/(default)/collectionGroups/posts/indexes/CICAgJiUsZIK",
+      "state": "READY",
+      "createdThisRun": true
+    },
+    {
+      "query": "Find Jobs open",
+      "collectionGroup": "serviceRequests",
+      "fields": [
+        {
+          "fieldPath": "visibility",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ],
+      "name": "projects/pimp-my-ride-a26fc/databases/(default)/collectionGroups/serviceRequests/indexes/CICAgOi39IkJ",
+      "state": "READY",
+      "createdThisRun": true
+    },
+    {
+      "query": "Owner My Requests",
+      "collectionGroup": "serviceRequests",
+      "fields": [
+        {
+          "fieldPath": "ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ],
+      "name": "projects/pimp-my-ride-a26fc/databases/(default)/collectionGroups/serviceRequests/indexes/CICAgJj7z4EK",
+      "state": "READY",
+      "createdThisRun": true
+    },
+    {
+      "query": "Find Jobs direct",
+      "collectionGroup": "serviceRequests",
+      "fields": [
+        {
+          "fieldPath": "visibility",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "shopId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ],
+      "name": "projects/pimp-my-ride-a26fc/databases/(default)/collectionGroups/serviceRequests/indexes/CICAgNi47oMK",
+      "state": "READY",
+      "createdThisRun": true
+    }
+  ],
+  "existingIndexes": [
+    {
+      "name": "projects/pimp-my-ride-a26fc/databases/(default)/collectionGroups/users/indexes/CICAgOjXh4EK",
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "role",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "verificationStatus",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        }
+      ],
+      "state": "READY",
+      "density": "SPARSE_ALL"
+    },
+    {
+      "name": "projects/pimp-my-ride-a26fc/databases/(default)/collectionGroups/posts/indexes/CICAgJiUpoMK",
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "authorRole",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ],
+      "state": "READY",
+      "density": "SPARSE_ALL"
+    },
+    {
+      "name": "projects/pimp-my-ride-a26fc/databases/(default)/collectionGroups/posts/indexes/CICAgOi3kJAK",
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "shopId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ],
+      "state": "READY",
+      "density": "SPARSE_ALL"
+    }
+  ],
+  "existingIndexesPreserved": true,
+  "totalIndexes": 9,
+  "queryChecks": {
+    "projectId": "pimp-my-ride-a26fc",
+    "database": "(default)",
+    "analyze": false,
+    "remoteWrites": 0,
+    "results": [
+      {
+        "query": "Discover all",
+        "collectionGroup": "posts",
+        "status": "PLANNABLE",
+        "planSummary": {
+          "indexesUsed": [
+            {
+              "properties": "(authorRole ASC, status ASC, createdAt DESC, __name__ DESC)",
+              "query_scope": "Collection"
+            }
+          ]
+        }
+      },
+      {
+        "query": "Discover category",
+        "collectionGroup": "posts",
+        "status": "PLANNABLE",
+        "planSummary": {
+          "indexesUsed": [
+            {
+              "properties": "(status ASC, authorRole ASC, category ASC, createdAt DESC, __name__ DESC)",
+              "query_scope": "Collection"
+            }
+          ]
+        }
+      },
+      {
+        "query": "Discover shop / My Posts",
+        "collectionGroup": "posts",
+        "status": "PLANNABLE",
+        "planSummary": {
+          "indexesUsed": [
+            {
+              "properties": "(status ASC, authorRole ASC, authorId ASC, createdAt DESC, __name__ DESC)",
+              "query_scope": "Collection"
+            }
+          ]
+        }
+      },
+      {
+        "query": "Discover category and shop",
+        "collectionGroup": "posts",
+        "status": "PLANNABLE",
+        "planSummary": {
+          "indexesUsed": [
+            {
+              "properties": "(status ASC, authorRole ASC, category ASC, authorId ASC, createdAt DESC, __name__ DESC)",
+              "query_scope": "Collection"
+            }
+          ]
+        }
+      },
+      {
+        "query": "Find Jobs open",
+        "collectionGroup": "serviceRequests",
+        "status": "PLANNABLE",
+        "planSummary": {
+          "indexesUsed": [
+            {
+              "query_scope": "Collection",
+              "properties": "(visibility ASC, status ASC, createdAt DESC, __name__ DESC)"
+            }
+          ]
+        }
+      },
+      {
+        "query": "Owner My Requests",
+        "collectionGroup": "serviceRequests",
+        "status": "PLANNABLE",
+        "planSummary": {
+          "indexesUsed": [
+            {
+              "query_scope": "Collection",
+              "properties": "(ownerId ASC, createdAt DESC, __name__ DESC)"
+            }
+          ]
+        }
+      },
+      {
+        "query": "Find Jobs direct",
+        "collectionGroup": "serviceRequests",
+        "status": "PLANNABLE",
+        "planSummary": {
+          "indexesUsed": [
+            {
+              "properties": "(visibility ASC, shopId ASC, status ASC, createdAt DESC, __name__ DESC)",
+              "query_scope": "Collection"
+            }
+          ]
+        }
+      },
+      {
+        "query": "Garage listing",
+        "collectionGroup": "vehicles",
+        "status": "PLANNABLE",
+        "planSummary": {
+          "indexesUsed": [
+            {
+              "properties": "(archived ASC, __name__ ASC)",
+              "query_scope": "Collection"
+            },
+            {
+              "properties": "(ownerId ASC, __name__ ASC)",
+              "query_scope": "Collection"
+            }
+          ]
+        }
+      },
+      {
+        "query": "Find Jobs quotation lookup",
+        "collectionGroup": "quotations",
+        "status": "PLANNABLE",
+        "planSummary": {
+          "indexesUsed": [
+            {
+              "properties": "(shopId ASC, __name__ ASC)",
+              "query_scope": "Collection"
+            },
+            {
+              "query_scope": "Collection",
+              "properties": "(serviceRequestId ASC, __name__ ASC)"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "documentChanges": 0,
+  "supabaseChanges": 0,
+  "applicationDeployments": 0,
+  "existingIndexModifications": 0,
+  "existingIndexDeletes": 0,
+  "realMediaUploadApproval": false
+}

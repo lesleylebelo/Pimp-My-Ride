@@ -17,7 +17,7 @@ function loadPicker({result}){
  };
  const picker=loadUI('src/features/marketplace/services/postsApi.js',{
   'react-native':{Platform:{OS:'ios'}},
-  '../utils/photos':{photoFileError:()=>null},
+  '../utils/photos':loadUI('src/features/marketplace/utils/photos.js'),
  });
  const options={
   loadImagePicker:async()=>{events.push(['import-picker']);return pickerModule;},
@@ -39,7 +39,7 @@ test('photo selection launches ImagePicker before initializing ImageManipulator'
   uri:'file:///compressed.jpg',name:'original.jpg',size:512,mimeType:'image/jpeg',
  }]);
  assert.deepEqual(picker.events[3][1],[
-  'file:///original.png',[{resize:{width:1600}}],{compress:0.78,format:'jpeg'},
+  'file:///original.png',[{resize:{width:1600}}],{compress:0.78,format:'jpeg',base64:true},
  ]);
 });
 
