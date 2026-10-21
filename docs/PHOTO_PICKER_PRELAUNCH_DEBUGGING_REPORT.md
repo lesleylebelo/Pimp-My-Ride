@@ -116,3 +116,38 @@ undefined `reload` value and whether this is an Expo Go/build mismatch.
 Until that device check, it is unverified whether the pre-launch import
 reordering removes the user's observed error or whether the runtime lacks a
 native module.
+
+## Follow-up verification — 14 October 2026
+
+The current checkout still contains the deferred import and development stack
+logging described above. No change to picker code, dependencies or app
+configuration was made during this follow-up.
+
+The installed package check was repeated: Expo is 57.0.20, while the SDK's
+bundled-module mapping recommends `~57.0.16` for ImagePicker and ImageManipulator;
+both installed versions are 57.0.20 and satisfy that semver range.
+
+Focused test reruns:
+
+- `tests/marketplace-post-picker.test.cjs`: 3 passed, 0 failed.
+- `tests/marketplace-photos.test.cjs` plus
+  `tests/marketplace-post-card.test.cjs`: 19 passed, 1 failed. The single
+  failure remains the documented PMR-14 expectation that excludes WebP; it is
+  not a picker-launch regression.
+
+The installed iOS module source registers `ExponentImagePicker` and calls
+`PHPickerViewController` for this multiple-selection flow. The app config does
+not list an explicit `expo-image-picker` config plugin. The package documents
+that plugin as automatically applied by EAS Build and otherwise used to
+configure Info.plist permission descriptions; the current flow does not
+explicitly request photo-library permissions before launching PHPicker. This
+checkout therefore does not prove that a custom iOS binary has the module
+registered, or what Info.plist was built into the iPhone app. Expo Go likewise
+must be a runtime compatible with the app's SDK and contain the module.
+
+These facts identify checks for a custom/native build, not a confirmed defect
+in the current source or proof that a missing permission description caused
+the reported `reload` error. No configuration edit is justified without the
+device/build details and complete exception stack. The status remains
+**partially addressed; physical-device verification and exact root-cause
+identification are still pending**.

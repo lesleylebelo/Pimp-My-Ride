@@ -6,8 +6,9 @@ import {useAuth} from '../../auth/context/AuthContext';
 import ConfirmationButton from '../../../shared/components/ConfirmationButton';
 import {Button,Card,Notice} from './MarketplaceUI';
 import {listPhotos,viewPhoto,uploadVehiclePhoto,removeVehiclePhoto} from '../services/photoApi';
-import {PHOTO_LIMIT,PHOTO_TYPES,photoFileError} from '../utils/photos';
+import {PHOTO_LIMIT,PICKER_PHOTO_TYPES,preparePhoto,photoFileError} from '../utils/photos';
 import colors from '../../../shared/theme/colors';
+import {isMediaUrl} from '../../../shared/services/mediaUrl';
 
 function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSelectionChange,disabled=false}) {
  const focused = useIsFocused();
@@ -62,13 +63,17 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
   const epoch = connectionEpoch.current, current = generation.current;
   pickerLock.current = true; setMessages(value => ({...value,[slot]:''}));
   try {
-   const picked = await DocumentPicker.getDocumentAsync({type:PHOTO_TYPES,multiple:false,copyToCacheDirectory:true});
+   const picked = await DocumentPicker.getDocumentAsync({type:PICKER_PHOTO_TYPES,multiple:false,copyToCacheDirectory:true});
+   let chosen=picked.assets?.[0];
+   if(!picked.canceled&&chosen&&(/image\/(heic|heif)/i.test(chosen.mimeType)||/\.(heic|heif)$/i.test(chosen.name||''))){
+    chosen=await preparePhoto(chosen,await import('expo-image-manipulator'));
+   }
    const p = permission.current;
    if (!active.current || epoch !== connectionEpoch.current || current !== generation.current || p.offline || !p.focused || p.disabled || !p.editable || !p.canManage || !p.fresh || p.loading || mutationLock.current || picked.canceled) return;
-   const file = picked.assets?.[0], issue = photoFileError(file);
+   const file = chosen, issue = photoFileError(file);
    if (issue) { setMessages(value => ({...value,[slot]:issue})); return; }
    setFiles(value => ({...value,[slot]:file}));
-  } catch (_) { if (active.current && epoch === connectionEpoch.current && current === generation.current && !permission.current.offline && permission.current.focused) setMessages(value => ({...value,[slot]:'Unable to choose a photo. Try again.'})); }
+  } catch (e) { if (active.current && epoch === connectionEpoch.current && current === generation.current && !permission.current.offline && permission.current.focused) setMessages(value => ({...value,[slot]:e.message||'Unable to choose a photo. Try again.'})); }
   finally { pickerLock.current = false; }
  }
  async function mutate(slot,remove=false) {
@@ -108,7 +113,7 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
   try {
    const result = await viewPhoto(target,id,photoId,uid), expiresAt = Math.min(Number(result.expiresAt),Date.now()+60000);
    if (!active.current || current !== viewGeneration.current || permission.current.offline || !permission.current.focused || permission.current.disabled) return;
-   if (typeof result.url !== 'string' || !result.url.startsWith('https://') || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error('This preview expired. View the photo again.');
+   if (!isMediaUrl(result.url) || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error('This preview expired. View the photo again.');
    setPreview({photoId,url:result.url,expiresAt,error:''});
   } catch (e) {
    if (active.current && current === viewGeneration.current) setPreview({photoId,url:null,error:e.message || 'Unable to view this photo. Try again.'});
@@ -169,7 +174,7 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
         </>
       ) : (
         <Text style={styles.status}>
-          {loading || error || !fresh ? 'Checking saved status…' : 'No photo uploaded yet'}
+          {loading ? 'Checking saved status…' : busy ? 'Saving photo…' : error || !fresh ? 'Saved status unavailable. Refresh photos before retrying.' : 'No photo uploaded yet'}
         </Text>
       )}
 
@@ -222,7 +227,7 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
       <Text style={styles.heading}>{target === 'vehicle' ? 'Vehicle photos' : 'Request photos'}</Text>
       {editable && (
         <Text style={styles.introText}>
-          Up to {PHOTO_LIMIT} photos. JPEG or PNG, up to 5 MB each. Choose from your device, then confirm the upload.
+          Up to {PHOTO_LIMIT} photos. JPEG, PNG, WebP or HEIC, up to 5 MB each. Choose from your device, then confirm the upload.
         </Text>
       )}
     </View>

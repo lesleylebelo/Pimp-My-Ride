@@ -10,8 +10,8 @@ function mutation(db,actor,op,input) {
  const fingerprint=hash(JSON.stringify(canonical(payload))),id=hash(`${actor}\n${op}\n${requestId}`);
  const ref=db.doc(`mutationReceipts/${id}`);
  function check(record){if(record&&(record.fingerprint!==fingerprint||record.actor!==actor||record.op!==op))D.fail('This request key was already used with different data.','already-exists');}
- async function atomic(change){return db.runTransaction(async tx=>{
-  const saved=(await tx.get(ref)).data();check(saved);if(saved)return saved.result;
+ async function atomic(change,{onReplay}={}){return db.runTransaction(async tx=>{
+  const saved=(await tx.get(ref)).data();check(saved);if(saved)return onReplay?onReplay(saved.result):saved.result;
   const result=await change(tx);
   tx.create(ref,{actor,op,fingerprint,result,createdAt:FieldValue.serverTimestamp()});return result;
  });}

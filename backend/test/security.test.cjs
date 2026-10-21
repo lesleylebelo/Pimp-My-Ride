@@ -16,7 +16,7 @@ test('storage credentials and endpoint are required and validated at startup',()
  assert.throws(()=>storageConfig({SUPABASE_URL:'http://storage.example',SUPABASE_SECRET_KEY:'secret'}),/HTTPS endpoint/);
  assert.throws(()=>storageConfig({SUPABASE_URL:'https://user:pass@storage.example',SUPABASE_SECRET_KEY:'secret'}),/HTTPS endpoint/);
  assert.throws(()=>storageConfig({SUPABASE_URL:'https://storage.example',SUPABASE_SECRET_KEY:'secret',SUPABASE_POSTS_BUCKET:'invalid/name'}),/Invalid postsBucket/);
- assert.deepEqual(storageConfig({SUPABASE_URL:'https://storage.example/',SUPABASE_SECRET_KEY:'secret'}),{url:'https://storage.example',key:'secret',bucket:'verification',photoBucket:'marketplace-photos',postsBucket:'public-posts'});
+ assert.deepEqual(storageConfig({SUPABASE_URL:'https://storage.example/',SUPABASE_SECRET_KEY:'secret'}),{url:'https://storage.example',key:'secret',bucket:'verification',photoBucket:'vehicle-images',requestBucket:'request-images',legacyPhotoBucket:'marketplace-photos',legacyPostsBucket:'public-posts',postsBucket:'showcase-images'});
  assert.doesNotThrow(()=>storageConfig({NODE_ENV:'development',SUPABASE_URL:'http://localhost:54321',SUPABASE_SECRET_KEY:'secret'}));
  assert.throws(()=>storageConfig({NODE_ENV:'production',SUPABASE_URL:'http://localhost:54321',SUPABASE_SECRET_KEY:'secret'}),/HTTPS endpoint/);
 });
@@ -40,4 +40,9 @@ test('recent authentication independently permits 899 seconds and rejects 901 se
 test('admin mutation rejects other roles, unverified, restricted and revoked actors',async()=>{
  for(const settings of [{role:'owner'},{role:'shop'},{status:'suspended'},{status:'archived'},{verified:false},{claims:false}])await assert.rejects(()=>fixture(settings).adminApi(req(0)),{code:'permission-denied'});
  await assert.rejects(()=>fixture({revoked:true}).adminApi(req(0)),{code:'unauthenticated'});
+});
+
+test('media bucket configuration cannot alias verification, another media type, or a legacy bucket',()=>{
+ const env={SUPABASE_URL:'https://synthetic.example',SUPABASE_SECRET_KEY:'synthetic-key'};
+ for(const override of [{SUPABASE_REQUEST_BUCKET:'verification'},{SUPABASE_POSTS_BUCKET:'vehicle-images'},{SUPABASE_LEGACY_PHOTO_BUCKET:'verification'},{SUPABASE_PHOTO_BUCKET:'marketplace-photos'}])assert.throws(()=>storageConfig({...env,...override}),/distinct/);
 });

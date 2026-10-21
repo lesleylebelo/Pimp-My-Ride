@@ -25,8 +25,9 @@ beforeEach(async()=>{
  await Promise.all([seed('alice','owner'),seed('bob','owner'),seed('shop-one','shop'),seed('shop-two','shop'),seed('pending','shop',{verificationStatus:'pending'}),seed('admin','admin')]);
  await db.doc('serviceCategories/body').set({name:'Body kit',description:'Body customization',archived:false});
  objects=new Map();links=[];uploadHook=null;
- const photoStorage={upload:async(path,bytes,contentType)=>{assert.equal(objects.has(path),false);objects.set(path,{bytes,contentType});if(uploadHook)await uploadHook(path);},signedUrl:async(path,seconds)=>{assert.ok(objects.has(path));assert.equal(seconds,60);links.push(path);return 'https://photos.example.invalid/temporary';}};
- services=createServices({db,auth,storage:{},photoStorage});app=createApp({auth,services});
+ const photoStorage={bucket:'vehicle-images',upload:async(path,bytes,contentType)=>{assert.equal(objects.has(path),false);objects.set(path,{bytes,contentType});if(uploadHook)await uploadHook(path);},signedUrl:async(path,seconds)=>{assert.ok(objects.has(path));assert.equal(seconds,60);links.push(path);return 'https://photos.example.invalid/temporary';}};
+ const requestStorage={...photoStorage,bucket:'request-images'};
+ services=createServices({db,auth,storage:{},photoStorage,requestStorage,mockPaymentEnv:{...process.env,NODE_ENV:'test',PMR_MOCK_PAYMENTS_ENABLED:'true',FIREBASE_PROJECT_ID:'demo-pmr-security'}});app=createApp({auth,services});
 });
 after(async()=>{await db.terminate();await deleteApp(firebase);});
 async function signIn(uid){
@@ -51,8 +52,9 @@ test('authenticated photos survive replacement/removal and remain private reques
  assert.equal((await photos('alice','list','vehicle',v.id)).items.length,0);assert.equal(objects.size,2);
  assert.equal((await read(owner,'list')).items[0].id,first.id);await read(shop,'view',{photoId:first.id});assert.equal(links.at(-1),originalPath);
  await assert.rejects(()=>photos('alice','view','vehicle',v.id,{photoId:replacement.id}),{code:'not-found'});
- const offer=await call('shop-one','quoteSubmit',{...quote,serviceRequestId:request.id});
- await call('alice','quoteAccept',{id:offer.id});
+ const requestTerms=(await db.doc(`serviceRequests/${request.id}`).get()).data();
+ const offer=await call('shop-one','quoteSubmit',{...quote,serviceRequestId:request.id,termsVersion:requestTerms.termsVersion});
+ await call('alice','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'});
  const booking=(await services.marketplace({auth:identity('shop-one'),data:{op:'booking',id:request.id}})).booking;
  assert.deepEqual(booking.photoIds,[first.id]);assertPrivate(booking);
  await call('alice','vehicleArchive',{id:v.id,version:1,archived:true});await db.doc('serviceCategories/body').update({archived:true});
@@ -136,4 +138,22 @@ test('malformed uploads and forged attachment selections fail before any photo m
  await assert.rejects(()=>call('alice','requestCreate',{...details,vehicleId:v.id,photoIds:[first.id,first.id]}),{code:'invalid-argument'});
  await assert.rejects(()=>call('alice','requestCreate',{...details,vehicleId:v.id,photoIds:['missing-photo']}),{code:'failed-precondition'});
  assert.equal((await db.collection('serviceRequests').get()).size,0);
+});
+
+test('direct request multipart uploads persist separately and enforce live Firebase request access',async()=>{
+ const token=await signIn('alice'),shop=await signIn('shop-one'),other=await signIn('shop-two');
+ const car=await call('alice','vehicleSave',vehicle);
+ const endpoint=`/api/photos/requests/${car.id}?version=0&requestId=direct-request-photo`;
+ await http(app).post(endpoint).attach('file',png,{filename:'synthetic.png',contentType:'image/png'}).expect(401);
+ const send=()=>http(app).post(endpoint).set('Authorization',`Bearer ${token}`).attach('file',png,{filename:'synthetic.png',contentType:'image/png'});
+ const first=(await send().expect(200)).body.data,replayed=(await send().expect(200)).body.data;
+ assert.equal(first.id,replayed.id);assert.equal(objects.size,1);
+ const asset=(await db.doc('marketplacePhotos/'+first.id).get()).data();assert.equal(asset.bucket,'request-images');assert.match(asset.path,/^requests\/alice\//);
+ const garage=(await db.doc('vehicles/'+car.id).get()).data();assert.equal(garage.photoSlots,undefined);assert.equal(garage.photoRevision,undefined);
+ const request=await call('alice','requestCreate',{...details,visibility:'direct',shopId:'shop-one',vehicleId:car.id,photoIds:[first.id]});
+ const view=token=>http(app).post('/api/photos').set('Authorization',`Bearer ${token}`).send({op:'view',target:'request',id:request.id,photoId:first.id});
+ await view(shop).expect(200);await view(other).expect(404);
+ await db.doc('users/shop-one').update({accountStatus:'suspended'});await view(shop).expect(403);
+ await assert.rejects(()=>photos('bob','view','attachment',first.id,{photoId:first.id}),{code:'not-found'});
+ assert.equal(objects.size,1);
 });

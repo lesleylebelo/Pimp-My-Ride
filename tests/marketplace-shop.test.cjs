@@ -4,8 +4,8 @@ const React = require('react'), Renderer = require('react-test-renderer');
 const {loadUI} = require('./helpers/load-ui.cjs');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const act = Renderer.act;
-const request = {id: 'request-1', title: 'Restore paint', description: 'Repaint the bonnet', categoryName: 'Paint', city: 'Pretoria', vehicle: {make: 'Ford', model: 'Fiesta', year: 2015, colour: 'Blue'}, status: 'open', visibility: 'open', budgetMinCents: 10000, budgetMaxCents: 50000};
-const quote = {id: 'quote-1', serviceRequestId: request.id, requestTitle: request.title, shopName: 'Test shop', scope: 'Prepare and repaint', items: [{description: 'Labour', amountCents: 10000}], totalCents: 10000, completionDays: 7, validUntil: Date.now() + 86400000, status: 'submitted'};
+const request = {id: 'request-1', version: 1, termsVersion: 1, title: 'Restore paint', description: 'Repaint the bonnet', categoryName: 'Paint', city: 'Pretoria', vehicle: {make: 'Ford', model: 'Fiesta', year: 2015, colour: 'Blue'}, status: 'open', visibility: 'open', budgetMinCents: 10000, budgetMaxCents: 50000};
+const quote = {id: 'quote-1', serviceRequestId: request.id, requestVersion: 1, termsVersion: 1, requestTitle: request.title, shopName: 'Test shop', scope: 'Prepare and repaint', items: [{description: 'Labour', amountCents: 10000}], totalCents: 10000, completionDays: 7, validUntil: Date.now() + 86400000, status: 'submitted'};
 function setup(overrides = {}) {
   const state = {auth: {user: {uid: 'shop-1'}, profile: {role: 'shop'}, offline: false}, data: {request, quotes: []}, posts: [], busy: false, error: '', calls: [], reads: [], navigations: [], api: async () => ({id: 'quote-1'}), refresh: async () => ({}), ...overrides};
   const PrimaryButton = loadUI('src/shared/components/PrimaryButton.js').default;
@@ -190,12 +190,34 @@ test('fresh closed requests and existing quotations block submission despite ope
   state.data = {request, quotes: [{...quote, status: 'withdrawn'}]};
   await act(async () => tree.update(React.createElement(screens.QuoteFormScreen, props)));
   assert.equal(button(tree, 'Send quotation').props.disabled, true);
-  assert.match(text(tree), /already been submitted/);
+  assert.match(text(tree), /cannot be resubmitted or replaced/);
   await act(async () => tree.unmount());
   const detail = await mount(screens.ShopRequestScreen, {navigation, route: {params: {id: request.id}}});
   assert.equal(button(detail, 'Prepare quotation'), undefined);
+  assert.match(text(detail), /cannot be resubmitted or replaced/);
   assert.ok(button(detail, 'My quotations'));
   await act(async () => detail.unmount());
+});
+
+test('shop can start a clearly labelled replacement only when its prior quotation is outdated', async () => {
+  const currentRequest = {...request, version: 2, termsVersion: 2};
+  const outdated = {...quote, requestVersion: 1, termsVersion: 1};
+  const {state, screens, navigation} = setup({data: {request: currentRequest, quotes: [outdated]}});
+  const props = {navigation, route: {params: {id: request.id}}};
+  const detail = await mount(screens.ShopRequestScreen, props);
+  assert.match(text(detail), /outdated or has no revision record/);
+  await act(async () => button(detail, 'Update outdated quotation').props.onPress());
+  assert.deepEqual(state.navigations, [['QuoteForm', {request: currentRequest}]]);
+  await act(async () => detail.unmount());
+
+  const draft = await mount(screens.QuoteFormScreen, props);
+  assert.match(text(draft), /previous quotation is outdated/);
+  assert.notEqual(button(draft, 'Submit replacement quotation').props.disabled, true);
+  await validQuote(draft);
+  await act(async () => button(draft, 'Submit replacement quotation').props.onPress());
+  assert.equal(state.calls.at(-1).input.termsVersion, 2);
+  assert.equal(state.calls.at(-1).op, 'quoteSubmit');
+  await act(async () => draft.unmount());
 });
 
 test('quote submission validates actual fields, computes cents, prevents duplicate taps and preserves a failed draft', async () => {
@@ -215,10 +237,13 @@ test('quote submission validates actual fields, computes cents, prevents duplica
   await change(tree, 'Item 2 description', 'Finishing');
   await change(tree, 'Item 2 amount (R)', '0.55');
   assert.match(text(tree), /Total: R124.00/);
+  await act(async () => button(tree, 'Percentage deposit').props.onPress());
+  await change(tree, 'Deposit percentage (whole %, 1–99)', '33');
+  assert.match(text(tree), /Required deposit: R40.92/);
   let pending;
   await act(async () => { const send = button(tree, 'Send quotation').props.onPress; pending = send(); void send(); });
   assert.equal(state.calls.length, 1);
-  assert.deepEqual(state.calls[0], {op: 'quoteSubmit', input: {serviceRequestId: request.id, scope: 'Prepare and repaint bonnet', items: [{description: 'Materials and labour', amountCents: 12345}, {description: 'Finishing', amountCents: 55}], completionDays: 7, warranty: '', validForDays: 14}});
+  assert.deepEqual(state.calls[0], {op: 'quoteSubmit', input: {serviceRequestId: request.id, termsVersion: 1, scope: 'Prepare and repaint bonnet', items: [{description: 'Materials and labour', amountCents: 12345}, {description: 'Finishing', amountCents: 55}], completionDays: 7, warranty: '', validForDays: 14,depositType:'percentage',depositValue:33}});
   await act(async () => { reject(new Error('Connection lost. Please retry.')); await pending; });
   assert.match(text(tree), /Connection lost/);
   assert.equal(input(tree, 'Work included').props.value, 'Prepare and repaint bonnet');
@@ -302,4 +327,22 @@ test('shop request photos use a read-only request target and closed requests req
  state.data={request:{...withPhotos,status:'booked'},quotes:[{...quote,status:'accepted'}]};await act(async()=>tree.update(React.createElement(screens.ShopRequestScreen,props)));gallery=tree.root.findByType('PhotoGallery');assert.equal(gallery.props.id,request.id);
  state.data={request:{...request,photoIds:[]},quotes:[]};await act(async()=>tree.update(React.createElement(screens.ShopRequestScreen,props)));assert.equal(tree.root.findAllByType('PhotoGallery').length,0);
  assert.equal(state.calls.length,0);await act(async()=>tree.unmount());
+});
+
+
+test('expired current offer exposes renewal and submits a separate freshly validated quotation',async()=>{
+ const expired={...quote,validUntil:Date.now()-1,depositType:'fixed',depositValue:1000,depositAmountCents:1000};
+ const {state,screens,navigation}=setup({data:{request,quotes:[expired]}}),props={navigation,route:{params:{request,id:request.id}}};
+ let tree=await mount(screens.ShopRequestScreen,props);assert.ok(button(tree,'Renew expired quotation'));assert.equal(!!button(tree,'Renew expired quotation').props.disabled,false);assert.match(text(tree),/Renew it with current pricing/);
+ await act(async()=>button(tree,'Renew expired quotation').props.onPress());assert.equal(state.navigations[0][0],'QuoteForm');await act(async()=>tree.unmount());
+ tree=await mount(screens.QuoteFormScreen,props);await validQuote(tree);await act(async()=>button(tree,'Submit renewal quotation').props.onPress());
+ assert.equal(state.calls[0].op,'quoteSubmit');assert.equal(state.calls[0].input.termsVersion,1);assert.equal(state.calls[0].input.items[0].amountCents,12345);assert.equal(state.calls[0].input.depositType,'none');assert.match(text(tree),/Quotation submitted/);await act(async()=>tree.unmount());
+ const zero=setup({data:{request,quotes:[{...quote,validUntil:0}]}}),zeroTree=await mount(zero.screens.ShopRequestScreen,{navigation:zero.navigation,route:{params:{id:request.id}}});assert.ok(button(zeroTree,'Renew expired quotation'));await act(async()=>zeroTree.unmount());
+});
+
+test('withdrawn and accepted offers never expose renewal even when their expiry has passed',async()=>{
+ for(const status of ['withdrawn','accepted']){
+  const {screens,navigation}=setup({data:{request,quotes:[{...quote,status,validUntil:Date.now()-1}]}}),tree=await mount(screens.ShopRequestScreen,{navigation,route:{params:{id:request.id}}});
+  assert.equal(button(tree,'Renew expired quotation'),undefined);assert.equal(button(tree,'Prepare another quotation'),undefined);await act(async()=>tree.unmount());
+ }
 });

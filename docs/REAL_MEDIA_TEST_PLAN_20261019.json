@@ -1,0 +1,340 @@
+{
+  "status": "DRAFT_NOT_APPROVED_NOT_EXECUTABLE",
+  "date": "2026-10-19",
+  "supabaseProject": "nymiyrzdpjctyembixbe",
+  "firebaseProject": "pimp-my-ride-a26fc",
+  "bucketVerification": {
+    "source": "Independently verified by agent through connected read-only Supabase query",
+    "date": "2026-10-19",
+    "buckets": [
+      {
+        "name": "request-images",
+        "public": false,
+        "fileSizeLimit": 5242880,
+        "allowedMimeTypes": [
+          "image/jpeg",
+          "image/png",
+          "image/webp"
+        ]
+      },
+      {
+        "name": "showcase-images",
+        "public": false,
+        "fileSizeLimit": 5242880,
+        "allowedMimeTypes": [
+          "image/jpeg",
+          "image/png",
+          "image/webp"
+        ]
+      },
+      {
+        "name": "vehicle-images",
+        "public": false,
+        "fileSizeLimit": 5242880,
+        "allowedMimeTypes": [
+          "image/jpeg",
+          "image/png",
+          "image/webp"
+        ]
+      }
+    ],
+    "verificationBucket": "unchanged; no object access"
+  },
+  "inputsRequired": {
+    "testCustomerUid": "aT6RWRl4AtQjtJKYIiD39eaR3x73",
+    "testShopUid": "vsZYsbWkD4Urq2S5OmWEKUNs6rZ2",
+    "testOnlyVehicleId": "78gG6bPHbGvCTOCuZAwR",
+    "emptyVehicleSlot": "1",
+    "activeCategoryId": "abrEnmpBoQ2cBvEtYqjl",
+    "reviewedApiOrigin": "http://127.0.0.1:3101"
+  },
+  "runtimeRequirements": [
+    "Secure server-only Supabase Storage credential for the existing project",
+    "Secure Firebase Admin credential for the existing project",
+    "Verified email, enabled Auth records; active owner and approved active shop Firestore profiles",
+    "Corrected local backend bound to loopback; no deployment; real-service configuration kept out of Expo"
+  ],
+  "storageWritesApproved": false,
+  "firebaseWritesApproved": false,
+  "approvalBudgets": {
+    "newStorageObjects": 3,
+    "objectsPerBucket": 1,
+    "newAssetDocuments": 2,
+    "newUploadAttemptDocuments": 2,
+    "newServiceRequests": 1,
+    "newShowcasePosts": 1,
+    "newMutationReceipts": 2,
+    "maxSignedPreviewCalls": 16,
+    "maxAuditEntries": 20,
+    "testVehiclePhotoUpdates": 1,
+    "accountProfileChanges": 0,
+    "quotationsBookingsPaymentsEmails": 0
+  },
+  "fixture": {
+    "filename": "pmr-synthetic-20261019-01.png",
+    "bytes": 92,
+    "contentType": "image/png",
+    "sha256": "7791330cf1138b83d7acee0022af9ecf7607bd7e25f38451c4f02f4e4c8dda09"
+  },
+  "operations": [
+    {
+      "id": "V1",
+      "actor": "customer",
+      "method": "POST",
+      "endpoint": "/api/photos/vehicles/78gG6bPHbGvCTOCuZAwR/1?version=0&requestId=pmr_media_20261019_01_vehicle",
+      "multipartField": "file",
+      "bucket": "vehicle-images",
+      "objectPrefix": "photos/aT6RWRl4AtQjtJKYIiD39eaR3x73/78gG6bPHbGvCTOCuZAwR/",
+      "objectSuffix": "server-generated new UUIDv4",
+      "effects": [
+        "Create one marketplacePhotos asset with persisted bucket/path",
+        "Create/update one storagePhotosUploadAttempts ledger",
+        "Update only the designated vehicle photoSlots/photoIds/photoRevision/updatedAt",
+        "Create upload audit entry"
+      ]
+    },
+    {
+      "id": "R1",
+      "actor": "customer",
+      "method": "POST",
+      "endpoint": "/api/photos/requests/78gG6bPHbGvCTOCuZAwR?version=1&requestId=pmr_media_20261019_01_attachment",
+      "multipartField": "file",
+      "bucket": "request-images",
+      "objectPrefix": "requests/aT6RWRl4AtQjtJKYIiD39eaR3x73/78gG6bPHbGvCTOCuZAwR/",
+      "objectSuffix": "server-generated new UUIDv4",
+      "effects": [
+        "Create one request-purpose marketplacePhotos asset and one upload-attempt ledger",
+        "Create upload audit entry; no vehicle slot/revision update"
+      ]
+    },
+    {
+      "id": "R2",
+      "actor": "customer",
+      "method": "POST",
+      "endpoint": "/api/marketplace",
+      "body": {
+        "op": "requestCreate",
+        "requestId": "pmr_media_20261019_01_request",
+        "vehicleId": "78gG6bPHbGvCTOCuZAwR",
+        "title": "PMR MEDIA TEST 20261019-01",
+        "description": "Synthetic media integration test; no customer work required.",
+        "categoryId": "abrEnmpBoQ2cBvEtYqjl",
+        "city": "Johannesburg",
+        "budgetMinCents": 0,
+        "budgetMaxCents": 100,
+        "preferredDate": "",
+        "visibility": "open",
+        "photoIds": [
+          "<V1_ASSET_ID>",
+          "<R1_ASSET_ID>"
+        ]
+      },
+      "effects": [
+        "Create one open serviceRequests document with two immutable photo references",
+        "Create one mutation receipt and one audit entry",
+        "Visible to eligible shops in the shared open feed; no direct-shop notification"
+      ]
+    },
+    {
+      "id": "S1",
+      "actor": "shop",
+      "method": "POST",
+      "endpoint": "/api/posts/images",
+      "multipartField": "file",
+      "bucket": "showcase-images",
+      "objectPrefix": "posts/vsZYsbWkD4Urq2S5OmWEKUNs6rZ2/",
+      "objectSuffix": "server-generated new UUIDv4",
+      "effects": [
+        "One immutable storage object; verified metadata returned; no post yet"
+      ]
+    },
+    {
+      "id": "S2",
+      "actor": "shop",
+      "method": "POST",
+      "endpoint": "/api/posts",
+      "body": {
+        "requestId": "pmr_media_20261019_01_showcase",
+        "title": "PMR MEDIA TEST 20261019-01",
+        "description": "Synthetic media integration test.",
+        "serviceCategory": "Other",
+        "vehicle": {
+          "make": "PMR Test",
+          "model": "Synthetic"
+        },
+        "images": [
+          "<S1_PATH>"
+        ]
+      },
+      "effects": [
+        "Create one published posts document with bucket/path/type/size only",
+        "Create one mutation receipt and one audit entry",
+        "Visible in shared Discover"
+      ]
+    }
+  ],
+  "previewRequests": [
+    {
+      "actor": "customer",
+      "endpoint": "/api/photos",
+      "body": {
+        "op": "view",
+        "target": "vehicle",
+        "id": "<VEHICLE_ID>",
+        "photoId": "<V1_ASSET_ID>"
+      },
+      "effects": "Signs URL and creates photos.viewed audit entry"
+    },
+    {
+      "actor": "customer",
+      "endpoint": "/api/photos",
+      "body": {
+        "op": "view",
+        "target": "attachment",
+        "id": "<R1_ASSET_ID>",
+        "photoId": "<R1_ASSET_ID>"
+      },
+      "effects": "Owner-only draft access; signs URL and creates audit entry"
+    },
+    {
+      "actor": "customer or authorised shop",
+      "endpoint": "/api/photos",
+      "body": {
+        "op": "view",
+        "target": "request",
+        "id": "<NEW_REQUEST_ID>",
+        "photoId": "<V1_OR_R1_ASSET_ID>"
+      },
+      "effects": "Request audience checked; signs URL and creates audit entry"
+    },
+    {
+      "actor": "customer or shop",
+      "endpoint": "/api/posts/<NEW_POST_ID>/images/view",
+      "body": {
+        "path": "<S1_PATH>"
+      },
+      "effects": "Published post membership checked; signs URL; no audit write in current route"
+    }
+  ],
+  "sharedFeedReadScope": "One first page each of Discover and Find Jobs; may inspect existing record metadata internally. Record/render only new test IDs; never request existing image previews.",
+  "stopConditions": [
+    "Any unresolved test identifier, missing runtime credential or policy concern",
+    "Existing vehicle slot is occupied; no replacement permitted",
+    "Any bucket/settings mismatch",
+    "Uncertain showcase upload acknowledgement; never blindly retry the upload",
+    "Missing index or unconfirmed feed prerequisite; do not create extra records to work around it",
+    "Budget exhausted"
+  ],
+  "afterTest": "Retain all new objects and records. No automatic cleanup, soft-delete, copy, overwrite, policy change or migration. Real-device/new-format extra uploads need a separately expanded scope.",
+  "accountEligibility": {
+    "project": "pimp-my-ride-a26fc",
+    "operation": "Read only: masked test-account profile documents and Auth account eligibility; no sign-in, custom tokens, record changes or admin test session",
+    "results": [
+      {
+        "purpose": "customer",
+        "uid": "aT6RWRl4AtQjtJKYIiD39eaR3x73",
+        "expectedRole": "owner",
+        "profileRead": "READ",
+        "role": "owner",
+        "roleMatches": true,
+        "accountStatus": null,
+        "active": true,
+        "verificationStatus": null,
+        "statusOperationPresent": false,
+        "provisioningOperationPresent": false,
+        "reviewOperationPresent": false,
+        "authRead": "READ",
+        "authUserExists": true,
+        "emailVerified": true,
+        "disabled": false,
+        "adminClaim": false,
+        "eligibleForRequestedRole": true
+      },
+      {
+        "purpose": "shop",
+        "uid": "vsZYsbWkD4Urq2S5OmWEKUNs6rZ2",
+        "expectedRole": "shop",
+        "profileRead": "READ",
+        "role": "shop",
+        "roleMatches": true,
+        "accountStatus": null,
+        "active": true,
+        "verificationStatus": "approved",
+        "statusOperationPresent": false,
+        "provisioningOperationPresent": false,
+        "reviewOperationPresent": false,
+        "authRead": "READ",
+        "authUserExists": true,
+        "emailVerified": true,
+        "disabled": false,
+        "adminClaim": false,
+        "eligibleForRequestedRole": true
+      },
+      {
+        "purpose": "admin metadata only; excluded from ordinary tests",
+        "uid": "JbUoD5CEHHgyzlxjDFFvGnTvUot2",
+        "expectedRole": "admin",
+        "profileRead": "READ",
+        "role": "admin",
+        "roleMatches": true,
+        "accountStatus": null,
+        "active": true,
+        "verificationStatus": null,
+        "statusOperationPresent": false,
+        "provisioningOperationPresent": false,
+        "reviewOperationPresent": false,
+        "authRead": "READ",
+        "authUserExists": true,
+        "emailVerified": true,
+        "disabled": false,
+        "adminClaim": true,
+        "eligibleForRequestedRole": true
+      }
+    ]
+  },
+  "excludedAdminTestUid": "JbUoD5CEHHgyzlxjDFFvGnTvUot2",
+  "optionalNewVehicleCreation": {
+    "approved": false,
+    "condition": "Only if no existing test-only vehicle is designated and separate approval explicitly includes creation",
+    "effects": [
+      "One new vehicle document, one extra vehicleSave receipt and one audit entry; no admin account or user profile changes"
+    ]
+  },
+  "accountReadNotes": "Read-only masked profile documents and Auth lookups succeeded. No test-account sign-in, custom token or profile mutation. Missing accountStatus is active under existing code. Exact endpoint authorization still needs actual test-user sessions after approval.",
+  "vehicleDesignation": {
+    "source": "User explicitly designated the owned 2018 BMW M4, slot 1, for the proposed plan only; no upload approval.",
+    "photoRevisionRead": 0,
+    "allSlotsEmpty": true,
+    "existingPhotos": 0
+  },
+  "policyReview": {
+    "source": "Agent read-only pg_policies count via connected Supabase; corroborates user review",
+    "storageObjects": 0,
+    "storageBuckets": 0,
+    "policiesChanged": false
+  },
+  "feedPrerequisites": {
+    "missingIndexes": 0,
+    "applied": true,
+    "ready": 6,
+    "existingIndexesPreserved": true,
+    "queryPlansPassed": 9,
+    "evidence": "FIRESTORE_MEDIA_INDEX_EXECUTION_20261019.json"
+  },
+  "localCredentialInstructions": "LOCAL_REAL_MEDIA_CREDENTIALS.md",
+  "offlineCredentialStatus": "READY: offline checker passed; existing credentials also passed read-only test-account and bucket metadata checks on 2026-10-21. Upload permissions remain untested.",
+  "deviceReadOnlyPreparation": {
+    "date": "2026-10-21",
+    "internalBackendOrigin": "http://127.0.0.1:3101",
+    "privateDeviceOrigin": "http://192.168.137.1:3102",
+    "phoneIp": "192.168.137.237",
+    "expoGoProject": "exp://192.168.137.1:8081",
+    "safariHealthConfirmedByUser": true,
+    "authenticatedDeviceMetadataCheck": "PASSED: user screenshot confirms isolated customer metadata read, photos 0, revision 0, isolated session closed",
+    "isolatedCustomerAuthCheckApproved": true,
+    "uploadsBlockedByGateway": true,
+    "writeApprovalGranted": false,
+    "expoGoDiagnosticScreenConfirmedByUser": true,
+    "deviceMetadataEvidence": "Ignored .local-checks/iphone-lan-20261021/device-metadata-confirmation.json"
+  }
+}

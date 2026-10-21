@@ -36,6 +36,7 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
  const postAction=(fn,status=200)=>async(req,res,next)=>{try{if(['POST','PATCH'].includes(req.method)&&(!req.body||Array.isArray(req.body)||typeof req.body!=='object'))throw new ApiError('validation_error','Expected a JSON object.');res.status(status).json({data:await fn({auth:req.identity,data:req.body||{},query:req.query,id:req.params.id})});}catch(e){next(e);}};
  app.get('/api/posts',postAction(services.postsList));
  app.get('/api/posts/:id',postAction(services.postDetail));
+ app.post('/api/posts/:id/images/view',postAction(services.viewPostImage));
  app.patch('/api/posts/:id',postAction(services.updateShowcase));
  app.delete('/api/posts/:id',postAction(services.deleteShowcase));
  app.post('/api/admin',action(services.adminApi));
@@ -78,6 +79,13 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
   try{
    if(Object.keys(req.query).some(key=>!['version','requestId'].includes(key))||typeof req.query.version!=='string'||!/^(0|[1-9]\d{0,15})$/.test(req.query.version)||typeof req.query.requestId!=='string')throw new ApiError('invalid-argument','Include a valid photo version and retry identifier.');
    req.photoRequest={auth:req.identity,vehicleId:req.params.vehicleId,slot:req.params.slot,version:Number(req.query.version),requestId:req.query.requestId};
+   await services.checkPhotoUpload(req.photoRequest);next();
+  }catch(e){next(e);}
+ },uploadSlot,upload,uploadAction(req=>services.uploadPhoto({...req.photoRequest,file:req.file})));
+ app.post('/api/photos/requests/:vehicleId',uploadLimit,async(req,res,next)=>{
+  try{
+   if(Object.keys(req.query).some(key=>!['version','requestId'].includes(key))||typeof req.query.version!=='string'||!/^(0|[1-9]\d{0,15})$/.test(req.query.version)||typeof req.query.requestId!=='string')throw new ApiError('invalid-argument','Include a valid photo version and retry identifier.');
+   req.photoRequest={auth:req.identity,target:'request',vehicleId:req.params.vehicleId,slot:'1',version:Number(req.query.version),requestId:req.query.requestId};
    await services.checkPhotoUpload(req.photoRequest);next();
   }catch(e){next(e);}
  },uploadSlot,upload,uploadAction(req=>services.uploadPhoto({...req.photoRequest,file:req.file})));

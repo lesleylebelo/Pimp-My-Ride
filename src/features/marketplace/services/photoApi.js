@@ -51,15 +51,17 @@ export function removeVehiclePhoto(id,slot,version,expectedUid) {
  const payload = {op:'remove',target:'vehicle',id,slot:String(slot),version};
  return mutate(payload,(uid,requestId) => apiRequest('photos',{...payload,requestId},{expectedUid:uid}),expectedUid);
 }
-export async function uploadVehiclePhoto(id,slot,version,file,expectedUid) {
+export function uploadRequestPhoto(id,version,file,expectedUid){return uploadPhoto(id,'1',version,file,expectedUid,'request');}
+export function uploadVehiclePhoto(id,slot,version,file,expectedUid){return uploadPhoto(id,slot,version,file,expectedUid,'vehicle');}
+async function uploadPhoto(id,slot,version,file,expectedUid,target) {
  const issue = photoFileError(file);
  if (issue) throw new Error(issue);
- if (Platform.OS === 'web' ? !/^(blob:|data:image\/(jpeg|png);base64,)/i.test(file.uri) : !/^(file|content):\/\//i.test(file.uri)) {
+ if (Platform.OS === 'web' ? !/^(blob:|data:image\/(jpeg|png|webp);base64,)/i.test(file.uri) : !/^(file|content):\/\//i.test(file.uri)) {
   throw new Error('Choose a photo from this device. Remote photo addresses are not supported.');
  }
  // A metadata refresh can observe an upload whose response was lost. Keep
  // both its key and original revision until that same file intent is settled.
- const identity = {op:'upload',id,slot:String(slot),file:{uri:file.uri,name:file.name,size:file.size,type:file.mimeType,lastModified:file.lastModified ?? file.file?.lastModified ?? null}};
+ const identity = {op:'upload',...(target==='request'?{target}:{}),id,slot:String(slot),file:{uri:file.uri,name:file.name,size:file.size,type:file.mimeType,lastModified:file.lastModified ?? file.file?.lastModified ?? null}};
  return mutate(identity,async (uid,requestId,intent) => {
   const body = new FormData();
   if (Platform.OS === 'web') {
@@ -72,6 +74,6 @@ export async function uploadVehiclePhoto(id,slot,version,file,expectedUid) {
    body.append('file',{uri:file.uri,name:file.name,type:file.mimeType});
   }
   account(uid);
-  return apiRequest(`photos/vehicles/${encodeURIComponent(id)}/${encodeURIComponent(slot)}?version=${encodeURIComponent(intent.version)}&requestId=${encodeURIComponent(requestId)}`,body,{multipart:true,expectedUid:uid});
+  return apiRequest(`photos/${target==='request'?'requests':'vehicles'}/${encodeURIComponent(id)}${target==='request'?'':'/'+encodeURIComponent(slot)}?version=${encodeURIComponent(intent.version)}&requestId=${encodeURIComponent(requestId)}`,body,{multipart:true,expectedUid:uid});
  },expectedUid,{version});
 }

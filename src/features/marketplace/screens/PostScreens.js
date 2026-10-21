@@ -8,16 +8,20 @@ import {PostCard} from '../components/PostCard';
 import {Page,Card,Field,Button,Notice,useInfiniteCursor} from '../components/MarketplaceUI';
 import {useMarketData} from '../hooks/useMarketData';
 import colors from '../../../shared/theme/colors';
+import {isMediaUrl} from '../../../shared/services/mediaUrl';
+import ShowcasePhoto,{hasPostImage} from '../components/ShowcasePhoto';
 const categories = ['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
 const failure=e=>e?.message||'Unable to save this post. Please retry.';
 
 export function PostFormScreen({navigation,route}){
  const {user,profile,offline}=useAuth(),post=route.params?.post,type=route.params?.type||(profile?.role==='shop'?'showcase':'build'),shop=profile?.role==='shop';
+ const savedImages=(Array.isArray(post?.images)?post.images:[]).filter(image=>typeof image?.path==='string'&&(typeof image.bucket==='string'||isMediaUrl(image.url)));
+ const invalidSavedMedia=!!post&&(post.images!=null&&!Array.isArray(post.images)||Array.isArray(post.images)&&savedImages.length!==post.images.length);
  const [title,setTitle]=useState(post?.title||''),[description,setDescription]=useState(post?.description||''),[category,setCategory]=useState(post?.category||'Other');
  const oldVehicle=typeof post?.vehicle==='string'?post.vehicle:'';
- const [status,setStatus]=useState(post?.projectStatus||'In progress'),[vehicle,setVehicle]=useState(oldVehicle),[vehicleMake,setVehicleMake]=useState(post?.vehicle?.make||''),[vehicleModel,setVehicleModel]=useState(post?.vehicle?.model||''),[vehicleYear,setVehicleYear]=useState(post?.vehicle?.year?String(post.vehicle.year):''),[images,setImages]=useState(post?.images||[]);
- const [files,setFiles]=useState([]),[imageOrder,setImageOrder]=useState(()=>[...(post?.images||[]).map(image=>`p:${image.path}`)]),[busy,setBusy]=useState(false),[progress,setProgress]=useState(0),[error,setError]=useState('');
- const lock=useRef(false),verified=shop&&profile?.verificationStatus==='approved';
+ const [status,setStatus]=useState(post?.projectStatus||'In progress'),[vehicle,setVehicle]=useState(oldVehicle),[vehicleMake,setVehicleMake]=useState(post?.vehicle?.make||''),[vehicleModel,setVehicleModel]=useState(post?.vehicle?.model||''),[vehicleYear,setVehicleYear]=useState(post?.vehicle?.year?String(post.vehicle.year):''),[images,setImages]=useState(savedImages);
+ const [files,setFiles]=useState([]),[imageOrder,setImageOrder]=useState(()=>savedImages.map(image=>`p:${image.path}`)),[busy,setBusy]=useState(false),[progress,setProgress]=useState(0),[error,setError]=useState('');
+ const lock=useRef(false),confirmedUploads=useRef(new Map()),verified=shop&&profile?.verificationStatus==='approved';
  async function selectPhotos(){
   if(busy||offline)return;
   try{const selected=await pickPostPhotos(Math.max(0,10-images.length-files.length));setFiles(previous=>[...previous,...selected].slice(0,Math.max(0,10-images.length)));setImageOrder(previous=>[...previous,...selected.map(file=>`f:${file.uri}`)]);}
@@ -26,6 +30,7 @@ export function PostFormScreen({navigation,route}){
  async function save(){
   if(lock.current||busy||offline)return;
   setError('');
+  if(invalidSavedMedia){setError('This post contains older or invalid photo references and cannot be edited safely. Its published media has been retained.');return;}
   if(!verified&&shop){setError('Shop verification is required before you can publish a showcase.');return;}
   if(!title.trim()||title.trim().length>100||description.trim().length>2000){setError('Enter a title (up to 100 characters) and a description up to 2000 characters.');return;}
   if(shop&&images.length+files.length<1){setError('Add at least one photo to your showcase.');return;}
@@ -33,7 +38,10 @@ export function PostFormScreen({navigation,route}){
   try{
    const uploadedByUri=new Map();
    for(const [index,file] of files.entries()){
-    const result=await uploadPostPhoto(file,user?.uid,value=>setProgress(Math.round(((index+value/100)/files.length)*100)));
+    const prior=confirmedUploads.current.get(file);
+    const result=prior?.uid===user?.uid?prior.result:await uploadPostPhoto(file,user?.uid,value=>setProgress(Math.round(((index+value/100)/files.length)*100)));
+    if(typeof result?.path!=='string'||!result.path.startsWith(`posts/${user?.uid}/`))throw new Error('The photo upload could not be confirmed. Try again.');
+    confirmedUploads.current.set(file,{uid:user?.uid,result});
     uploaded.push(result.path);uploadedByUri.set(file.uri,result.path);
    }
    const imagePaths=shop?imageOrder.map(item=>item.startsWith('p:')?item.slice(2):uploadedByUri.get(item.slice(2))).filter(Boolean):[...images.map(image=>image.path),...uploaded];
@@ -46,7 +54,6 @@ export function PostFormScreen({navigation,route}){
    navigation.goBack();
   }catch(e){
    setError(failure(e));
-   await Promise.all(uploaded.map(path=>postsApi('removeImage',{path},user?.uid).catch(()=>{})));
   }finally{lock.current=false;setBusy(false);}
  }
  function removeImage(path){if(!busy){setImages(current=>current.filter(image=>image.path!==path));setImageOrder(current=>current.filter(item=>item!==`p:${path}`));}}
@@ -65,7 +72,7 @@ export function PostFormScreen({navigation,route}){
    {shop&&<><Text weight="medium">Project status</Text><View style={styles.pills}>{['In progress','Completed'].map(item=><Pressable key={item} accessibilityRole="button" accessibilityState={{selected:status===item}} onPress={()=>!busy&&setStatus(item)} style={[styles.pill,status===item&&styles.selected]}><Text style={[styles.pillText,status===item&&styles.selectedText]}>{item}</Text></Pressable>)}</View></>}
    {shop?<><Field label="Vehicle make (optional)" value={vehicleMake} onChangeText={setVehicleMake} maxLength={80} editable={!busy} placeholder="e.g. Volkswagen"/><Field label="Vehicle model (optional)" value={vehicleModel} onChangeText={setVehicleModel} maxLength={80} editable={!busy} placeholder="e.g. Golf"/><Field label="Vehicle year (optional)" value={vehicleYear} onChangeText={setVehicleYear} maxLength={4} keyboardType="number-pad" editable={!busy} placeholder="e.g. 2024"/></>:<Field label="Vehicle (optional)" value={vehicle} onChangeText={setVehicle} maxLength={120} editable={!busy} placeholder="For example, 2020 VW Golf 7"/>}
    <Button title={`Add photos (${images.length+files.length}/${shop?10:6})`} outline disabled={disabled||images.length+files.length>=(shop?10:6)} onPress={()=>void selectPhotos()}/>
-   {imageOrder.map((key,index)=>{const existing=key.startsWith('p:'),image=existing?images.find(item=>item.path===key.slice(2)):files.find(item=>item.uri===key.slice(2));if(!image)return null;return <View key={key} style={styles.photoRow}><Image source={{uri:existing?image.url:image.uri}} style={styles.preview}/><Text style={styles.photoName}>{index===0?'Cover · ':''}{image.name||'Uploaded photo'}</Text><Button title="↑" outline disabled={busy||index===0} onPress={()=>moveImage(index,-1)}/><Button title="↓" outline disabled={busy||index===imageOrder.length-1} onPress={()=>moveImage(index,1)}/><Button title="Remove" outline disabled={busy} onPress={()=>existing?removeImage(image.path):removeFile(image.uri)}/></View>;})}
+   {imageOrder.map((key,index)=>{const existing=key.startsWith('p:'),image=existing?images.find(item=>item.path===key.slice(2)):files.find(item=>item.uri===key.slice(2));if(!image)return null;return <View key={key} style={styles.photoRow}><View>{existing?<ShowcasePhoto postId={post?.id} image={image} style={styles.preview}/>:<Image source={{uri:image.uri}} style={styles.preview}/>}</View><Text style={styles.photoName}>{index===0?'Cover · ':''}{image.name||'Uploaded photo'}</Text><Button title="↑" outline disabled={busy||index===0} onPress={()=>moveImage(index,-1)}/><Button title="↓" outline disabled={busy||index===imageOrder.length-1} onPress={()=>moveImage(index,1)}/><Button title="Remove" outline disabled={busy} onPress={()=>existing?removeImage(image.path):removeFile(image.uri)}/></View>;})}
    {busy&&files.length>0&&<Text accessibilityRole="status">Uploading photos · {progress}%</Text>}
    <Notice error={error}/>
    <Button title={busy?post?'Saving…':'Publishing…':post?'Save changes':'Post'} disabled={disabled||!title.trim()} onPress={()=>void save()}/>
@@ -102,12 +109,12 @@ export function PostDetailScreen({navigation,route}){
  const {user}=useAuth(),[post,setPost]=useState(null),[busy,setBusy]=useState(true),[error,setError]=useState('');
  const [retry,setRetry]=useState(0);
  useEffect(()=>{let active=true;setBusy(true);setPost(null);setError('');postsApi('get',{id:route.params?.id},user?.uid).then(result=>{if(active)setPost(result.post);}).catch(e=>{if(active)setError(e.message||failure(e));}).finally(()=>{if(active)setBusy(false);});return()=>{active=false;};},[route.params?.id,user?.uid,retry]);
- const photos=post?.images||[],vehicle=post?.vehicle;
+ const photos=(Array.isArray(post?.images)?post.images:[]).map(image=>typeof image==='string'?{url:image}:image).filter(hasPostImage),vehicle=post?.vehicle;
  return <Page title="Showcase" navigation={navigation} showTabs={false}>
   <Notice busy={busy} error={error}/>
   {!!error&&<Button title="Retry loading post" outline onPress={()=>setRetry(value=>value+1)}/>}
   {post&&<Card>
-   <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>{photos.map((image,index)=><Image key={image.path||image.url||index} source={{uri:image.url||image}} style={styles.detailImage} resizeMode="cover"/>)}</ScrollView>
+   <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>{photos.map((image,index)=><ShowcasePhoto key={image.path||image.url||index} postId={post.id} image={image} style={styles.detailImage}/>)}</ScrollView>
    <Text weight="medium" style={styles.detailTitle}>{post.title}</Text>
    <Text style={styles.categoryChip}>{post.serviceCategory||post.category}</Text>
    {!!post.description&&<Text>{post.description}</Text>}

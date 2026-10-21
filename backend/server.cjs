@@ -1,10 +1,11 @@
+if(process.env.PMR_LOCAL_DEMO==='true')throw Error('Local demo must use node backend/local-demo.cjs; production startup is disabled for demo mode.');
 const {initializeApp,cert,applicationDefault}=require('firebase-admin/app');
 const {getAuth}=require('firebase-admin/auth');
 const {getFirestore}=require('firebase-admin/firestore');
 const {createServices}=require('./services.cjs');
-const {createStorage}=require('./storage.cjs');
+const {createStorage,createMediaStorage}=require('./storage.cjs');
 const {createApp}=require('./app.cjs');
-const {corsOrigins,storageConfig,validateEmulatorHost}=require('./config.cjs');
+const {corsOrigins,storageConfig,validateEmulatorHost,listenHost}=require('./config.cjs');
 const fs=require('node:fs');
 const path=require('node:path');
 try{
@@ -27,13 +28,15 @@ try{
  }
  else if(!process.env.FIREBASE_AUTH_EMULATOR_HOST)throw Error('Configure a server-only Firebase service account credential.');
  const storage=storageConfig();
+ const host=listenHost();
  initializeApp({projectId,...(credential?{credential}:{})});
  const auth=getAuth(),db=getFirestore(),storageClient=createStorage({url:storage.url,key:storage.key,bucket:storage.bucket});
- const photoStorage=createStorage({url:storage.url,key:storage.key,bucket:storage.photoBucket,scope:'photos'});
- const postStorage=createStorage({url:storage.url,key:storage.key,bucket:storage.postsBucket,scope:'public-posts'});
- const app=createApp({auth,services:createServices({db,auth,storage:storageClient,photoStorage,postStorage}),trustProxy:process.env.RENDER?1:false,
+ const photoStorage=createMediaStorage({url:storage.url,key:storage.key,bucket:storage.photoBucket,legacyBucket:storage.legacyPhotoBucket,scope:'photos'});
+ const requestStorage=createMediaStorage({url:storage.url,key:storage.key,bucket:storage.requestBucket,scope:'requests'});
+ const postStorage=createMediaStorage({url:storage.url,key:storage.key,bucket:storage.postsBucket,legacyBucket:storage.legacyPostsBucket,scope:'showcase'});
+ const app=createApp({auth,services:createServices({db,auth,storage:storageClient,photoStorage,requestStorage,postStorage}),trustProxy:process.env.RENDER?1:false,
   allowedOrigins:corsOrigins(process.env.CORS_ORIGINS,process.env.NODE_ENV==='production')});
- const server=app.listen(portValue,'0.0.0.0',()=>console.log('PimpMyRide API ready.'));
+ const server=app.listen(portValue,host,()=>console.log('PimpMyRide API ready.'));
  server.requestTimeout=90000;
  process.on('SIGTERM',()=>server.close(()=>process.exit(0)));
 }catch(e){console.error('Startup failed:',e.message,e.stack);process.exitCode=1;}

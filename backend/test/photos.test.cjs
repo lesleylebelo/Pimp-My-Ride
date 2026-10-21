@@ -3,6 +3,7 @@ const assert=require('node:assert/strict');
 const {memoryDb}=require('./helpers/memory-db.cjs');
 const {createPhotos,LEASE_MS}=require('../photos.cjs');
 const {createMarketplace}=require('../marketplace.cjs');
+const {LOCAL_MOCK_ENV}=require('./helpers/mock-payments.cjs');
 const P=require('../photo-domain.cjs');
 
 // Generated one-pixel colour fixtures, with real image headers and image data.
@@ -24,11 +25,18 @@ function fixture(){
  const auth={getUser:async uid=>users.get(uid)||{emailVerified:true,disabled:false}};
  const actor=async request=>({uid:request.auth.uid,profile:(await db.doc(`users/${request.auth.uid}`).get()).data()});
  const storage={upload:async(path,buffer)=>files.set(path,buffer),signedUrl:async(path,seconds)=>{signed.push({path,seconds});return `https://private.example.invalid/${signed.length}`;},remove:async()=>assert.fail('Photo operations must never delete source objects.')};
- const api=createPhotos({db,auth,storage,actor}),market=createMarketplace({db,auth,actor});
+ db.projectId='demo-pmr-security';
+ const api=createPhotos({db,auth,storage,actor}),market=createMarketplace({db,auth,actor,mockPaymentEnv:LOCAL_MOCK_ENV});
  const data=(extra={})=>({auth:{uid:'owner'},vehicleId:'car',slot:'1',version:db.rows.get('vehicles/car').photoRevision||0,requestId:`upload-${++sequence}`,file:file(),...extra});
  const upload=extra=>api.uploadPhoto(data(extra));
  const read=(uid,op,extra={})=>api.photosApi({auth:{uid},data:{op,target:'vehicle',id:'car',...extra}});
- const write=(uid,op,extra={})=>market({auth:{uid},data:{op,requestId:`market-${++sequence}`,...extra}});
+ const write=async(uid,op,extra={})=>{
+  if(op==='quoteSubmit'&&extra.termsVersion===undefined){
+   const request=(await db.doc(`serviceRequests/${extra.serviceRequestId}`).get()).data();
+   extra={...extra,termsVersion:request?.termsVersion||request?.version||1};
+  }
+  return market({auth:{uid},data:{op,requestId:`market-${++sequence}`,...extra}});
+ };
  const attempts=()=>[...db.rows].filter(([path])=>path.startsWith('storagePhotosUploadAttempts/')).map(([,value])=>value);
  const assets=()=>[...db.rows].filter(([path])=>path.startsWith('marketplacePhotos/')).map(([,value])=>value);
  return {db,files,users,signed,auth,actor,storage,api,market,data,upload,read,write,attempts,assets};
@@ -145,7 +153,7 @@ test('legacy requests need no photos; booked requests copy immutable photo IDs a
  // Even a malformed privileged/legacy metadata record is redacted at output.
  f.db.rows.get(`serviceRequests/${created.id}`).photos[0].path='private/unexpected/path';
  const detail=await f.market({auth:{uid:'shop'},data:{op:'request',id:created.id}});assert.ok(!JSON.stringify(detail).includes('private/unexpected/path'));
- const quote=await f.write('shop','quoteSubmit',{serviceRequestId:created.id,...quoteData}),booking=await f.write('owner','quoteAccept',{id:quote.id});assert.deepEqual(f.db.rows.get(`bookings/${booking.id}`).photoIds,[photo.id]);
+ const quote=await f.write('shop','quoteSubmit',{serviceRequestId:created.id,...quoteData}),booking=await f.write('owner','quoteAccept',{id:quote.id,paymentMethod:'pay_in_store'});assert.deepEqual(f.db.rows.get(`bookings/${booking.id}`).photoIds,[photo.id]);
  assert.equal((await f.read('shop','list',{target:'request',id:created.id})).items.length,1);
  await assert.rejects(()=>f.read('competitor','list',{target:'request',id:created.id}),{code:'not-found'});
  f.db.rows.get('vehicles/car').archived=true;assert.equal((await f.read('shop','list',{target:'request',id:created.id})).items.length,1);
@@ -220,4 +228,49 @@ test('malformed lease timestamps and changed worker tokens never authorize metad
   const f=fixture(),upload=f.storage.upload;f.storage.upload=async(...args)=>{await upload(...args);change(f.attempts()[0]);};
   await assert.rejects(()=>f.upload());assert.equal(f.assets().length,0);assert.equal(f.files.size,1);assert.equal(f.db.rows.get('vehicles/car').photoSlots,undefined);
  }
+});
+
+test('editing a request retains its authorised immutable attachments after garage replacement',async()=>{
+ const f=fixture(),first=await f.upload(),created=await f.write('owner','requestCreate',{...requestData,photoIds:[first.id]});
+ await f.upload();
+ await f.write('owner','requestUpdate',{...requestData,id:created.id,version:1,title:'Updated title',photoIds:[first.id]});
+ assert.deepEqual(f.db.rows.get('serviceRequests/'+created.id).photoIds,[first.id]);
+ assert.equal((await f.read('shop','list',{target:'request',id:created.id})).items[0].id,first.id);
+ await assert.rejects(()=>f.write('owner','requestCreate',{...requestData,photoIds:[first.id]}),{code:'failed-precondition'});
+ assert.equal(f.files.size,2);
+});
+
+test('request-only photos do not alter Garage slots and remain private through request and booking audiences',async()=>{
+ const f=fixture();f.storage.bucket='vehicle-images';
+ const requestFiles=new Map(),requestSigns=[];
+ const requestStorage={bucket:'request-images',upload:async(path,buffer)=>requestFiles.set(path,buffer),signedUrl:async path=>{requestSigns.push(path);return 'https://request.example.invalid/signed';}};
+ const api=createPhotos({db:f.db,auth:f.auth,actor:f.actor,storage:f.storage,requestStorage});
+ const input=f.data({target:'request'}),uploaded=await api.uploadPhoto(input);
+ assert.deepEqual(await api.uploadPhoto(input),uploaded);assert.equal(requestFiles.size,1);assert.equal(f.files.size,0);
+ const asset=f.db.rows.get('marketplacePhotos/'+uploaded.id);assert.equal(asset.bucket,'request-images');assert.equal(asset.purpose,'request');assert.match(asset.path,/^requests\/owner\/car\//);
+ assert.equal(f.db.rows.get('vehicles/car').photoSlots,undefined);assert.equal(f.db.rows.get('vehicles/car').photoRevision,undefined);
+ const draft={op:'view',target:'attachment',id:uploaded.id,photoId:uploaded.id};
+ await api.photosApi({auth:{uid:'owner'},data:draft});
+ for(const uid of ['other','shop'])await assert.rejects(()=>api.photosApi({auth:{uid},data:draft}));
+ const result=await f.write('owner','requestCreate',{...requestData,photoIds:[uploaded.id]});
+ const read=uid=>api.photosApi({auth:{uid},data:{op:'view',target:'request',id:result.id,photoId:uploaded.id}});
+ await read('owner');await read('shop');await assert.rejects(()=>read('other'));
+ assert.equal(requestSigns.length,3);
+ await f.write('owner','requestUpdate',{id:result.id,version:1,...requestData,photoIds:[uploaded.id]});
+ // A foreign owner cannot attach it to another vehicle.
+ await assert.rejects(()=>f.write('other','requestCreate',{...requestData,vehicleId:'othercar',photoIds:[uploaded.id]}));
+ const req=f.db.rows.get('serviceRequests/'+result.id);f.db.rows.set('serviceRequests/'+result.id,{...req,visibility:'direct',shopId:'shop'});
+ await assert.rejects(()=>read('competitor'));await read('shop');
+ f.db.rows.set('serviceRequests/'+result.id,{...req,status:'accepted',bookingId:'booking'});
+ f.db.rows.set('bookings/booking',{serviceRequestId:result.id,ownerId:'owner',shopId:'shop'});
+ await read('shop');await assert.rejects(()=>read('competitor'));
+ assert.equal(requestFiles.size,1);
+});
+
+test('request upload errors never attach or publish a successful asset',async()=>{
+ const f=fixture(),requestStorage={bucket:'request-images',upload:async()=>{throw Error('Synthetic storage outage');}};
+ const api=createPhotos({db:f.db,auth:f.auth,actor:f.actor,storage:f.storage,requestStorage});
+ await assert.rejects(()=>api.uploadPhoto(f.data({target:'request'})),{code:'failed-precondition'});
+ assert.equal(f.assets().length,0);assert.equal(f.db.rows.get('vehicles/car').photoSlots,undefined);
+ assert.equal(f.attempts()[0].state,'cleanupPending');
 });

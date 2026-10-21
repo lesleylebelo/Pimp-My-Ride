@@ -1,0 +1,407 @@
+{
+  "reviewDate": "2026-10-19",
+  "projectId": "pimp-my-ride-a26fc",
+  "database": "(default)",
+  "approvalRequired": true,
+  "applied": true,
+  "operationPolicy": "After explicit index approval only: create these six missing composites, preserve every existing index. No full-file deployment, replacement or removal.",
+  "comparison": "Equality-prefix field order treated as equivalent; ordered timestamp/document-ID suffix must match",
+  "alreadySatisfied": [
+    {
+      "query": "Discover all",
+      "index": {
+        "collectionGroup": "posts",
+        "queryScope": "COLLECTION",
+        "fields": [
+          {
+            "fieldPath": "authorRole",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "status",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "createdAt",
+            "order": "DESCENDING"
+          },
+          {
+            "fieldPath": "__name__",
+            "order": "DESCENDING"
+          }
+        ],
+        "state": "READY",
+        "density": "SPARSE_ALL"
+      }
+    }
+  ],
+  "existingIndexesToPreserve": [
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "role",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "verificationStatus",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        }
+      ],
+      "state": "READY",
+      "density": "SPARSE_ALL"
+    },
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "authorRole",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ],
+      "state": "READY",
+      "density": "SPARSE_ALL"
+    },
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "shopId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ],
+      "state": "READY",
+      "density": "SPARSE_ALL"
+    }
+  ],
+  "indexesToCreate": [
+    {
+      "query": "Discover category",
+      "collectionGroup": "posts",
+      "method": "POST",
+      "endpoint": "https://firestore.googleapis.com/v1/projects/pimp-my-ride-a26fc/databases/(default)/collectionGroups/posts/indexes",
+      "body": {
+        "queryScope": "COLLECTION",
+        "fields": [
+          {
+            "fieldPath": "status",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "authorRole",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "category",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "createdAt",
+            "order": "DESCENDING"
+          },
+          {
+            "fieldPath": "__name__",
+            "order": "DESCENDING"
+          }
+        ]
+      }
+    },
+    {
+      "query": "Discover shop / My Posts",
+      "collectionGroup": "posts",
+      "method": "POST",
+      "endpoint": "https://firestore.googleapis.com/v1/projects/pimp-my-ride-a26fc/databases/(default)/collectionGroups/posts/indexes",
+      "body": {
+        "queryScope": "COLLECTION",
+        "fields": [
+          {
+            "fieldPath": "status",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "authorRole",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "authorId",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "createdAt",
+            "order": "DESCENDING"
+          },
+          {
+            "fieldPath": "__name__",
+            "order": "DESCENDING"
+          }
+        ]
+      }
+    },
+    {
+      "query": "Discover shop and category",
+      "collectionGroup": "posts",
+      "method": "POST",
+      "endpoint": "https://firestore.googleapis.com/v1/projects/pimp-my-ride-a26fc/databases/(default)/collectionGroups/posts/indexes",
+      "body": {
+        "queryScope": "COLLECTION",
+        "fields": [
+          {
+            "fieldPath": "status",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "authorRole",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "category",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "authorId",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "createdAt",
+            "order": "DESCENDING"
+          },
+          {
+            "fieldPath": "__name__",
+            "order": "DESCENDING"
+          }
+        ]
+      }
+    },
+    {
+      "query": "Find Jobs open requests",
+      "collectionGroup": "serviceRequests",
+      "method": "POST",
+      "endpoint": "https://firestore.googleapis.com/v1/projects/pimp-my-ride-a26fc/databases/(default)/collectionGroups/serviceRequests/indexes",
+      "body": {
+        "queryScope": "COLLECTION",
+        "fields": [
+          {
+            "fieldPath": "visibility",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "status",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "createdAt",
+            "order": "DESCENDING"
+          },
+          {
+            "fieldPath": "__name__",
+            "order": "DESCENDING"
+          }
+        ]
+      }
+    },
+    {
+      "query": "Owner My Requests",
+      "collectionGroup": "serviceRequests",
+      "method": "POST",
+      "endpoint": "https://firestore.googleapis.com/v1/projects/pimp-my-ride-a26fc/databases/(default)/collectionGroups/serviceRequests/indexes",
+      "body": {
+        "queryScope": "COLLECTION",
+        "fields": [
+          {
+            "fieldPath": "ownerId",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "createdAt",
+            "order": "DESCENDING"
+          },
+          {
+            "fieldPath": "__name__",
+            "order": "DESCENDING"
+          }
+        ]
+      }
+    },
+    {
+      "query": "Shop direct requests",
+      "collectionGroup": "serviceRequests",
+      "method": "POST",
+      "endpoint": "https://firestore.googleapis.com/v1/projects/pimp-my-ride-a26fc/databases/(default)/collectionGroups/serviceRequests/indexes",
+      "body": {
+        "queryScope": "COLLECTION",
+        "fields": [
+          {
+            "fieldPath": "visibility",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "shopId",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "status",
+            "order": "ASCENDING"
+          },
+          {
+            "fieldPath": "createdAt",
+            "order": "DESCENDING"
+          },
+          {
+            "fieldPath": "__name__",
+            "order": "DESCENDING"
+          }
+        ]
+      }
+    }
+  ],
+  "indexesToModify": [],
+  "indexesToRemove": [],
+  "compositesNotRequiredForCurrentQueries": [
+    {
+      "query": "Garage vehicle listing",
+      "reason": "Plan-only Query Explain confirms built-in single-field index intersection; do not create a composite solely for this query."
+    },
+    {
+      "query": "Find Jobs current-shop quotation lookup",
+      "reason": "Plan-only Query Explain confirms built-in single-field index intersection; do not create a composite solely for this query."
+    }
+  ],
+  "preflight": {
+    "method": "Corrected read-only Query Explain, analyze:false, resolveOnHTTPError:true",
+    "results": [
+      {
+        "query": "Discover all",
+        "collectionGroup": "posts",
+        "status": "PLANNABLE",
+        "planSummary": {
+          "indexesUsed": [
+            {
+              "properties": "(authorRole ASC, status ASC, createdAt DESC, __name__ DESC)",
+              "query_scope": "Collection"
+            }
+          ]
+        }
+      },
+      {
+        "query": "Discover category",
+        "collectionGroup": "posts",
+        "status": "MISSING_INDEX",
+        "code": 400,
+        "reason": "No matching index found"
+      },
+      {
+        "query": "Discover shop / My Posts",
+        "collectionGroup": "posts",
+        "status": "MISSING_INDEX",
+        "code": 400,
+        "reason": "No matching index found"
+      },
+      {
+        "query": "Discover category and shop",
+        "collectionGroup": "posts",
+        "status": "MISSING_INDEX",
+        "code": 400,
+        "reason": "No matching index found"
+      },
+      {
+        "query": "Find Jobs open",
+        "collectionGroup": "serviceRequests",
+        "status": "MISSING_INDEX",
+        "code": 400,
+        "reason": "No matching index found"
+      },
+      {
+        "query": "Owner My Requests",
+        "collectionGroup": "serviceRequests",
+        "status": "MISSING_INDEX",
+        "code": 400,
+        "reason": "No matching index found"
+      },
+      {
+        "query": "Find Jobs direct",
+        "collectionGroup": "serviceRequests",
+        "status": "MISSING_INDEX",
+        "code": 400,
+        "reason": "No matching index found"
+      },
+      {
+        "query": "Garage listing",
+        "collectionGroup": "vehicles",
+        "status": "PLANNABLE",
+        "planSummary": {
+          "indexesUsed": [
+            {
+              "properties": "(archived ASC, __name__ ASC)",
+              "query_scope": "Collection"
+            },
+            {
+              "properties": "(ownerId ASC, __name__ ASC)",
+              "query_scope": "Collection"
+            }
+          ]
+        }
+      },
+      {
+        "query": "Find Jobs quotation lookup",
+        "collectionGroup": "quotations",
+        "status": "PLANNABLE",
+        "planSummary": {
+          "indexesUsed": [
+            {
+              "properties": "(shopId ASC, __name__ ASC)",
+              "query_scope": "Collection"
+            },
+            {
+              "properties": "(serviceRequestId ASC, __name__ ASC)",
+              "query_scope": "Collection"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "verificationStatus": "SIX_CREATED_AND_READY_QUERY_PLANS_PASSED",
+  "localDefinitionsAlreadyPresent": true,
+  "execution": {
+    "date": "2026-10-19",
+    "method": "Individual create-only index REST calls",
+    "created": 6,
+    "ready": 6,
+    "existingIndexesPreserved": true,
+    "modified": 0,
+    "deleted": 0,
+    "documentChanges": 0,
+    "evidence": "FIRESTORE_MEDIA_INDEX_EXECUTION_20261019.json"
+  }
+}

@@ -7,6 +7,7 @@ import colors from '../../../shared/theme/colors';
 import {Card,Button} from './MarketplaceUI';
 import {postsApi} from '../services/postsApi';
 import {useAuth} from '../../auth/context/AuthContext';
+import ShowcasePhoto,{hasPostImage} from './ShowcasePhoto';
 
 export function postTime(value){
  const timestamp=typeof value?.toMillis==='function'?value.toMillis():Number(value)||new Date(value).getTime();
@@ -28,7 +29,7 @@ export function PostCard({post,onOpen,onEdit,onRemoved,editable=false,onSaved}){
   catch(e){setError(e.message||'Unable to update saved posts.');}
   finally{setBusy(false);}
  }
- const photos=(post.images||[]).filter(image=>typeof image?.url==='string'&&image.url.startsWith('https://'));
+ const photos=(Array.isArray(post.images)?post.images:[]).map(image=>typeof image==='string'?{url:image}:image).filter(hasPostImage);
  const vehicle=formatVehicle(post.vehicle);
  const place=[post.city,post.province].filter(Boolean).join(' · ');
  const author=post.authorName||'Customer';
@@ -40,7 +41,7 @@ export function PostCard({post,onOpen,onEdit,onRemoved,editable=false,onSaved}){
    {editable&&<Pressable accessibilityRole="button" accessibilityLabel="Post options" onPress={()=>setMenu(value=>!value)} hitSlop={8} style={styles.more}><Ionicons name="ellipsis-horizontal" size={22} color={colors.textSecondary}/></Pressable>}
   </View>
   {!!photos.length&&<ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={styles.photos}>
-   {photos.slice(0,1).map(photo=><Image key={photo.path} source={{uri:photo.url}} style={styles.photo} resizeMode="cover"/>)}
+   {photos.slice(0,1).map(photo=><ShowcasePhoto key={photo.path||photo.url} postId={post.id} image={photo} style={styles.photo}/>)}
   </ScrollView>}
   <View style={styles.tags}><Text style={styles.tag}>{post.type==='showcase'?'Showcase':'Build'} · {post.category}</Text>{!!post.projectStatus&&<Text style={styles.status}>{post.projectStatus}</Text>}</View>
   <Text weight="medium" style={styles.title}>{post.title}</Text>

@@ -52,9 +52,10 @@ function validatePhoto(file){
  return {buffer:b,name,contentType:type,size:b.length,contentHash:hash(b)};
 }
 function safePhoto(value,id){return {id,name:value.name,size:value.size,contentType:value.contentType,uploadedAt:value.uploadedAt?.toMillis?.()??value.uploadedAt??null};}
-async function snapshotRequestPhotos(tx,db,vehicle,ownerId,vehicleId,selected){
- const ids=photoIds(selected),current=new Set(Object.values(vehicle.photoSlots||{}));
+function assetPath(value,id){return `${value.purpose==='request'?'requests':'photos'}/${value.ownerId}/${value.vehicleId}/${id}`;}
+async function snapshotRequestPhotos(tx,db,vehicle,ownerId,vehicleId,selected,retained=[]){
+ const ids=photoIds(selected),current=new Set([...Object.values(vehicle.photoSlots||{}),...photoIds(retained)]);
  const records=await Promise.all(ids.map(id=>tx.get(db.doc(`marketplacePhotos/${id}`))));
- return records.map((doc,index)=>{const value=doc.data(),id=ids[index];if(!current.has(id)||!value||value.ownerId!==ownerId||value.vehicleId!==vehicleId||value.path!==`photos/${ownerId}/${vehicleId}/${id}`)D.fail('A selected photo changed. Refresh the vehicle photos before submitting.','failed-precondition');return safePhoto(value,id);});
+ return records.map((doc,index)=>{const value=doc.data(),id=ids[index];if(!value||(!current.has(id)&&value.purpose!=='request')||value.ownerId!==ownerId||value.vehicleId!==vehicleId||value.path!==assetPath(value,id))D.fail('A selected photo changed. Refresh the vehicle photos before submitting.','failed-precondition');return safePhoto(value,id);});
 }
-module.exports={MAX_BYTES,MAX_PHOTOS,hash,slots,slot,version,eligible,photoIds,validatePhoto,safePhoto,snapshotRequestPhotos};
+module.exports={MAX_BYTES,MAX_PHOTOS,hash,assetPath,slots,slot,version,eligible,photoIds,validatePhoto,safePhoto,snapshotRequestPhotos};

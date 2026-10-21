@@ -85,7 +85,10 @@ test('picker cancellation and invalid file types or sizes keep uploads unavailab
  }
  choice={canceled:false,assets:[selected()]};await s.press('Choose photo','1');assert.ok(s.button('Upload photo','1'));assert.equal(s.state.calls.upload.length,0);
  await s.press('Discard selection','1');assert.equal(s.button('Upload photo','1'),undefined);
- assert.deepEqual(s.state.calls.picker[0],{type:['image/jpeg','image/png'],multiple:false,copyToCacheDirectory:true});
+ choice={canceled:false,assets:[]};await s.press('Choose photo','1');assert.equal(s.button('Upload photo','1'),undefined);
+ choice={canceled:false,assets:[{...selected('selected.webp'),mimeType:'image/webp'}]};await s.press('Choose photo','1');assert.ok(s.button('Upload photo','1'));
+ assert.equal(s.state.calls.upload.length,0);
+ assert.deepEqual(s.state.calls.picker[0],{type:['image/jpeg','image/png','image/webp','image/heic','image/heif'],multiple:false,copyToCacheDirectory:true});
 });
 
 test('picker responses after blur/refocus, account changes or external disable cannot select a stale file',async()=>{
@@ -112,10 +115,24 @@ test('uploads require confirmation, block duplicate taps and preserve acknowledg
 test('upload errors remain in the confirmation and keep the selected file until refresh and manual retry',async()=>{
  let fail=true;const s=await screen({upload:async()=>{if(fail)throw Error('Unknown upload outcome');return {ok:true};}});
  await s.press('Choose photo','1');await s.press('Upload photo','1');await s.press('Confirm');
+ assert.doesNotMatch(s.text(),/Checking saved status/);
+ assert.match(s.text(),/Saved status unavailable/);
+ assert.doesNotMatch(s.text(),/Photo uploaded successfully/);
  assert.equal(s.tree.root.findAllByType('Modal').length,1);assert.match(s.text(),/Unknown upload outcome/);assert.match(s.text(),/Your selected photo is kept/);assert.equal(s.button('Confirm').props.disabled,true);
  await s.press('Cancel');assert.match(s.text(),/Selected: selected.jpg/);assert.equal(s.button('Upload photo','1').props.disabled,true);
  s.state.version=3;s.state.items=[photo()];await s.press('Refresh photos');assert.ok(s.button('Replace photo','1'));assert.match(s.text(),/Selected: selected.jpg/);
  fail=false;await s.press('Replace photo','1');await s.press('Confirm');assert.equal(s.state.calls.upload.length,2);assert.equal(s.state.calls.upload[1][2],3);assert.doesNotMatch(s.text(),/Selected: selected/);await s.close();
+});
+
+test('a failed manual status refresh stops checking and keeps mutations blocked',async()=>{
+ let reads=0;
+ const s=await screen({list:async()=>{if(++reads>1)throw Error('Cannot reach the server.');return {items:[],version:2,canManage:true};}});
+ await s.press('Refresh photos');
+ assert.doesNotMatch(s.text(),/Checking saved status/);
+ assert.match(s.text(),/Saved status unavailable/);
+ assert.equal(!!s.button('Refresh photos').props.disabled,false);
+ assert.equal(s.button('Choose photo','1').props.disabled,true);
+ await s.close();
 });
 
 test('removal is confirmed, uses the photo revision and blocks duplicate submissions',async()=>{

@@ -15,7 +15,7 @@ export function Page({title,subtitle,navigation,children,showTabs=true,onScroll,
   const styles=makeStyles(theme);
   const shop=profile?.role==='shop',routes=shop?shopRoutes:ownerRoutes,feedback=useLandingFeedback();
   const state=navigation?.getState?.(),route=state?.routes?.[state.index]?.name;
-  const activeTab=Object.keys(routes).find(k=>routes[k]===route)||(route==='BookingDetail'?'Bookings':shop?(route==='QuoteForm'?'Quotes':'Find Jobs'):['RequestForm','OwnerRequest','QuoteComparison'].includes(route)?'My Requests':'Garage');
+  const activeTab=Object.keys(routes).find(k=>routes[k]===route)||(['BookingDetail','ReceiptDetail','Notifications'].includes(route)?'Bookings':shop?(route==='QuoteForm'?'Quotes':'Find Jobs'):['RequestForm','OwnerRequest','QuoteComparison','PaymentChoice'].includes(route)?'My Requests':'Garage');
   const showBack = navigation?.canGoBack?.();
   return <LandingShell title={title} subtitle={subtitle} tabs={showTabs?(shop?shopTabs:ownerTabs):undefined} activeTab={activeTab} {...feedback} onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} floatingAction={floatingAction} refreshControl={refreshControl} onTabPress={label=>routes[label]?navigation?.navigate(routes[label]):feedback.showFeature(label)}>
     {showBack && (
@@ -66,10 +66,11 @@ export function Notice({busy,error}){
 }
 
 const sameItem=(left,right)=>left===right||Object.keys(left).length===Object.keys(right).length&&Object.keys(left).every(key=>Object.is(left[key],right[key]));
-export function useInfiniteCursor(data,busy,setCursor,{itemsKey='items',cursorKey='cursor',autoLoad=true}={}){
+export function useInfiniteCursor(data,busy,setCursor,{itemsKey='items',cursorKey='cursor',autoLoad=true,prepend=false,pageCursor}={}){
   const [items,setItems]=useState([]),requested=useRef(new Set()),viewport=useRef(0),content=useRef(0),seen=useRef(new WeakSet());
   const pageItems=data?.[itemsKey],nextCursor=data?.[cursorKey];
-  useEffect(()=>{if(!data||seen.current.has(data))return;seen.current.add(data);if(Array.isArray(pageItems))setItems(previous=>{const indexes=new Map(previous.map((item,index)=>[item.id,index])),next=[...previous];let changed=false;for(const item of pageItems){const index=indexes.get(item.id);if(index===undefined){indexes.set(item.id,next.length);next.push(item);changed=true;}else if(!sameItem(next[index],item)){next[index]=item;changed=true;}}return changed?next:previous;});},[data,pageItems]);
+  useEffect(()=>{if(!data||seen.current.has(data))return;seen.current.add(data);if(Array.isArray(pageItems))setItems(previous=>{if(prepend){const ids=new Set(pageItems.map(item=>item.id)),next=[...pageItems,...previous.filter(item=>!ids.has(item.id))];return next.length===previous.length&&next.every((item,index)=>sameItem(previous[index],item))?previous:next;}const prior=pageCursor===null?[]:previous,indexes=new Map(prior.map((item,index)=>[item.id,index])),next=[...prior];let changed=pageCursor===null;for(const item of pageItems){const index=indexes.get(item.id);if(index===undefined){indexes.set(item.id,next.length);next.push(item);changed=true;}else if(!sameItem(next[index],item)){next[index]=item;changed=true;}}return changed&&!(next.length===previous.length&&next.every((item,index)=>sameItem(previous[index],item)))?next:previous;});},[data,pageItems,prepend,pageCursor]);
+  useEffect(()=>{if(data&&pageCursor===null){requested.current.clear();}},[data,pageCursor]);
   const loadNext=()=>{if(nextCursor&&!busy&&!requested.current.has(nextCursor)){requested.current.add(nextCursor);setCursor(nextCursor);}};
   const onScroll=event=>{const {contentOffset,contentSize,layoutMeasurement}=event.nativeEvent;if(autoLoad&&contentSize.height-contentOffset.y-layoutMeasurement.height<260)loadNext();};
   const onLayout=event=>{viewport.current=event.nativeEvent.layout.height;if(autoLoad&&content.current-viewport.current<260)loadNext();};
@@ -112,6 +113,15 @@ export function QuoteCard({quote,children}){
         <Text style={quoteStyles.totalLabel}>Total</Text>
         <Text style={quoteStyles.totalValue}>{formatMoney(quote.totalCents)}</Text>
       </View>
+      {(quote.depositType==='percentage'||quote.depositType==='fixed')&&Number.isSafeInteger(quote.depositAmountCents)
+        ? <View style={quoteStyles.metaRow}>
+          <Text style={quoteStyles.metaLabel}>Required deposit{quote.depositType==='percentage'?` (${quote.depositValue}%)`:''}</Text>
+          <Text style={quoteStyles.metaValue}>{formatMoney(quote.depositAmountCents)}</Text>
+        </View>
+        : <View style={quoteStyles.metaRow}>
+          <Text style={quoteStyles.metaLabel}>Deposit</Text>
+          <Text style={quoteStyles.metaValue}>No deposit required</Text>
+        </View>}
       <View style={quoteStyles.metaRow}>
         <Text style={quoteStyles.metaLabel}>Estimated completion</Text>
         <Text style={quoteStyles.metaValue}>{quote.completionDays} working days</Text>

@@ -11,7 +11,7 @@ test('even admins cannot forge logs, presence, metadata or categories',async()=>
 test('document metadata requires the revoked-token-aware backend for every client',async()=>{await seed('shop','shop');await env.withSecurityRulesDisabled(c=>setDoc(doc(c.firestore(),'users','shop','documents','ownerId'),{name:'demo.pdf'}));await assertFails(getDoc(doc(ctx('shop').firestore(),'users','shop','documents','ownerId')));for(const c of [ctx('shop',false),ctx('other'),ctx('admin',true,true)])await assertFails(getDoc(doc(c.firestore(),'users','shop','documents','ownerId')));await seed('shop','shop','suspended');await assertFails(getDoc(doc(ctx('shop').firestore(),'users','shop','documents','ownerId')));});
 test('catalogue access requires the backend and clients never modify it',async()=>{await seed('u');const db=ctx('u').firestore();await assertFails(getDocs(collection(db,'serviceCategories')));await assertFails(setDoc(doc(db,'serviceCategories','x'),{name:'fake'}));await seed('u','owner','archived');await assertFails(getDocs(collection(db,'serviceCategories')));});
 test('marketplace records cannot be read or forged through direct Firestore clients, including administrators',async()=>{
- for(const role of ['owner','shop','admin']){await seed(role,role);const db=ctx(role,true,role==='admin').firestore();for(const name of ['vehicles','serviceRequests','quotations','bookings','marketplacePhotos','storagePhotosUploadAttempts']){await assertFails(getDocs(collection(db,name)));await assertFails(getDoc(doc(db,name,'x')));await assertFails(setDoc(doc(db,name,'x'),{ownerId:role,shopId:role,status:'open'}));}}
+ for(const role of ['owner','shop','admin']){await seed(role,role);const db=ctx(role,true,role==='admin').firestore();for(const name of ['vehicles','serviceRequests','quotations','bookings','paymentReceipts','marketplacePhotos','storagePhotosUploadAttempts']){await assertFails(getDocs(collection(db,name)));await assertFails(getDoc(doc(db,name,'x')));await assertFails(setDoc(doc(db,name,'x'),{ownerId:role,shopId:role,status:'open'}));}await assertFails(setDoc(doc(db,'bookings','x','paymentAttempts','attempt'),{amountCents:1,status:'paid',paidCents:1}));}
 });
 
 async function seedModerationPost(){
@@ -61,5 +61,15 @@ test('administrators with a pending status or provisioning operation cannot mode
    role:'admin',accountStatus:'active',[operation]:'pending-operation',
   }));
   await assertFails(moderate(ctx('admin',true,true).firestore()));
+ }
+});
+
+
+test('Phase 3 receipts, outbox, notifications and attempts deny direct reads and all writes even by participants and administrators',async()=>{
+ const paths=['paymentReceipts/r','emailOutbox/e','notifications/n','bookings/b/paymentAttempts/a','quotationHeads/h'];
+ await env.withSecurityRulesDisabled(async c=>{for(const path of paths)await setDoc(doc(c.firestore(),path),{recipientUid:'owner',ownerId:'owner',shopId:'shop',amountCents:100,readAt:null});});
+ for(const role of ['owner','shop','admin']){
+  await seed(role,role);const client=ctx(role,true,role==='admin').firestore();
+  for(const path of paths){await assertFails(getDoc(doc(client,path)));await assertFails(setDoc(doc(client,path+'new'),{recipientUid:role,amountCents:1}));await assertFails(updateDoc(doc(client,path),{readAt:new Date(),amountCents:1}));await assertFails(deleteDoc(doc(client,path)));}
  }
 });
