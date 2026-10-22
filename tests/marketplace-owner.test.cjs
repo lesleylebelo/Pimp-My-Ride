@@ -17,7 +17,7 @@ const change=(tree,label,value)=>act(async()=>field(tree,label).props.onChangeTe
 const press=(tree,title)=>act(async()=>button(tree,title).props.onPress());
 const unmount=tree=>act(async()=>tree.unmount());
 const scrollToBottom=tree=>act(async()=>{const view=tree.root.findAllByType('View').find(node=>node.props.onScroll);assert.ok(view,'Scrollable page must expose onScroll for pagination');view.props.onScroll({nativeEvent:{contentOffset:{y:500},contentSize:{height:1200},layoutMeasurement:{height:600}}});});
-function setup({api=async()=>({id:'saved'}),read,auth={user:{uid:'owner'},profile:{role:'owner'},offline:false}}={}){
+function setup({api=async()=>({id:'saved'}),read,auth={user:{uid:'owner'},profile:{role:'owner'},offline:false},aiComponent}={}){
   const calls=[],reads=[],moves=[];
   const navigation={navigate:(...args)=>moves.push(['navigate',...args]),replace:(...args)=>moves.push(['replace',...args]),goBack:()=>moves.push(['back'])};
   const Primary=loadUI('src/shared/components/PrimaryButton.js').default;
@@ -26,6 +26,7 @@ function setup({api=async()=>({id:'saved'}),read,auth={user:{uid:'owner'},profil
     '../../auth/context/AuthContext':{useAuth:()=>auth},
     '../components/PhotoGallery':props=>React.createElement('PhotoGallery',props),
     '../components/PrivatePhoto':props=>React.createElement('PrivatePhoto',props),
+    ...(aiComponent?{'../components/AIAssistButton':aiComponent}:{}),
     '../services/marketApi':{marketApi:async(...args)=>{calls.push(args);return api(...args);}},
     '../hooks/useMarketData':{useMarketData:(op,input)=>{reads.push([op,input]);return {data:read?read(op,input):{items:[]},busy:false,error:'',refresh:async()=>{}};}},
   });
@@ -37,6 +38,19 @@ async function mount(context,name,params={}){
 async function fillRequest(tree){
   for(const [label,value] of [['Request title','Paint the doors'],['Description','Repair and paint both front doors.'],['City','Pretoria'],['Minimum budget (ZAR)','500.10'],['Maximum budget (ZAR)','1000.25']])await change(tree,label,value);
 }
+
+test('AI Apply changes only request text and optional category while retaining photos, location and terms until normal save',async()=>{
+ const original={...request,vehicleId:vehicle.id,categoryId:category.id,version:4,budgetMinCents:50000,budgetMaxCents:100000,photoIds:['attached-a','attached-b'],mandatoryServices:['Keep original finish'],serviceLocation:{latitude:-26.1,longitude:28.1}};
+ const c=setup({aiComponent:props=>React.createElement('AIAssist',props),read:op=>({items:op==='vehicles'?[vehicle]:op==='categories'?[category]:[]})});
+ const tree=await mount(c,'RequestFormScreen',{request:original});
+ try{
+  const ai=tree.root.findByType('AIAssist');assert.equal(ai.props.kind,'request');assert.equal(c.calls.length,0);
+  await act(async()=>ai.props.onApply({title:'Updated paint request',description:'Paint both front doors.',category:{id:'paint',name:'Paint'}}));
+  assert.equal(field(tree,'Request title').props.value,'Updated paint request');assert.equal(c.calls.length,0);assert.deepEqual(tree.root.findByType('PhotoGallery').props.selectedIds,original.photoIds);
+  await press(tree,'Save request');const [op,data]=c.calls[0];assert.equal(op,'requestUpdate');assert.deepEqual(data.photoIds,original.photoIds);assert.deepEqual(data.serviceLocation,original.serviceLocation);
+  assert.deepEqual(data.mandatoryServices,original.mandatoryServices);assert.equal(data.vehicleId,vehicle.id);assert.equal(data.budgetMinCents,50000);assert.equal(data.version,4);
+ }finally{await unmount(tree);}
+});
 
 test('vehicle form validates live, keeps a failed draft, submits once and includes the optimistic version',async()=>{
   let reject,fail=true;

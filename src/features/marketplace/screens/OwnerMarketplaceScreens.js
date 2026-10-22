@@ -12,6 +12,7 @@ import RequestPhotoUploads from '../components/RequestPhotoUploads';
 import LocationPicker from '../../../shared/location/LocationPicker';
 import {CustomerConversationPicker} from '../components/ConversationAction';
 import PrivatePhoto from '../components/PrivatePhoto';
+import AIAssistButton from '../components/AIAssistButton';
 import {vehicleErrors, requestErrors, parseMoney} from '../utils/validation';
 import {useTheme} from '../../../shared/theme/ThemeContext';
 
@@ -211,6 +212,10 @@ function RequestDraft({route, navigation}) {
       <Text style={styles.sectionEyebrow}>03  /  THE DETAILS</Text>
       <Field label="Request title" placeholder="e.g. satin black vinyl wrap" value={form.title} onChangeText={value => edit('title', value)} onBlur={() => setTouched(previous => ({...previous, title: true}))} maxLength={100} editable={!disabled} error={fieldError('title')}/>
       <Field label="Description" placeholder="Tell the shop what you're looking for…" value={form.description} onChangeText={value => edit('description', value)} onBlur={() => setTouched(previous => ({...previous, description: true}))} maxLength={300} multiline editable={!disabled} error={fieldError('description')} helperText={`${form.description.length}/300 characters`}/>
+      <AIAssistButton kind="request" title={form.title} description={form.description} categoryId={form.categoryId} disabled={disabled} onApply={suggestion=>{
+        setForm(previous=>({...previous,title:suggestion.title,description:suggestion.description,...(suggestion.category?{categoryId:suggestion.category.id}:{})}));
+        if(suggestion.category)setSelected(previous=>({...previous,category:suggestion.category}));
+      }}/>
       <Field label="City" value={form.city} onChangeText={value => edit('city', value)} onBlur={() => setTouched(previous => ({...previous, city: true}))} maxLength={100} editable={!disabled} error={fieldError('city')}/>
       <Field label="Mandatory services (optional, one per line)" value={mandatoryServicesText} onChangeText={setMandatoryServicesText} multiline maxLength={4020} editable={!disabled} error={errors.mandatoryServices} helperText="Up to 20 unique requirements, each at most 200 characters. Shops confirm each requirement for recommendations."/>
       <LocationPicker label="Service location" value={serviceLocation} onChange={setServiceLocation} disabled={mutation.saving || mutation.offline || uploadingAttachment} onBusyChange={setLocating}/>

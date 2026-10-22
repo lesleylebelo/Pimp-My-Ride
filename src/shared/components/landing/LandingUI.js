@@ -59,7 +59,7 @@ export const shopTabs = [
   { label: 'My Shop', icon: 'profile' },
 ];
 
-export function LandingShell({ title, subtitle, tabs, feature, showFeature, onClose, children, admin = false, activeTab, onTabPress, onScroll, onLayout, onContentSizeChange, floatingAction, refreshControl }) {
+export function LandingShell({ title, subtitle, tabs, feature, showFeature, onClose, children, admin = false, activeTab, onTabPress, onScroll, onLayout, onContentSizeChange, floatingAction, refreshControl, headerRight }) {
   const [loaded, fontError] = useFonts({ SpaceGrotesk_500Medium, SpaceGrotesk_600SemiBold, SpaceGrotesk_700Bold, Manrope_400Regular, Manrope_500Medium, Manrope_600SemiBold });
   const { logout, working, offline, cachedAt } = useAuth();
   const {theme} = useTheme();
@@ -86,9 +86,7 @@ export function LandingShell({ title, subtitle, tabs, feature, showFeature, onCl
               <Text accessibilityRole="header" style={[ui.title, { fontFamily: loaded ? fontNames.displaySemi : undefined }]} numberOfLines={1}>{title}</Text>
               {!!subtitle && <Text style={[ui.subtitle, { fontFamily: loaded ? fontNames.regular : undefined }]} numberOfLines={2}>{subtitle}</Text>}
             </View>
-            {!admin && <Pressable onPress={signOut} disabled={working} style={ui.signOut} hitSlop={8}>
-              <Text style={[ui.signOutText, { fontFamily: loaded ? fontNames.medium : undefined }]}>Sign out</Text>
-            </Pressable>}
+            {!!headerRight && <View style={ui.headerActions}>{headerRight}</View>}
           </View>
 
           <ScrollView refreshControl={refreshControl} style={ui.scroll} contentContainerStyle={[ui.content, !tabs && { paddingBottom: Math.max(insets.bottom, 24) }]} keyboardShouldPersistTaps="handled" onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} scrollEventThrottle={onScroll ? 16 : undefined}>
@@ -134,8 +132,7 @@ export const makeStyles = (colors) => StyleSheet.create({
   headerLeft: { flex: 1, minWidth: 0 },
   title: { fontSize: 26, lineHeight: 32, fontWeight: '600', color: colors.accent },
   subtitle: { fontSize: 14, lineHeight: 20, color: colors.textSecondary, marginTop: 4 },
-  signOut: { paddingVertical: 6, paddingHorizontal: 2, marginTop: 4 },
-  signOutText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
+  headerActions: {flexDirection:'row',alignItems:'center',gap:8,flexShrink:0,minHeight:44},
 
   scroll: { flex: 1 },
   content: { paddingHorizontal: spacing.lg, paddingTop: 8, paddingBottom: 30, gap: spacing.md },

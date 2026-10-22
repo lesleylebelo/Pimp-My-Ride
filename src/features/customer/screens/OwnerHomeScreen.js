@@ -6,6 +6,8 @@ import {useAuth} from '../../auth/context/AuthContext';
 import {usePostsFeed} from '../../marketplace/hooks/usePostsFeed';
 import {PostCard} from '../../marketplace/components/PostCard';
 import {ownerRoutes} from '../../marketplace/components/MarketplaceUI';
+import MessagesHeaderButton from '../../marketplace/components/MessagesHeaderButton';
+import NotificationsHeaderButton from '../../marketplace/components/NotificationsHeaderButton';
 import {radius} from '../../../shared/theme/typography';
 import colors from '../../../shared/theme/colors';
 
@@ -44,6 +46,7 @@ export default function OwnerHomeScreen({navigation}){
    subtitle="Find shops and builds near you"
    tabs={ownerTabs}
    activeTab="Discover"
+   headerRight={<><NotificationsHeaderButton navigation={navigation}/><MessagesHeaderButton navigation={navigation}/></>}
    {...feedback}
    onScroll={onScroll}
    onContentSizeChange={onContentSizeChange}

@@ -73,9 +73,13 @@ unread state, using the existing notification-history controls.
 
 ## Screens and updates
 
-Both existing navigation stacks register **Messages** and **Chat**. Entry points are available
-from marketplace pages, account/profile, request details, quotation comparison and active
-booking details. Owners can choose approved shops from their own request; shops can open
+Both existing navigation stacks register **Messages** and **Chat**. The general inbox is
+opened from the outlined messaging icon at the top-right of customer **Discover** and shop
+**Find Jobs**. Both use the same 44-point touch target and an accessible unread badge,
+aggregated across existing inbox pages while the feed is focused and foregrounded. Reading
+these counters never marks messages read. Redundant generic/profile Messages shortcuts
+have been removed. Contextual chat entry points remain in request details, quotation
+comparison and active booking details. Owners can choose approved shops from their own request; shops can open
 an authorised chat or request customer approval from an open request. The customer sees
 approve, reject and revoke controls in the private chat. History shows context, sender/receiver
 bubbles, SAST timestamps, unread counts, pagination and links to the request/booking.
@@ -127,13 +131,18 @@ these two indexes before using the inbox on a remote database.
 - `src/features/marketplace/services/messageApi.js`: authenticated, account-bound API and retries.
 - `src/features/marketplace/hooks/useMessages.js`: active-screen updates and paginated feed.
 - `src/features/marketplace/components/ConversationAction.js`: shop/customer initiation and
-  pending-enquiry controls; `MarketplaceUI.js`: shared Messages entry point.
+  pending-enquiry controls; `MarketplaceUI.js`: shared header-action slot.
+- `src/features/marketplace/components/MessagesHeaderButton.js`: shared feed inbox icon
+  and unread indicator using the existing read-only messaging API.
 - `src/features/marketplace/screens/MessagingScreens.js`: inbox and private text chat.
 - `OwnerNavigator.js`, `ShopNavigator.js` in `src/features/marketplace`: existing stack routes.
 - `OwnerMarketplaceScreens.js`, `ShopMarketplaceScreens.js`, `QuoteComparisonScreen.js`,
   `BookingScreens.js`, `CommunicationScreens.js` in the marketplace screens directory:
   existing workflow entry points and notification routing.
-- `src/features/auth/screens/AccountScreen.js`: profile Messages entry point.
+- `src/features/auth/screens/AccountScreen.js`: Sign out remains the last account action;
+  the profile Messages shortcut is removed. Customer/shop shared headers no longer show
+  Sign out. Account scrolling and safe-area padding, the logout handler and session cleanup
+  are unchanged.
 - `tests/messaging.test.cjs`: messaging UI, retry, read/consent actions, polling and cleanup.
 - `backend/test/marketplace.test.cjs`: focused policy, privacy, retry, pagination and business-rule tests.
 - `backend/test/marketplace-integration.test.cjs`: actual emulator Auth/Firestore and HTTP tests.
@@ -166,3 +175,25 @@ becomes authorised: it creates a real authorised thread without granting custome
 
 No commits, pushes, deployments or live data changes were performed. Device testing and
 remote index provisioning remain outside this local implementation.
+
+## Feed navigation UI update
+
+Customer Discover and shop Find Jobs now use the same outlined header icon and unread
+badge. Counter reads use the existing paginated inbox API every 15 seconds while active;
+polling stops on blur, background and unmount. Account changes discard earlier responses.
+The badge caps its visual label at `99+`, while accessibility exposes the full count.
+Counter failures show no stale badge and report unavailable status to accessibility.
+
+This UI update changes `LandingUI.js`, `MarketplaceUI.js`, `OwnerHomeScreen.js`,
+`ShopMarketplaceScreens.js`, `AccountScreen.js`, adds `MessagesHeaderButton.js` and
+`tests/feed-navigation.test.cjs`, and updates this document. Internal inbox/chat routes,
+contextual conversation actions, notifications and authentication/session cleanup are
+unchanged. Sign out remains the last action inside the scrollable, safe-area Account view.
+
+Node **22.23.3** verification: **369 application tests passed**, including six new
+navigation tests, and Android/iOS/web Expo exports passed with native Hermes bytecode.
+The first sandboxed export could not execute the local Hermes compiler; the permitted
+local rerun passed. `git diff --check` passed. Logs and bundles are in the ignored
+`.local-checks/feed-navigation-*` paths. Small-screen safe areas, text scaling and touch
+comfort still need physical-device visual checks. No backend, API, data, bucket or
+permission changes, commits, pushes or deployments were performed for this UI update.

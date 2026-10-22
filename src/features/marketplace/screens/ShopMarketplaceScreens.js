@@ -13,6 +13,8 @@ import {Page, Card, Field, Button, Notice, useInfiniteCursor, formatMoney, Quote
 import {parseMoney, quoteErrors} from '../utils/validation';
 import PhotoGallery from '../components/PhotoGallery';
 import RequestPhotos from '../components/RequestPhotos';
+import MessagesHeaderButton from '../components/MessagesHeaderButton';
+import NotificationsHeaderButton from '../components/NotificationsHeaderButton';
 import {usePostsFeed} from '../hooks/usePostsFeed';
 import {PostCard,postTime} from '../components/PostCard';
 
@@ -148,7 +150,7 @@ function RequestsFeed({navigation, feed}) {
     {busy && !!feedRequests.length && <Text style={styles.loadMore}>Loading more requests...</Text>}
   </Page>;
 
-  return <Page title="Find Jobs" navigation={navigation} onScroll={onScroll} onLayout={requestFeed.onLayout} onContentSizeChange={onContentSizeChange}
+  return <Page title="Find Jobs" navigation={navigation} headerRight={<><NotificationsHeaderButton navigation={navigation}/><MessagesHeaderButton navigation={navigation}/></>} onScroll={onScroll} onLayout={requestFeed.onLayout} onContentSizeChange={onContentSizeChange}
    floatingAction={<Pressable accessibilityRole="button" accessibilityLabel="New showcase" onPress={()=>navigation.navigate('PostForm',{type:'showcase'})} style={styles.floating}><Ionicons name="add" size={28} color={colors.white}/></Pressable>}>
     <FeedSearchInput accessibilityLabel="Search requests, vehicles or services" placeholder="Search requests, vehicles or services" value={search} onChangeText={setSearch}/>
     <FeedSourceSelector options={[{label:'All',value:'all'},{label:'Customers',value:'customers'},{label:'Shops',value:'shops'}]} storageKey="feed-source:shop" value={source} onChange={setSource}/>

@@ -348,10 +348,10 @@ test('new balance attempt requires a fresh result action and mixed settlement la
  state.data={booking:{...partial,paymentStatus:'paid',paidCents:12345,balanceDueCents:0},paymentAttempts:[{id:'cash',status:'paid',method:'simulated_cash',amountCents:9845,currency:'ZAR'}]};await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));assert.match(text(tree),/Initial choice: Deposit online/);assert.match(text(tree),/Method: cash/);await act(async()=>tree.unmount());
 });
 
-test('booking history exposes notification history and issued receipts to both participant roles',async()=>{
+test('booking history omits the global notification shortcut and preserves issued receipts for both roles',async()=>{
  for(const role of ['owner','shop']){
   const {state,screens,navigation}=setup({auth:{user:{uid:role+'-1'},profile:{role},offline:false},data:{items:[booking],cursor:null}});
-  let tree=await mount(screens.BookingsScreen,{navigation});await act(async()=>button(tree,'Notification history').props.onPress());assert.deepEqual(state.navigations.at(-1),['Notifications']);await act(async()=>tree.unmount());
+  let tree=await mount(screens.BookingsScreen,{navigation});assert.equal(button(tree,'Notification history'),undefined);await act(async()=>tree.unmount());
   state.data={booking:{...booking,paymentStatus:'paid',paidCents:12345,balanceDueCents:0},paymentAttempts:[{id:'paid-attempt',amountCents:12345,currency:'ZAR',status:'paid',receiptIssued:true},{id:'failed-attempt',amountCents:12345,currency:'ZAR',status:'failed',receiptIssued:false}]};
   tree=await mount(screens.BookingDetailScreen,detailProps(navigation));assert.equal(tree.root.findAllByType('Pressable').filter(node=>node.findAllByType('Text').some(t=>t.props.children==='View simulated receipt')).length,1);await act(async()=>button(tree,'View simulated receipt').props.onPress());assert.deepEqual(state.navigations.at(-1),['ReceiptDetail',{id:'paid-attempt'}]);await act(async()=>tree.unmount());
  }
