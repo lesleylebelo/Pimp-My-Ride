@@ -12,6 +12,7 @@ import {useMarketData} from '../hooks/useMarketData';
 import {Page, Card, Field, Button, Notice, useInfiniteCursor, formatMoney, QuoteCard} from '../components/MarketplaceUI';
 import {parseMoney, quoteErrors} from '../utils/validation';
 import PhotoGallery from '../components/PhotoGallery';
+import RequestPhotos from '../components/RequestPhotos';
 import {usePostsFeed} from '../hooks/usePostsFeed';
 import {PostCard,postTime} from '../components/PostCard';
 
@@ -139,6 +140,7 @@ function RequestsFeed({navigation, feed}) {
     <Notice busy={busy} error={offline ? offlineMessage : error}/>
     {feedRequests.map(request => <Card key={request.id}>
       <RequestSummary request={request}/>
+      <RequestPhotos request={request}/>
       <Button title="View request" disabled={disabled} onPress={() => { if (!disabled) navigation.navigate('ShopRequest', {id: request.id}); }}/>
     </Card>)}
     {!busy && data && !data.items.length && <Text>No direct requests yet.</Text>}
@@ -186,6 +188,7 @@ function RequestsFeed({navigation, feed}) {
       <Text style={styles.jobTitle}>{request.title}</Text>
       <Text style={styles.jobVehicle}>{[request.vehicle?.year, request.vehicle?.make, request.vehicle?.model].filter(Boolean).join(' ')}</Text>
       {!!request.description && <Text style={styles.jobDescription}>{request.description}</Text>}
+      <RequestPhotos request={request}/>
       <Text style={styles.jobBudget}>{request.budgetMinCents == null && request.budgetMaxCents == null ? 'Budget not specified' : `${request.budgetMinCents == null ? 'No minimum' : formatMoney(request.budgetMinCents)} – ${request.budgetMaxCents == null ? 'No maximum' : formatMoney(request.budgetMaxCents)}`}</Text>
       <View style={styles.jobFooter}>
         <Pressable accessibilityRole="button" accessibilityLabel={`${request.quotedByMe ? 'View your quote' : 'View request'}: ${request.title}`} disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('ShopRequest', {id: request.id});}} style={styles.viewJob}>

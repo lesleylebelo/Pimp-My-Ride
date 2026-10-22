@@ -1,5 +1,5 @@
 import {Platform} from 'react-native';
-import {apiRequest} from '../../../shared/services/api';
+import {apiRequest,uploadRequest} from '../../../shared/services/api';
 import {firebase} from '../../../shared/services/firebase';
 import {photoFileError} from '../utils/photos';
 
@@ -74,6 +74,6 @@ async function uploadPhoto(id,slot,version,file,expectedUid,target) {
    body.append('file',{uri:file.uri,name:file.name,type:file.mimeType});
   }
   account(uid);
-  return apiRequest(`photos/${target==='request'?'requests':'vehicles'}/${encodeURIComponent(id)}${target==='request'?'':'/'+encodeURIComponent(slot)}?version=${encodeURIComponent(intent.version)}&requestId=${encodeURIComponent(requestId)}`,body,{multipart:true,expectedUid:uid});
+  return uploadRequest(`photos/${target==='request'?'requests':'vehicles'}/${encodeURIComponent(id)}${target==='request'?'':'/'+encodeURIComponent(slot)}?version=${encodeURIComponent(intent.version)}&requestId=${encodeURIComponent(requestId)}`,body,{expectedUid:uid});
  },expectedUid,{version});
 }
