@@ -11,6 +11,9 @@ This repository contains the ongoing development of the PimpMyRide mobile applic
 
 ## Setup and current handover
 
+Private customer–shop messaging, consent rules and local Firebase index requirements are
+documented in [docs/MESSAGING.md](docs/MESSAGING.md).
+
 Smart quotation recommendations, scoring rules, distance handling and limitations are
 documented in [docs/SMART_QUOTATIONS.md](docs/SMART_QUOTATIONS.md).
 

@@ -1146,3 +1146,155 @@ test('shop-location saves recalculate distances and origin-only request edits in
  await assert.rejects(()=>f.write('owner','quoteAccept',{id:b.id}),{code:'failed-precondition'});
  await assert.rejects(()=>f.write('other','requestUpdate',{...requestData,id,version:before.version+1,serviceLocation:null}),{code:'not-found'});
 });
+
+function messagingFixture() {
+ const f=fixture(),{createServices}=require('../services.cjs');let sequence=0;
+ const auth={getUser:async uid=>({metadata:{creationTime:'2020-01-01'},tokensValidAfterTime:'2020-01-01',...await f.auth.getUser(uid)})};
+ const services=createServices({db:f.db,auth,storage:{},mockPaymentEnv:LOCAL_MOCK_ENV});
+ const chat=(uid,op,data={})=>services.messaging({auth:{uid,token:{email_verified:true,auth_time:Date.now()/1000}},data:{op,...(['open','enquire','consent','send','read'].includes(op)?{requestId:`chat-test-${++sequence}`} : {}),...data}});
+ return {...f,chat};
+}
+const chatRows=(f,prefix)=>[...f.db.rows.entries()].filter(([path])=>path.startsWith(prefix+'/'));
+
+test('open-request visibility alone cannot initiate chat; an enquiry stays pending until customer consent',async()=>{
+ const f=messagingFixture(),id=await created(f);
+ await assert.rejects(()=>f.chat('shop','open',{serviceRequestId:id}),{code:'permission-denied'});
+ assert.equal(chatRows(f,'conversations').length,0);
+ const enquiry=await f.chat('shop','enquire',{serviceRequestId:id,reason:'May we discuss the required paint finish?'});
+ assert.equal((await f.chat('shop','get',{id:enquiry.id})).conversation.canSend,false);
+ await assert.rejects(()=>f.chat('shop','send',{id:enquiry.id,text:'Not approved'}),{code:'permission-denied'});
+ await assert.rejects(()=>f.chat('shop','consent',{id:enquiry.id,decision:'approved'}),{code:'permission-denied'});
+ await f.chat('owner','consent',{id:enquiry.id,decision:'approved'});
+ await f.chat('shop','send',{id:enquiry.id,text:'Thanks for approving this discussion.'});
+ assert.equal((await f.chat('owner','get',{id:enquiry.id})).messages.length,1);
+});
+
+test('customer initiation is explicit consent for an eligible shop on an owned request',async()=>{
+ const f=messagingFixture(),id=await created(f);
+ await assert.rejects(()=>f.chat('other','open',{serviceRequestId:id,shopId:'shop'}),{code:'not-found'});
+ const conversation=await f.chat('owner','open',{serviceRequestId:id,shopId:'shop'});
+ const result=await f.chat('shop','get',{id:conversation.id});assert.equal(result.conversation.consent,'approved');assert.equal(result.conversation.canSend,true);
+ await f.chat('shop','send',{id:conversation.id,text:'Authorised reply'});
+ assert.equal((await f.chat('owner','list')).items[0].unreadCount,1);
+});
+
+test('a current quoted shop can initiate while an unrelated shop cannot read, join or send',async()=>{
+ const f=messagingFixture(),offer=await offered(f),id=offer.serviceRequestId;
+ const conversation=await f.chat('shop','open',{serviceRequestId:id});
+ await f.chat('shop','send',{id:conversation.id,text:'Question about the current offer'});
+ for(const op of ['get','send','read','consent'])await assert.rejects(()=>f.chat('competitor',op,{id:conversation.id,...(op==='send'?{text:'Forged'}:op==='read'?{through:0}:op==='consent'?{decision:'approved'}:{})}),{code:'not-found'});
+ await assert.rejects(()=>f.chat('competitor','open',{serviceRequestId:id,shopId:'shop'}),{code:'permission-denied'});
+ await assert.rejects(()=>f.chat('shop','send',{id:conversation.id,text:'Forged sender',senderId:'owner'}),{code:'invalid-argument'});
+ assert.deepEqual((await f.chat('other','list')).items,[]);assert.deepEqual((await f.chat('competitor','list')).items,[]);
+});
+
+test('direct invitation is restricted to its invited shop and ends when the request closes or changes shop',async()=>{
+ const f=messagingFixture(),id=await created(f,{visibility:'direct',shopId:'shop'});
+ await assert.rejects(()=>f.chat('competitor','open',{serviceRequestId:id}),{code:'not-found'});
+ await assert.rejects(()=>f.chat('owner','open',{serviceRequestId:id,shopId:'competitor'}),{code:'permission-denied'});
+ const c=await f.chat('shop','open',{serviceRequestId:id});await f.chat('shop','send',{id:c.id,text:'Invited discussion'});
+ f.db.rows.get('serviceRequests/'+id).shopId='competitor';
+ assert.equal((await f.chat('shop','get',{id:c.id})).conversation.canSend,false);
+ await assert.rejects(()=>f.chat('shop','send',{id:c.id,text:'Old invitation'}),{code:'permission-denied'});
+ f.db.rows.get('serviceRequests/'+id).shopId='shop';f.db.rows.get('serviceRequests/'+id).status='closed';
+ assert.equal((await f.chat('shop','get',{id:c.id})).messages.length,1);
+});
+
+test('rejected enquiries and explicit revocation block both parties, even when a quote later exists',async()=>{
+ const f=messagingFixture(),id=await created(f),c=await f.chat('shop','enquire',{serviceRequestId:id,reason:'Please approve a discussion.'});
+ await f.chat('owner','consent',{id:c.id,decision:'rejected'});
+ await assert.rejects(()=>f.chat('shop','enquire',{serviceRequestId:id,reason:'Repeated enquiry'}),{code:'permission-denied'});
+ await f.write('shop','quoteSubmit',{...quoteData,serviceRequestId:id});
+ for(const uid of ['shop','owner'])await assert.rejects(()=>f.chat(uid,'send',{id:c.id,text:'Rejected enquiry bypass'}),{code:'permission-denied'});
+ await f.chat('owner','consent',{id:c.id,decision:'approved'});await f.chat('owner','send',{id:c.id,text:'We may discuss now'});
+ await f.chat('owner','consent',{id:c.id,decision:'revoked'});
+ for(const uid of ['shop','owner'])await assert.rejects(()=>f.chat(uid,'send',{id:c.id,text:'Revoked bypass'}),{code:'permission-denied'});
+ assert.equal((await f.chat('owner','get',{id:c.id})).messages.length,1);
+});
+
+test('expired, withdrawn, superseded and obsolete offers preserve history but cannot authorise new messages',async()=>{
+ for(const change of [quote=>{quote.validUntil=Timestamp.fromMillis(Date.now()-1);},quote=>{quote.status='withdrawn';},quote=>{quote.status='superseded';},quote=>{quote.termsVersion=0;}]) {
+  const f=messagingFixture(),offer=await offered(f),c=await f.chat('shop','open',{serviceRequestId:offer.serviceRequestId});
+  await f.chat('shop','send',{id:c.id,text:'Original authorised message'});change(f.db.rows.get('quotations/'+offer.id));
+  const history=await f.chat('owner','get',{id:c.id});assert.equal(history.messages.length,1);assert.equal(history.conversation.canSend,false);
+  await assert.rejects(()=>f.chat('shop','send',{id:c.id,text:'No current relationship'}),{code:'permission-denied'});
+ }
+});
+
+test('a valid booking continues authorisation after quote expiry; cancellation or explicit revocation stops sends',async()=>{
+ const f=messagingFixture(),offer=await offered(f),c=await f.chat('shop','open',{serviceRequestId:offer.serviceRequestId});
+ await f.write('owner','quoteAccept',{id:offer.id});f.db.rows.get('quotations/'+offer.id).validUntil=Timestamp.fromMillis(Date.now()-1);
+ await f.chat('shop','send',{id:c.id,text:'Discuss the booked appointment'});
+ assert.equal((await f.chat('owner','get',{id:c.id})).conversation.bookingId,offer.serviceRequestId);
+ f.db.rows.get('bookings/'+offer.serviceRequestId).status='cancelled';
+ await assert.rejects(()=>f.chat('shop','send',{id:c.id,text:'Cancelled relationship'}),{code:'permission-denied'});
+ assert.equal((await f.chat('owner','get',{id:c.id})).messages.length,1);
+});
+
+test('current quotation heads and material request versions are checked on every send',async()=>{
+ const f=messagingFixture(),offer=await offered(f),c=await f.chat('shop','open',{serviceRequestId:offer.serviceRequestId});
+ f.db.rows.get('quotationHeads/'+quoteId(offer.serviceRequestId,'shop')).quoteId='missing';
+ await assert.rejects(()=>f.chat('shop','send',{id:c.id,text:'Not current'}),{code:'permission-denied'});
+ await f.chat('owner','consent',{id:c.id,decision:'approved'});
+ await f.write('owner','requestUpdate',{...requestData,id:offer.serviceRequestId,version:1,description:'Material scope change'});
+ await assert.rejects(()=>f.chat('shop','send',{id:c.id,text:'Consent belongs to old terms'}),{code:'permission-denied'});
+});
+
+test('canonical conversations survive concurrent starts and enquiries without duplicate records or opening notifications',async()=>{
+ const f=messagingFixture(),offer=await offered(f);
+ const results=await Promise.all(Array.from({length:8},()=>f.chat('shop','open',{serviceRequestId:offer.serviceRequestId})));
+ assert.equal(new Set(results.map(row=>row.id)).size,1);
+ assert.equal(chatRows(f,'conversations').length,1);
+ assert.equal(chatRows(f,'notifications').filter(([,row])=>row.event==='conversation_opened').length,1);
+ const same=await f.chat('owner','open',{serviceRequestId:offer.serviceRequestId,shopId:'shop'});assert.equal(same.id,results[0].id);
+ const late=messagingFixture(),current=await offered(late);
+ const enquired=await late.chat('shop','enquire',{serviceRequestId:current.serviceRequestId,reason:'A quotation became current before this enquiry arrived.'});
+ assert.equal((await late.chat('shop','get',{id:enquired.id})).conversation.canSend,true);
+ assert.equal(chatRows(late,'notifications').filter(([,row])=>row.event==='conversation_opened').length,1);
+ assert.equal((await late.chat('shop','open',{serviceRequestId:current.serviceRequestId})).id,enquired.id);
+});
+
+test('message retries persist one message, one recipient notification and one unread increment',async()=>{
+ const f=messagingFixture(),id=await created(f),c=await f.chat('owner','open',{serviceRequestId:id,shopId:'shop'});
+ const businessBefore=JSON.stringify([...f.db.rows].filter(([path])=>/^(serviceRequests|quotations|bookings)\//.test(path)));
+ const payload={id:c.id,text:'Official changes still use the quotation and booking workflows.',requestId:'same-send'};
+ const results=await Promise.all([f.chat('owner','send',payload),f.chat('owner','send',payload)]);assert.deepEqual(results[0],results[1]);
+ const view=await f.chat('shop','get',{id:c.id});assert.equal(view.messages.length,1);assert.equal(view.messages[0].senderId,'owner');assert.equal(view.conversation.unreadCount,1);assert.equal(typeof view.messages[0].createdAt,'number');
+ const notifications=chatRows(f,'notifications').filter(([,row])=>row.event==='message_received');assert.equal(notifications.length,1);assert.equal(notifications[0][1].recipientUid,'shop');
+ assert.equal(JSON.stringify([...f.db.rows].filter(([path])=>/^(serviceRequests|quotations|bookings)\//.test(path))),businessBefore);
+ await assert.rejects(()=>f.chat('owner','send',{...payload,text:'Altered retry'}),{code:'already-exists'});
+});
+
+test('read acknowledgements cannot clear unseen concurrent messages or change the other participant unread count',async()=>{
+ const f=messagingFixture(),id=await created(f),c=await f.chat('owner','open',{serviceRequestId:id,shopId:'shop'});
+ await f.chat('owner','send',{id:c.id,text:'First'});const first=await f.chat('shop','get',{id:c.id});
+ assert.equal(first.conversation.unreadCount,1);
+ await f.chat('owner','send',{id:c.id,text:'Second arrived later'});
+ assert.equal((await f.chat('shop','read',{id:c.id,through:1})).unreadCount,1);
+ await f.chat('shop','read',{id:c.id,through:1});assert.equal((await f.chat('shop','get',{id:c.id})).conversation.unreadCount,1);
+ await assert.rejects(()=>f.chat('shop','read',{id:c.id,through:3}),{code:'invalid-argument'});
+ await f.chat('shop','send',{id:c.id,text:'Reply'});await f.chat('shop','read',{id:c.id,through:2});
+ assert.equal((await f.chat('owner','get',{id:c.id})).conversation.unreadCount,1);
+});
+
+test('history pagination is chronological and send throttling rejects spam without blocking idempotent retries',async()=>{
+ const f=messagingFixture(),id=await created(f),c=await f.chat('owner','open',{serviceRequestId:id,shopId:'shop'});
+ for(let i=0;i<25;i++){
+  if(i%10===0){const row=f.db.rows.get('conversations/'+c.id);row.ownerSendWindow={start:Date.now()-61000,count:0};}
+  await f.chat('owner','send',{id:c.id,text:'Message '+i});
+ }
+ const latest=await f.chat('shop','get',{id:c.id});assert.deepEqual(latest.messages.map(row=>row.sequence),Array.from({length:20},(_,i)=>i+6));assert.ok(latest.cursor);
+ const older=await f.chat('shop','get',{id:c.id,cursor:latest.cursor});assert.deepEqual(older.messages.map(row=>row.sequence),[1,2,3,4,5]);assert.equal(older.cursor,null);
+ for(let i=0;i<5;i++)await f.chat('owner','send',{id:c.id,text:'Burst '+i});
+ await assert.rejects(()=>f.chat('owner','send',{id:c.id,text:'Spam'}),{code:'resource-exhausted'});
+ for(const text of ['', 'x'.repeat(2001),'bad\u0000message'])await assert.rejects(()=>f.chat('shop','send',{id:c.id,text}),{code:'invalid-argument'});
+});
+
+test('disabled, unverified, revoked or unapproved participants cannot send; an active owner retains read-only history',async()=>{
+ const f=messagingFixture(),id=await created(f),c=await f.chat('owner','open',{serviceRequestId:id,shopId:'shop'});
+ await f.chat('shop','send',{id:c.id,text:'Before access changed'});
+ f.users.set('shop',{emailVerified:true,disabled:true});await assert.rejects(()=>f.chat('shop','get',{id:c.id}),{code:'permission-denied'});
+ assert.equal((await f.chat('owner','get',{id:c.id})).conversation.canSend,false);
+ f.users.clear();f.db.rows.get('users/shop').verificationStatus='rejected';await assert.rejects(()=>f.chat('shop','send',{id:c.id,text:'Unapproved'}),{code:'permission-denied'});
+ assert.equal((await f.chat('owner','get',{id:c.id})).messages.length,1);
+});

@@ -29,6 +29,7 @@ export function Page({title,subtitle,navigation,children,showTabs=true,onScroll,
         <Ionicons name="arrow-back" size={20} color={theme.accent} />
       </Pressable>
     )}
+    {navigation && route!=='Messages' && <LandingButton title="Messages" onPress={()=>navigation.navigate('Messages')}/>}
     {children}
   </LandingShell>;
 }

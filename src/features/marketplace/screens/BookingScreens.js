@@ -9,6 +9,7 @@ import {useMarketData} from '../hooks/useMarketData';
 import {Page, Card, Field, Button, Notice, StatusTag, useInfiniteCursor, formatMoney} from '../components/MarketplaceUI';
 import {appointmentErrors, cancellationError} from '../utils/bookingValidation';
 import PhotoGallery from '../components/PhotoGallery';
+import {ConversationAction} from '../components/ConversationAction';
 
 const offlineMessage = 'Connect to the internet to view and manage bookings.';
 const statusLabels = {pending_payment: 'Payment pending', pending_confirmation: 'Awaiting shop confirmation', confirmed: 'Confirmed', cancelled: 'Cancelled'};
@@ -175,6 +176,7 @@ function BookingDetail({navigation, id}) {
     {booking && <>
       <Card>
         <BookingSummary booking={booking}/>
+        {booking.status!=='cancelled' && <ConversationAction serviceRequestId={booking.serviceRequestId} shopId={booking.shopId} navigation={navigation} disabled={disabled}/>}
         <Text weight="semibold">Quotation total: {formatMoney(booking.totalCents)}</Text>
         {(booking.depositType==='percentage'||booking.depositType==='fixed')&&Number.isSafeInteger(booking.depositAmountCents)&&<Text>Accepted required deposit{booking.depositType==='percentage'?` (${booking.depositValue}%)`:''}: {formatMoney(booking.depositAmountCents)}</Text>}
         <Text>Simulated amount paid: {formatMoney(paidAmount(booking))}</Text>

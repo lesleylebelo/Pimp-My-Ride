@@ -10,6 +10,7 @@ import {Page, Card, Field, Button, Notice, StatusTag, useInfiniteCursor, formatM
 import PhotoGallery from '../components/PhotoGallery';
 import RequestPhotoUploads from '../components/RequestPhotoUploads';
 import LocationPicker from '../../../shared/location/LocationPicker';
+import {CustomerConversationPicker} from '../components/ConversationAction';
 import PrivatePhoto from '../components/PrivatePhoto';
 import {vehicleErrors, requestErrors, parseMoney} from '../utils/validation';
 import {useTheme} from '../../../shared/theme/ThemeContext';
@@ -264,6 +265,7 @@ export function OwnerRequestScreen({route, navigation}) {
       {request.status === 'open' && <ConfirmationButton title="Close request" message="Stop new or updated quotations for this request. Existing quotations remain available to view. Closing does not create a booking." disabled={disabled} danger onConfirm={close}/>}
     </Card>
       {!!request.photoIds?.length && <PhotoGallery target="request" id={id}/>}
+      <CustomerConversationPicker key={`${id}:${request.termsVersion}`} request={request} navigation={navigation} disabled={disabled}/>
       <Text weight="semibold" style={styles.heading}>Private quotations</Text>
       <Text>Compare quoted work, prices and validity. An accepted offer creates a booking awaiting the shop's confirmation.</Text>
       {request.status === 'open' && <Button title="Compare quotes" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('QuoteComparison', {id});}}/>}

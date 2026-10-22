@@ -41,6 +41,7 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
  app.delete('/api/posts/:id',postAction(services.deleteShowcase));
  app.post('/api/admin',action(services.adminApi));
  app.post('/api/marketplace',action(services.marketplace));
+ app.post('/api/messaging',action(services.messaging));
  app.post('/api/posts',(req,res,next)=>req.body?.op?action(services.postsApi)(req,res,next):postAction(services.createShowcase,201)(req,res,next));
  app.post('/api/photos',action(services.photosApi));
  app.post('/api/session',action(services.sessionEvent));

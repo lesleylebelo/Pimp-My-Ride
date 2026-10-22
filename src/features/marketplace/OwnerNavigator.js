@@ -1,4 +1,5 @@
 import React from 'react';
+import {MessagesScreen,ChatScreen} from './screens/MessagingScreens';
 import {ReceiptDetailScreen,NotificationsScreen} from './screens/CommunicationScreens';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import OwnerHomeScreen from '../customer/screens/OwnerHomeScreen';
@@ -40,6 +41,8 @@ export default function OwnerNavigator(){
       <Stack.Screen name="BookingDetail" component={BookingDetailScreen}/>
       <Stack.Screen name="ReceiptDetail" component={ReceiptDetailScreen}/>
       <Stack.Screen name="Notifications" component={NotificationsScreen}/>
+      <Stack.Screen name="Messages" component={MessagesScreen}/>
+      <Stack.Screen name="Chat" component={ChatScreen}/>
       <Stack.Screen name="OwnerAccount" component={AccountScreen}/>
     </Stack.Navigator>
   );
