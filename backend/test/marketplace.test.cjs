@@ -53,6 +53,26 @@ const quoteData={scope:'Prepare and respray both doors',items:[{description:'Pre
 async function created(f,details={}){return (await f.write('owner','requestCreate',{...requestData,...details})).id;}
 const audits=f=>[...f.db.rows.entries()].filter(([path])=>path.startsWith('auditLogs/'));
 
+test('shop request feed preserves immutable attachment IDs and order through pagination and refresh without exposing Garage media',async()=>{
+ const f=fixture();
+ f.db.rows.get('vehicles/car').photoSlots={'1':'attached-a','2':'attached-b','3':'garage-only'};
+ for(const id of ['attached-a','attached-b','garage-only'])f.db.rows.set('marketplacePhotos/'+id,{ownerId:'owner',vehicleId:'car',path:'photos/owner/car/'+id,name:id+'.jpg',size:100,contentType:'image/jpeg',bucket:'vehicle-images'});
+ const selected=['attached-b','attached-a'];
+ for(let index=0;index<21;index++){
+  const id=await created(f,{photoIds:selected});f.db.rows.get('serviceRequests/'+id).createdAt=Timestamp.fromMillis(1800000000000+index);
+ }
+ const first=await f.read('shop','requests',{feed:'open'}),second=await f.read('shop','requests',{feed:'open',cursor:first.cursor});
+ assert.equal(first.items.length,20);assert.equal(second.items.length,1);assert.equal(second.cursor,null);
+ for(const item of [...first.items,...second.items]){
+  assert.deepEqual(item.photoIds,selected);assert.deepEqual(item.photos.map(photo=>photo.id),selected);
+  for(const photo of item.photos)assert.deepEqual(Object.keys(photo).sort(),['contentType','id','name','size','uploadedAt']);
+ }
+ assert.ok(!JSON.stringify([first,second]).includes('garage-only'));assert.equal(new Set([...first.items,...second.items].map(item=>item.id)).size,21);
+ f.db.rows.get('vehicles/car').photoSlots={};
+ const refreshed=await f.read('shop','requests',{feed:'open'});assert.deepEqual(refreshed.items[0].photoIds,selected);
+ assert.deepEqual((await f.read('shop','request',{id:refreshed.items[0].id})).request.photoIds,selected);
+});
+
 test('owner can update an open request transactionally and retries are idempotent',async()=>{
  const f=fixture(),id=await created(f),before=f.db.rows.get(`serviceRequests/${id}`);
  const input={id,version:before.version,title:'Updated title',description:'Updated description.',categoryId:'paint',city:'Pretoria',budgetMinCents:20000,budgetMaxCents:250000,preferredDate:'',visibility:'open'};

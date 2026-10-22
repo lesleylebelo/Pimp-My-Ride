@@ -6,7 +6,7 @@ function setup({platform='android',fetchFile}={}){
  const auth={currentUser:{uid:'owner'}},calls=[];let respond=async()=>({ok:true});
  const mocks={'react-native':{Platform:{OS:platform}},'../../../shared/services/firebase':{firebase:()=>({auth})},
   '../utils/photos':loadUI('src/features/marketplace/utils/photos.js'),
-  '../../../shared/services/api':{apiRequest:async(...args)=>{calls.push(args);return respond(...args);}}};
+  '../../../shared/services/api':{apiRequest:async(...args)=>{calls.push(args);return respond(...args);},uploadRequest:async(...args)=>{calls.push(args);return respond(...args);}}};
  class Multipart{constructor(){this.fields=[];}append(...args){this.fields.push(args);}}
  const {code}=babel.transformSync(fs.readFileSync('src/features/marketplace/services/photoApi.js','utf8'),{configFile:false,babelrc:false,plugins:[require.resolve('@babel/plugin-transform-modules-commonjs')]});
  const mod={exports:{}};
@@ -33,7 +33,7 @@ test('a lost upload acknowledgement keeps its original key and revision after me
  assert.deepEqual(await s.uploadVehiclePhoto('car','1',3,{...selected},'owner'),{ok:true,id:'already-saved',version:3});
  const retried=uploadParams(s.calls[2]);assert.equal(retried.get('requestId'),first.get('requestId'));assert.equal(retried.get('version'),'2');
  assert.deepEqual(s.calls[2][1].fields,[['file',{uri:selected.uri,name:selected.name,type:selected.mimeType}]]);
- assert.deepEqual(s.calls[2][2],{multipart:true,expectedUid:'owner'});
+ assert.deepEqual(s.calls[2][2],{expectedUid:'owner'});
  await s.uploadVehiclePhoto('car','1',3,selected,'owner');assert.notEqual(uploadParams(s.calls[3]).get('requestId'),first.get('requestId'));assert.equal(uploadParams(s.calls[3]).get('version'),'3');
 });
 

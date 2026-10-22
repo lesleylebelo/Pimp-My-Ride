@@ -10,6 +10,17 @@ function baseURL(){
  if(!url.startsWith('https://')&&!(__DEV__&&url.startsWith('http://')))throw new Error('The backend address must use HTTPS.');
  return url;
 }
+function connectionError(url,stage,timedOut){
+ const error=new Error(timedOut?'The server is taking too long. Check your connection, refresh, and try again.':'Cannot reach the server. Check your connection and try again.');
+ error.code=timedOut?'api/connection-timeout':'api/network-request-failed';
+ error.connectionStage=stage;
+ if(__DEV__){
+  let origin='invalid-address';try{origin=new URL(url).origin;}catch{}
+  // Never print request URLs/queries, headers, bodies, local files or raw errors.
+  console.warn('[PimpMyRide connection]',{stage,origin,reason:timedOut?'timeout':'network'});
+ }
+ return error;
+}
 async function fetchWithTimeout(url,options,ms,stage){
  const controller=new AbortController();let timer;
  const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{
@@ -23,15 +34,7 @@ async function fetchWithTimeout(url,options,ms,stage){
  })(),deadline]);}
  catch(e){
   const timedOut=controller.signal.aborted||e?.name==='AbortError';
-  const error=new Error(timedOut?'The server is taking too long. Check your connection, refresh, and try again.':'Cannot reach the server. Check your connection and try again.');
-  error.code=timedOut?'api/connection-timeout':'api/network-request-failed';
-  error.connectionStage=stage;
-  if(__DEV__){
-   let origin='invalid-address';try{origin=new URL(url).origin;}catch{}
-   // Never print request URLs/queries, headers, bodies, local files or raw errors.
-   console.warn('[PimpMyRide connection]',{stage,origin,reason:timedOut?'timeout':'network'});
-  }
-  throw error;
+  throw connectionError(url,stage,timedOut);
  }
  finally{clearTimeout(timer);}
 }
@@ -89,26 +92,43 @@ export async function uploadRequest(path,body,{expectedUid,onProgress}={}){
  if(!user)throw new Error('Please sign in again.');
  if(expectedUid&&user.uid!==expectedUid)throw new Error('Your account changed. Please try again.');
  await ready(url);
+ if(auth.currentUser?.uid!==user.uid)throw new Error('Your account changed. Please try again.');
  const token=await user.getIdToken();
  if(auth.currentUser?.uid!==user.uid)throw new Error('Your account changed. Please try again.');
  if(localDemo)body=await require('./demoMedia').demoUploadBody(body);
+ if(auth.currentUser?.uid!==user.uid)throw new Error('Your account changed. Please try again.');
  return new Promise((resolve,reject)=>{
-  const xhr=new XMLHttpRequest();
-  xhr.open('POST',`${url}/api/${path}`);
+  const xhr=new XMLHttpRequest(),requestUrl=`${url}/api/${path}`;let settled=false,timer;
+  const finish=(callback,value)=>{if(settled)return;settled=true;clearTimeout(timer);callback(value);};
+  const failConnection=timedOut=>{if(!settled)finish(reject,connectionError(requestUrl,'upload',timedOut));};
+  xhr.open('POST',requestUrl);
   xhr.timeout=60000;
   xhr.setRequestHeader('Authorization',`Bearer ${token}`);
   xhr.upload.onprogress=event=>{if(event.lengthComputable)onProgress?.(Math.round(event.loaded/event.total*100));};
-  xhr.onerror=()=>reject(new Error('Cannot reach the server. Check your connection and try again.'));
-  xhr.ontimeout=()=>reject(new Error('The upload is taking too long. Refresh before trying again.'));
+  xhr.onerror=()=>failConnection(false);
+  xhr.ontimeout=()=>failConnection(true);
+  xhr.onabort=()=>failConnection(false);
   xhr.onload=()=>{
+   if(settled)return;
+   if(auth.currentUser?.uid!==user.uid){finish(reject,new Error('Your account changed. Please try again.'));return;}
    let result;
    try{result=JSON.parse(xhr.responseText);}
-   catch(_){reject(new Error('The server returned an unexpected response. Refresh before trying again.'));return;}
-   if(auth.currentUser?.uid!==user.uid){reject(new Error('Your account changed. Please try again.'));return;}
-   if(xhr.status<200||xhr.status>=300){const error=new Error(result.error?.message||'The upload failed.');error.code=`api/${result.error?.code||'internal'}`;reject(error);return;}
-   resolve(result.data);
+   catch(_){const error=new Error('The server returned an unexpected response. Refresh before trying again.');error.status=xhr.status;error.code=`api/http-${xhr.status}`;finish(reject,error);return;}
+   if(xhr.status<200||xhr.status>=300){
+    const error=new Error(xhr.status===401?'Your session expired. Please sign out and sign in again.':xhr.status>=500?`The server could not complete this request (HTTP ${xhr.status}). Please try again shortly.`:result?.error?.message||'The upload failed.');
+    error.code=`api/${result?.error?.code||'internal'}`;error.status=xhr.status;
+    if(result?.error?.retryWithNewRequest===true)error.retryWithNewRequest=true;
+    finish(reject,error);return;
+   }
+   if(!result||typeof result!=='object'||!result.data||typeof result.data!=='object'||Array.isArray(result.data)){
+    const error=new Error('The server returned an unexpected response. Refresh before trying again.');error.code='api/unexpected-response';error.status=xhr.status;finish(reject,error);return;
+   }
+   finish(resolve,result.data);
   };
-  xhr.send(body);
+  // Native timeout events can be lost after a network interruption. Bound the
+  // whole upload/response and keep ambiguous outcomes for manual receipt replay.
+  timer=setTimeout(()=>{failConnection(true);xhr.abort();},60000);
+  try{xhr.send(body);}catch{failConnection(false);}
  });
 }
 

@@ -37,6 +37,25 @@ async function signIn(uid){
 async function uploaded(){const v=await call('alice','vehicleSave',vehicle),photo=await upload(v.id);return {vehicleId:v.id,photo};}
 const assertPrivate=value=>{const json=JSON.stringify(value);for(const field of ['"path"','"provider"','"uploadAttemptId"','"workerToken"','"fingerprint"'])assert.ok(!json.includes(field),field);};
 
+test('Find Jobs attachments survive feed refresh and only authorised request-bound previews can mint URLs',async()=>{
+ const car=await call('alice','vehicleSave',vehicle),first=await upload(car.id),second=await upload(car.id,'2',1),privatePhoto=await upload(car.id,'3',2);
+ const selected=[second.id,first.id],job=await call('alice','requestCreate',{...details,vehicleId:car.id,photoIds:selected});
+ const shop=await signIn('shop-one'),other=await signIn('shop-two');
+ const feed=async()=> (await http(app).post('/api/marketplace').set('Authorization',`Bearer ${shop}`).send({op:'requests',feed:'open'}).expect(200)).body.data;
+ const preview=(token,id,photoId)=>http(app).post('/api/photos').set('Authorization',`Bearer ${token}`).send({op:'view',target:'request',id,photoId});
+ const page=await feed();assert.deepEqual(page.items[0].photoIds,selected);assert.deepEqual(page.items[0].photos.map(photo=>photo.id),selected);assertPrivate(page.items[0].photos);
+ assert.ok(!JSON.stringify(page).includes(privatePhoto.id));
+ for(const id of selected)assert.ok((await preview(shop,job.id,id).expect(200)).body.data.expiresAt>Date.now());
+ await preview(shop,job.id,privatePhoto.id).expect(404);
+ await http(app).post('/api/photos').set('Authorization',`Bearer ${shop}`).send({op:'view',target:'vehicle',id:car.id,photoId:first.id}).expect(404);
+ await photos('alice','remove','vehicle',car.id,{slot:'2',version:3,requestId:'remove-attached-from-garage'});
+ assert.deepEqual((await feed()).items[0].photoIds,selected);await preview(shop,job.id,second.id).expect(200);
+ const minted=links.length;await preview(shop,job.id,second.id).expect(200);assert.equal(links.length,minted+1);
+ const direct=await call('alice','requestCreate',{...details,vehicleId:car.id,visibility:'direct',shopId:'shop-one',photoIds:[first.id]});
+ await preview(other,direct.id,first.id).expect(404);await preview(shop,direct.id,first.id).expect(200);
+ await call('alice','requestClose',{id:job.id});await preview(shop,job.id,first.id).expect(404);
+});
+
 test('authenticated photos survive replacement/removal and remain private request attachments through booking',async()=>{
  const owner=await signIn('alice'),shop=await signIn('shop-one'),otherShop=await signIn('shop-two');
  const v=await call('alice','vehicleSave',vehicle);

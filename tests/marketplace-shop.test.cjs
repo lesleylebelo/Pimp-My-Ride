@@ -7,7 +7,7 @@ const act = Renderer.act;
 const request = {id: 'request-1', version: 1, termsVersion: 1, title: 'Restore paint', description: 'Repaint the bonnet', categoryName: 'Paint', city: 'Pretoria', vehicle: {make: 'Ford', model: 'Fiesta', year: 2015, colour: 'Blue'}, status: 'open', visibility: 'open', budgetMinCents: 10000, budgetMaxCents: 50000};
 const quote = {id: 'quote-1', serviceRequestId: request.id, requestVersion: 1, termsVersion: 1, requestTitle: request.title, shopName: 'Test shop', scope: 'Prepare and repaint', items: [{description: 'Labour', amountCents: 10000}], totalCents: 10000, completionDays: 7, validUntil: Date.now() + 86400000, status: 'submitted'};
 function setup(overrides = {}) {
-  const state = {auth: {user: {uid: 'shop-1'}, profile: {role: 'shop'}, offline: false}, data: {request, quotes: []}, posts: [], busy: false, error: '', calls: [], reads: [], navigations: [], api: async () => ({id: 'quote-1'}), refresh: async () => ({}), ...overrides};
+  const state = {auth: {user: {uid: 'shop-1'}, profile: {role: 'shop'}, offline: false}, data: {request, quotes: []}, posts: [], busy: false, error: '', calls: [], photoCalls: [], reads: [], navigations: [], api: async () => ({id: 'quote-1'}), refresh: async () => ({}), ...overrides};
   const PrimaryButton = loadUI('src/shared/components/PrimaryButton.js').default;
   const landing = {LandingText: 'Text', LandingShell: ({children, onScroll, onLayout, onContentSizeChange}) => React.createElement('View', {onScroll, onLayout, onContentSizeChange}, children), LandingButton: PrimaryButton, ownerTabs: [], shopTabs: [], ui: {}, useLandingFeedback: () => ({showFeature() {}})};
   const marketplace = loadUI('src/features/marketplace/components/MarketplaceUI.js', {
@@ -17,6 +17,7 @@ function setup(overrides = {}) {
   const screens = loadUI('src/features/marketplace/screens/ShopMarketplaceScreens.js', {
     '../../auth/context/AuthContext': {useAuth: () => state.auth},
     '../components/PhotoGallery': props => React.createElement('PhotoGallery', props),
+    '../services/photoApi': {viewPhoto: async (...args) => {state.photoCalls.push(args);return {url:`https://private.example.invalid/${args[2]}`,expiresAt:Date.now()+60000};}},
     '../components/PostCard': {PostCard: props => React.createElement('PostCard', props, React.createElement('Text', null, props.post.title))},
     '../hooks/usePostsFeed': {usePostsFeed: () => ({items: state.posts, busy: false, error: '', refresh: async () => {}, loadNext() {}})},
     '../components/MarketplaceUI': marketplace,
@@ -43,6 +44,38 @@ async function validQuote(tree) {
   await change(tree, 'Item 1 description', 'Materials and labour');
   await change(tree, 'Item 1 amount (R)', '123.45');
 }
+
+test('Find Jobs renders both attached request photos in saved order and opens a private preview',async()=>{
+ const job={...request,photoIds:['second','first'],photos:[{id:'first',name:'First.jpg'},{id:'second',name:'Second.jpg'}]};
+ const {state,screens,navigation}=setup({data:{items:[job],cursor:null}}),tree=await mount(screens.ShopJobsScreen,{navigation});
+ try{
+  assert.deepEqual(tree.root.findAllByType('Image').map(image=>image.props.source.uri),['https://private.example.invalid/second','https://private.example.invalid/first']);
+  assert.deepEqual(state.photoCalls,[['request',request.id,'second','shop-1'],['request',request.id,'first','shop-1']]);
+  await act(async()=>action(tree,'Preview attached photo 1').props.onPress());assert.equal(tree.root.findAllByType('Modal').length,1);
+  await act(async()=>button(tree,'Close photo').props.onPress());assert.equal(tree.root.findAllByType('Modal').length,0);
+  state.data={items:[{...job,photos:job.photos.map(photo=>({...photo}))}],cursor:null};
+  await act(async()=>tree.update(React.createElement(screens.ShopJobsScreen,{navigation})));
+  assert.equal(tree.root.findAllByType('Image').length,2);assert.equal(state.photoCalls.length,2);
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test('Find Jobs without attachments renders normally without private-media requests',async()=>{
+ const {state,screens,navigation}=setup({data:{items:[{...request,photoIds:[]}],cursor:null}}),tree=await mount(screens.ShopJobsScreen,{navigation});
+ try{assert.match(text(tree),/Restore paint/);assert.equal(tree.root.findAllByType('Image').length,0);assert.equal(state.photoCalls.length,0);}
+ finally{await act(async()=>tree.unmount());}
+});
+
+test('Find Jobs pagination and a fresh mount retain attachment IDs without refetching existing page images',async()=>{
+ const first={items:[{...request,photoIds:['attached-a','attached-b']}],cursor:'next'},second={items:[{...request,id:'next-job',photoIds:['attached-c']}],cursor:null};
+ const {state,screens,navigation}=setup({readRequests:input=>input.cursor?second:first});let tree=await mount(screens.ShopJobsScreen,{navigation});
+ try{
+  const scroller=tree.root.findAllByType('View').find(node=>node.props.onScroll);
+  await act(async()=>scroller.props.onScroll({nativeEvent:{contentOffset:{y:900},contentSize:{height:1200},layoutMeasurement:{height:500}}}));
+  assert.equal(tree.root.findAllByType('Image').length,3);assert.equal(state.photoCalls.length,3);
+  await act(async()=>tree.unmount());tree=await mount(screens.ShopJobsScreen,{navigation});
+  assert.equal(tree.root.findAllByType('Image').length,2);assert.deepEqual(state.photoCalls.slice(-2).map(call=>call[2]),first.items[0].photoIds);
+ }finally{await act(async()=>tree.unmount());}
+});
 
 test('merged shop feed sorts requests and showcases newest first and preserves navigation', async () => {
   const older = {...request, id:'older', title:'Older request', createdAt:1700000000000};

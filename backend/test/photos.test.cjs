@@ -43,6 +43,19 @@ function fixture(){
 }
 const safeKeys=['contentType','id','name','size','uploadedAt'];
 
+test('request previews expose only the two ordered attachments and preserve direct-request and Garage privacy',async()=>{
+ const f=fixture(),first=await f.upload(),second=await f.upload({slot:'2'}),privatePhoto=await f.upload({slot:'3'});
+ const request=await f.write('owner','requestCreate',{...requestData,visibility:'direct',shopId:'shop',photoIds:[second.id,first.id]});
+ const saved=f.db.rows.get('serviceRequests/'+request.id);assert.deepEqual(saved.photos.map(photo=>photo.id),[second.id,first.id]);
+ const selected=await f.read('shop','list',{target:'request',id:request.id});assert.deepEqual(selected.items.map(photo=>photo.id),[second.id,first.id]);
+ for(const photoId of [second.id,first.id])await f.read('shop','view',{target:'request',id:request.id,photoId});assert.equal(f.signed.length,2);
+ await assert.rejects(()=>f.read('shop','view',{target:'request',id:request.id,photoId:privatePhoto.id}),{code:'not-found'});
+ await assert.rejects(()=>f.read('competitor','view',{target:'request',id:request.id,photoId:first.id}),{code:'not-found'});
+ await assert.rejects(()=>f.read('shop','view',{photoId:first.id}),{code:'not-found'});
+ await f.write('owner','requestClose',{id:request.id});
+ await assert.rejects(()=>f.read('shop','view',{target:'request',id:request.id,photoId:first.id}),{code:'not-found'});
+});
+
 test('photo validation accepts complete JPEG/PNG fixtures and never trusts a filename for content type',()=>{
  for(const [buffer,mimetype,name] of [[PNG,'image/png','vehicle.png'],[JPEG,'image/jpeg','vehicle.jpg']]){
   const value=P.validatePhoto(file(buffer,mimetype,name));assert.equal(value.contentType,mimetype);assert.equal(value.size,buffer.length);assert.equal(value.contentHash,P.hash(buffer));
