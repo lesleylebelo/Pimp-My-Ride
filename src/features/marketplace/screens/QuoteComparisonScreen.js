@@ -4,6 +4,7 @@ import {useIsFocused} from '@react-navigation/native';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
 import {useAuth} from '../../auth/context/AuthContext';
 import {useMarketData} from '../hooks/useMarketData';
+import {ConversationAction} from '../components/ConversationAction';
 import {Page, Card, Button, Notice, useInfiniteCursor, formatMoney, QuoteCard} from '../components/MarketplaceUI';
 
 const available = (quote, now) => quote?.status === 'submitted' && Number(quote.validUntil) > now;
@@ -94,6 +95,7 @@ function QuoteComparison({route, navigation}) {
         const currentTerms = matchesRequestVersion(quote,request);
         const eligible = request.status === 'open' && available(quote, Math.max(now, Date.now())) && currentTerms;
         return <QuoteCard key={quote.id} quote={quote}>
+          {request.status==='open' && !!quote.shopId && <ConversationAction serviceRequestId={id} shopId={quote.shopId} navigation={navigation} disabled={disabled}/>}
           {!!assessment?.rank && <Text weight="semibold">Rank {assessment.rank} of {recommendations.eligibleCount}{recommended?.id === quote.id ? ' · Recommended' : ''}</Text>}
           <Text>{assessment?.distanceKm == null ? 'Distance unavailable' : `${assessment.distanceKm.toFixed(1)} km (straight-line)`}</Text>
           <Text>Service coverage: {quote.scopeConfirmed === true ? 'Full scope confirmed by shop' : 'Full scope not confirmed'}{assessment?.coverage.required ? `; ${assessment.coverage.matched}/${assessment.coverage.required} mandatory services` : ''}</Text>

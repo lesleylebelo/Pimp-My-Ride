@@ -9,6 +9,7 @@ const {createMarketplace}=require('./marketplace.cjs');
 const {createPhotos}=require('./photos.cjs');
 const {createPosts}=require('./posts.cjs');
 const {saveShopLocation}=require('./shop-location.cjs');
+const {createMessaging}=require('./messaging.cjs');
 function createServices({db,auth,storage,photoStorage,requestStorage=photoStorage,postStorage=photoStorage,mockPaymentEnv=process.env}){
 const reviews=createReviews({db,auth,storage});
 const stamp=()=>FieldValue.serverTimestamp();
@@ -170,8 +171,9 @@ async function completeProfile(request){
 }
 const {listDocuments,checkUpload,uploadDocument}=createDocuments({db,storage,actor});
 const marketplace=createMarketplace({db,auth,actor,mockPaymentEnv});
+const messaging=createMessaging({db,auth,actor});
 const {photosApi,checkPhotoUpload,uploadPhoto}=createPhotos({db,auth,storage:photoStorage,requestStorage,actor});
 const {postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage}=createPosts({db,auth,actor,storage:postStorage});
-return {adminApi,sessionEvent,completeProfile,listDocuments,checkUpload,uploadDocument,marketplace,photosApi,checkPhotoUpload,uploadPhoto,postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage};
+return {adminApi,sessionEvent,completeProfile,listDocuments,checkUpload,uploadDocument,marketplace,messaging,photosApi,checkPhotoUpload,uploadPhoto,postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage};
 }
 module.exports={createServices};

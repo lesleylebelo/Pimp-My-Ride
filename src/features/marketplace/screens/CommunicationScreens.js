@@ -11,6 +11,7 @@ export function notificationDestination(item,role){
  const target=item.target||(item.bookingId?{type:'booking',id:item.bookingId}:null);
  if(!target||typeof target.id!=='string'||!/^[a-zA-Z0-9_-]{1,128}$/.test(target.id))return null;
  if(target.type==='receipt')return ['ReceiptDetail',{id:target.id}];
+ if(target.type==='conversation')return ['Chat',{id:target.id}];
  if(target.type==='booking')return ['BookingDetail',{id:target.id}];
  if(target.type==='request'||target.type==='quotation')return [role==='shop'?'ShopRequest':target.type==='quotation'?'QuoteComparison':'OwnerRequest',{id:target.id}];
  return null;

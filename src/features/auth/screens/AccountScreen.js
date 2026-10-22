@@ -55,6 +55,7 @@ export default function AccountScreen({ navigation }) {
     </>}
 
     {stage==='restricted' && <Text style={styles.body}>Your account has been suspended or archived. Contact the project administrator.</Text>}
+    {stage==='ready' && ['owner','shop'].includes(profile?.role) && <PrimaryButton title="Messages" disabled={offline || busy || uploadBusy || locationBusy} onPress={()=>navigation.navigate('Messages')}/>}
     {profile?.reviewReason && <Text style={styles.body}>Shop review: {profile.reviewReason}</Text>}
     {stage==='pending' && <Text style={styles.body}>{profile?.verificationStatus==='reviewing' ? 'An administrator is reviewing your application. Document replacement is paused until this review finishes.' : 'Your shop needs administrator approval before it can use the marketplace. Upload each document below and check that all three show as saved.'}</Text>}
     {stage==='rejected' && <Text style={styles.body}>Contact the project administrator to discuss the review. Marketplace access is restricted.</Text>}

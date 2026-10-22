@@ -492,3 +492,60 @@ test('shop location ownership and request coordinate versioning work with real e
  assert.equal((await call('alice','request',{id:r.id})).recommendations.recommendedId,null);
  await assert.rejects(()=>call('alice','quoteAccept',{id:b.id}),{code:'failed-precondition'});
 });
+
+const chatCall=(uid,op,data={})=>services.messaging({auth:identity(uid),data:{op,...(['open','enquire','consent','send','read'].includes(op)?{requestId:`chat-emulator-${++sequence}`} : {}),...data}});
+
+test('authenticated messaging HTTP denies visibility-only initiation and requires customer approval for enquiries',async()=>{
+ const v=await call('alice','vehicleSave',vehicle),r=await call('alice','requestCreate',{...details,vehicleId:v.id});
+ const shop=await signIn('shop-one'),owner=await signIn('alice'),other=await signIn('shop-two');
+ const api=(token,data)=>http(app).post('/api/messaging').set('Authorization',`Bearer ${token}`).send(data);
+ await api(shop,{op:'open',serviceRequestId:r.id,requestId:'no-relationship'}).expect(403);
+ const requested=(await api(shop,{op:'enquire',serviceRequestId:r.id,reason:'Please approve discussing the service scope.',requestId:'ask-owner'}).expect(200)).body.data;
+ await api(shop,{op:'send',id:requested.id,text:'Unapproved chat',requestId:'pending-chat'}).expect(403);
+ await api(other,{op:'get',id:requested.id}).expect(404);
+ await api(owner,{op:'consent',id:requested.id,decision:'approved',requestId:'approve-chat'}).expect(200);
+ await api(shop,{op:'send',id:requested.id,text:'Approved discussion',requestId:'approved-send'}).expect(200);
+ await api(shop,{op:'send',id:requested.id,text:'Approved discussion',requestId:'approved-send'}).expect(200);
+ const received=(await api(owner,{op:'get',id:requested.id}).expect(200)).body.data;
+ assert.equal(received.messages.length,1);assert.equal(received.conversation.unreadCount,1);
+ assert.equal((await db.collection('notifications').where('event','==','message_received').get()).docs.length,1);
+ await api(owner,{op:'consent',id:requested.id,decision:'revoked',requestId:'revoke-chat'}).expect(200);
+ await api(shop,{op:'send',id:requested.id,text:'After revocation',requestId:'revoked-send'}).expect(403);
+ const history=(await api(owner,{op:'get',id:requested.id}).expect(200)).body.data;assert.equal(history.messages.length,1);assert.equal(history.conversation.canSend,false);
+ await api(shop,{op:'send',id:requested.id,text:'Spoof',senderId:'alice',requestId:'spoofed-sender'}).expect(400);
+});
+
+test('Firestore creates one canonical conversation and serialises messages, unread acknowledgements and paging',async()=>{
+ const offered=await offers();
+ const opened=await Promise.all([chatCall('shop-one','open',{serviceRequestId:offered.requestId}),chatCall('shop-one','open',{serviceRequestId:offered.requestId}),chatCall('shop-one','open',{serviceRequestId:offered.requestId})]);
+ const id=opened[0].id;assert.ok(opened.every(row=>row.id===id));assert.equal((await db.collection('conversations').get()).size,1);
+ await Promise.all([chatCall('shop-one','send',{id,text:'Concurrent first',requestId:'send-a'}),chatCall('shop-one','send',{id,text:'Concurrent second',requestId:'send-b'})]);
+ let received=await chatCall('alice','get',{id});assert.deepEqual(received.messages.map(row=>row.sequence),[1,2]);assert.equal(received.conversation.unreadCount,2);
+ await chatCall('alice','read',{id,through:1});assert.equal((await chatCall('alice','get',{id})).conversation.unreadCount,1);
+ for(let i=0;i<21;i++){
+  if(i%5===0)await db.doc('conversations/'+id).update({shopSendWindow:{start:Date.now()-61000,count:0}});
+  await chatCall('shop-one','send',{id,text:'Paginated '+i});
+ }
+ received=await chatCall('alice','get',{id});assert.equal(received.messages.length,20);assert.ok(received.cursor);
+ const older=await chatCall('alice','get',{id,cursor:received.cursor});assert.deepEqual(older.messages.map(row=>row.sequence),[1,2,3]);assert.equal(older.cursor,null);
+ assert.equal((await chatCall('bob','list')).items.length,0);assert.equal((await chatCall('shop-two','list')).items.length,0);
+ assert.equal((await db.doc('serviceRequests/'+offered.requestId).get()).data().status,'open');assert.equal((await db.collection('bookings').get()).size,0);
+});
+
+test('Firestore messaging checks current quotations, direct invitations and continuing booking authority without changing business terms',async()=>{
+ const offered=await offers(),c=await chatCall('shop-one','open',{serviceRequestId:offered.requestId});
+ await chatCall('shop-one','send',{id:c.id,text:'Before expiry'});
+ await db.doc('quotations/'+offered.first).update({validUntil:Timestamp.fromMillis(Date.now()-1)});
+ await assert.rejects(()=>chatCall('shop-one','send',{id:c.id,text:'Expired quote'}),{code:'permission-denied'});
+ assert.equal((await chatCall('alice','get',{id:c.id})).messages.length,1);
+ await db.doc('quotations/'+offered.first).update({validUntil:Timestamp.fromMillis(Date.now()+86400000)});
+ await call('alice','quoteAccept',{id:offered.first});await db.doc('quotations/'+offered.first).update({validUntil:Timestamp.fromMillis(Date.now()-1)});
+ await chatCall('shop-one','send',{id:c.id,text:'Booked appointment question'});
+ assert.equal((await chatCall('alice','get',{id:c.id})).conversation.bookingId,offered.requestId);
+ await call('alice','bookingCancel',{id:offered.requestId,reason:'Synthetic cancellation'});
+ await assert.rejects(()=>chatCall('shop-one','send',{id:c.id,text:'Cancelled booking'}),{code:'permission-denied'});
+ const direct=await call('alice','requestCreate',{...details,vehicleId:offered.vehicleId,visibility:'direct',shopId:'shop-one'});
+ await assert.rejects(()=>chatCall('shop-two','open',{serviceRequestId:direct.id}),{code:'not-found'});
+ const invited=await chatCall('shop-one','open',{serviceRequestId:direct.id});await chatCall('shop-one','send',{id:invited.id,text:'Invited discussion'});
+ await call('alice','requestClose',{id:direct.id});assert.equal((await chatCall('shop-one','get',{id:invited.id})).conversation.canSend,false);
+});

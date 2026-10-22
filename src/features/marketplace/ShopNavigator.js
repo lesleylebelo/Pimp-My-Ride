@@ -1,4 +1,5 @@
 import React from 'react';
+import {MessagesScreen,ChatScreen} from './screens/MessagingScreens';
 import {ReceiptDetailScreen,NotificationsScreen} from './screens/CommunicationScreens';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import AccountScreen from '../auth/screens/AccountScreen';
@@ -30,6 +31,8 @@ export default function ShopNavigator(){
       <Stack.Screen name="BookingDetail" component={BookingDetailScreen}/>
       <Stack.Screen name="ReceiptDetail" component={ReceiptDetailScreen}/>
       <Stack.Screen name="Notifications" component={NotificationsScreen}/>
+      <Stack.Screen name="Messages" component={MessagesScreen}/>
+      <Stack.Screen name="Chat" component={ChatScreen}/>
       <Stack.Screen name="ShopAccount" component={AccountScreen}/>
       <Stack.Screen name="ShopPosts" component={MyPostsScreen}/>
       <Stack.Screen name="PostForm" component={PostFormScreen} options={{presentation:'modal'}}/>

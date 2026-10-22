@@ -4,6 +4,7 @@ import {Ionicons} from '@expo/vector-icons';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
 import {FeedSearchInput, FeedServicePill, FeedSourceSelector} from '../../../shared/components/landing/FeedControls';
 import {useAuth} from '../../auth/context/AuthContext';
+import {ConversationAction} from '../components/ConversationAction';
 import ConfirmationButton from '../../../shared/components/ConfirmationButton';
 import colors from '../../../shared/theme/colors';
 import {marketApi} from '../services/marketApi';
@@ -257,6 +258,7 @@ export function ShopRequestScreen({navigation, route}) {
     <Notice busy={busy} error={offline ? offlineMessage : error}/>
     {request && <>
       <Card><RequestSummary request={request} detailed/></Card>
+      {request.status==='open' && <Card><ConversationAction serviceRequestId={request.id} navigation={navigation} disabled={busy || offline || !!error} askApproval={request.visibility==='open' && !hasCurrentQuote}/></Card>}
       {!!request.photoIds?.length && (request.status === 'open' || quotes.some(quote => quote.status === 'accepted')) && <PhotoGallery target="request" id={request.id}/>}
       {quotes.length > 0 ? <>
         <Text style={styles.heading}>Your quotation</Text>
