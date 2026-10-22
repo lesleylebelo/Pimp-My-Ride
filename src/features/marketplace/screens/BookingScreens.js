@@ -48,7 +48,6 @@ function BookingsList({navigation}) {
   return <Page title="Bookings" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
     <Text style={styles.muted}>{profile?.role === 'shop' ? 'Confirm appointments for accepted quotations and view your booking history.' : 'View your accepted quotations, shop appointments and booking history.'}</Text>
     <Notice busy={busy} error={offline ? offlineMessage : error}/>
-    <Button title="Notification history" onPress={()=>navigation.navigate('Notifications')}/>
     {!offline && feed.items.map(booking => <Card key={booking.id}>
       <BookingSummary booking={booking}/>
       <Text weight="semibold">Accepted total: {formatMoney(booking.totalCents)}</Text>

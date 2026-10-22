@@ -9,7 +9,7 @@ import {useTheme} from '../../../shared/theme/ThemeContext';
 export const ownerRoutes={Discover:'Discover',Garage:'Garage','My Requests':'OwnerRequests',Bookings:'Bookings',Profile:'OwnerAccount'};
 export const shopRoutes={'Find Jobs':'ShopJobs',Requests:'ShopRequests',Quotes:'ShopQuotes',Bookings:'Bookings','My Shop':'ShopPosts'};
 
-export function Page({title,subtitle,navigation,children,showTabs=true,onScroll,onLayout,onContentSizeChange,floatingAction,refreshControl}){
+export function Page({title,subtitle,navigation,children,showTabs=true,onScroll,onLayout,onContentSizeChange,floatingAction,refreshControl,headerRight}){
   const {profile}=useAuth();
   const {theme}=useTheme();
   const styles=makeStyles(theme);
@@ -17,7 +17,7 @@ export function Page({title,subtitle,navigation,children,showTabs=true,onScroll,
   const state=navigation?.getState?.(),route=state?.routes?.[state.index]?.name;
   const activeTab=Object.keys(routes).find(k=>routes[k]===route)||(['BookingDetail','ReceiptDetail','Notifications'].includes(route)?'Bookings':shop?(route==='QuoteForm'?'Quotes':'Find Jobs'):['RequestForm','OwnerRequest','QuoteComparison','PaymentChoice'].includes(route)?'My Requests':'Garage');
   const showBack = navigation?.canGoBack?.();
-  return <LandingShell title={title} subtitle={subtitle} tabs={showTabs?(shop?shopTabs:ownerTabs):undefined} activeTab={activeTab} {...feedback} onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} floatingAction={floatingAction} refreshControl={refreshControl} onTabPress={label=>routes[label]?navigation?.navigate(routes[label]):feedback.showFeature(label)}>
+  return <LandingShell title={title} subtitle={subtitle} tabs={showTabs?(shop?shopTabs:ownerTabs):undefined} activeTab={activeTab} {...feedback} onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} floatingAction={floatingAction} refreshControl={refreshControl} headerRight={headerRight} onTabPress={label=>routes[label]?navigation?.navigate(routes[label]):feedback.showFeature(label)}>
     {showBack && (
       <Pressable
         accessibilityRole="button"
@@ -29,7 +29,6 @@ export function Page({title,subtitle,navigation,children,showTabs=true,onScroll,
         <Ionicons name="arrow-back" size={20} color={theme.accent} />
       </Pressable>
     )}
-    {navigation && route!=='Messages' && <LandingButton title="Messages" onPress={()=>navigation.navigate('Messages')}/>}
     {children}
   </LandingShell>;
 }

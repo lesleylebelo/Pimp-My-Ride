@@ -10,6 +10,7 @@ import {useMarketData} from '../hooks/useMarketData';
 import colors from '../../../shared/theme/colors';
 import {isMediaUrl} from '../../../shared/services/mediaUrl';
 import ShowcasePhoto,{hasPostImage} from '../components/ShowcasePhoto';
+import AIAssistButton from '../components/AIAssistButton';
 const categories = ['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
 const failure=e=>e?.message||'Unable to save this post. Please retry.';
 
@@ -67,6 +68,7 @@ export function PostFormScreen({navigation,route}){
   <Card>
    <Field label="Title" value={title} onChangeText={setTitle} maxLength={shop?100:80} editable={!busy} placeholder="Give your post a title"/>
    <Field label="Description (optional)" value={description} onChangeText={setDescription} maxLength={shop?2000:1000} multiline editable={!busy} placeholder="Tell everyone about this work"/>
+   {shop&&type==='showcase'&&<AIAssistButton kind="showcase" title={title} description={description} categoryId={category} disabled={disabled} onApply={suggestion=>{setTitle(suggestion.title);setDescription(suggestion.description);if(suggestion.category)setCategory(suggestion.category.id);}}/>}
    <Text weight="medium">Service category</Text>
    <View style={styles.pills}>{categories.map(item=><Pressable key={item} accessibilityRole="button" accessibilityState={{selected:category===item}} onPress={()=>!busy&&setCategory(item)} style={[styles.pill,category===item&&styles.selected]}><Text style={[styles.pillText,category===item&&styles.selectedText]}>{item}</Text></Pressable>)}</View>
    {shop&&<><Text weight="medium">Project status</Text><View style={styles.pills}>{['In progress','Completed'].map(item=><Pressable key={item} accessibilityRole="button" accessibilityState={{selected:status===item}} onPress={()=>!busy&&setStatus(item)} style={[styles.pill,status===item&&styles.selected]}><Text style={[styles.pillText,status===item&&styles.selectedText]}>{item}</Text></Pressable>)}</View></>}

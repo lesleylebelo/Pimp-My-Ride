@@ -7,7 +7,7 @@ const {loadUI}=require('./helpers/load-ui.cjs');
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const {act}=Renderer;
 
-async function renderForm({pickPostPhotos,uploadPostPhoto,postsApi,post}){
+async function renderForm({pickPostPhotos,uploadPostPhoto,postsApi,post,aiComponent}){
  const {PostFormScreen}=loadUI('src/features/marketplace/screens/PostScreens.js',{
   'react-native':{Pressable:({children,...props})=>React.createElement('Pressable',props,children)},
   '../../../shared/components/landing/LandingUI':{LandingText:'Text'},
@@ -15,6 +15,8 @@ async function renderForm({pickPostPhotos,uploadPostPhoto,postsApi,post}){
   '../services/postsApi':{postsApi,pickPostPhotos,uploadPostPhoto},
   '../hooks/usePostsFeed':{usePostsFeed:()=>({items:[],busy:false,error:'',refresh:async()=>{}})},
   '../components/PostCard':{PostCard:'PostCard'},
+  '../components/ShowcasePhoto':{__esModule:true,default:props=>React.createElement('SavedPhoto',props),hasPostImage:image=>typeof image?.path==='string'},
+  ...(aiComponent?{'../components/AIAssistButton':aiComponent}:{}),
   '../components/MarketplaceUI':{
    Page:({children})=>React.createElement('View',null,children),
    Card:({children})=>React.createElement('View',null,children),
@@ -31,6 +33,16 @@ async function renderForm({pickPostPhotos,uploadPostPhoto,postsApi,post}){
 }
 
 const photo=name=>({uri:`file:///${name}.jpg`,name:`${name}.jpg`,size:128,mimeType:'image/jpeg'});
+
+test('showcase AI Apply preserves saved media order and vehicle details and cannot publish automatically',async()=>{
+ const saved={id:'post',title:'Original wrap',description:'Black wrap on doors.',category:'Wrap & Paint',vehicle:{make:'Test make',model:'Test model',year:2020},images:[{bucket:'showcase-images',path:'posts/shop-1/second'},{bucket:'showcase-images',path:'posts/shop-1/first'}]},calls=[];
+ const f=await renderForm({post:saved,aiComponent:props=>React.createElement('AIAssist',props),pickPostPhotos:async()=>[],uploadPostPhoto:async()=>assert.fail('No media upload is needed'),postsApi:async(...args)=>calls.push(args)});
+ try{
+  await act(async()=>f.tree.root.findByType('AIAssist').props.onApply({title:'Reviewed wrap',description:'Black wrap for doors.',category:null}));assert.equal(calls.length,0);
+  await act(async()=>f.tree.root.findAllByType('Pressable').find(node=>node.props.accessibilityLabel==='Save changes').props.onPress());
+  assert.equal(calls.length,1);assert.equal(calls[0][1].title,'Reviewed wrap');assert.deepEqual(calls[0][1].images,saved.images.map(image=>image.path));assert.deepEqual(calls[0][1].vehicle,saved.vehicle);assert.equal(calls[0][1].serviceCategory,saved.category);
+ }finally{await f.unmount();}
+});
 
 test('retrying a showcase save reuses confirmed uploaded paths instead of changing the publication payload',async()=>{
  let uploads=0;const payloads=[];
