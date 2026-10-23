@@ -1,0 +1,608 @@
+diff --git a/backend/.env.example b/backend/.env.example
+index 8b9466a..ea706ca 100644
+--- a/backend/.env.example
++++ b/backend/.env.example
+@@ -20,9 +20,9 @@ PMR_AI_ASSIST_ENABLED=false
+ # Explicit selection; never falls back to another provider.
+ PMR_AI_PROVIDER=gemini
+ GEMINI_API_KEY=
+-OPENAI_API_KEY=
+-# Gemini adapter supports this explicitly selected model only; OpenAI remains optional.
++# Only this Gemini model is authorised; other providers/models fail closed.
+ PMR_AI_MODEL=gemini-2.5-flash-lite
+-# Initial release only: one designated Firebase Auth UID and one durable global attempt.
+-# Missing UID or unavailable quota storage fails closed. No automatic quota reset.
+-PMR_AI_TEST_UID=
++# Comma-separated Firebase test UIDs; maximum five global attempts per UTC day.
++# Missing/invalid allowlist or unavailable storage fails closed. No provider retries.
++PMR_AI_TEST_UIDS=
++# Legacy PMR_AI_TEST_UID is used only when PMR_AI_TEST_UIDS is absent.
+diff --git a/backend/ai-assist.cjs b/backend/ai-assist.cjs
+index 8a6e52b..d3e1e27 100644
+--- a/backend/ai-assist.cjs
++++ b/backend/ai-assist.cjs
+@@ -1,34 +1,35 @@
+ const D=require('./domain.cjs'),M=require('./marketplace-domain.cjs');
+ const {createAIProvider,unavailable}=require('./ai-provider.cjs');
+ const {ApiError}=require('./errors.cjs');
++const {AIFailure,failure}=require('./ai-errors.cjs');
+ const {createAIReleaseControl}=require('./ai-release-control.cjs');
+ const showcaseCategories=['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
+ const neutral=new Set(('a an the i we you your our it its this that these those to for of and or in on at by with from as is are be been was were have has would could can please request service work project showcase description title details information clarify explain provide consider prefer preferred which what when how any about want like need clearly accurately regarding includes').split(' '));
+ const words=value=>String(value).toLowerCase().match(/[\p{L}\p{N}]+/gu)||[];
+ function grounded(source,value){
+  const supplied=new Set(words(source));
+- if(words(value).some(word=>!supplied.has(word)&&!neutral.has(word)))throw unavailable();
++ if(words(value).some(word=>!supplied.has(word)&&!neutral.has(word)))throw failure('grounding_rejected');
+  const numbers=source.match(/\d+(?:[.,]\d+)*/g)||[];
+- if((value.match(/\d+(?:[.,]\d+)*/g)||[]).some(number=>!numbers.includes(number))||/[£$€%]/.test(value)&&!/[£$€%]/.test(source))throw unavailable();
+- for(const word of ['no','not','never','without'])if(supplied.has(word)&&!words(value).includes(word))throw unavailable();
++ if((value.match(/\d+(?:[.,]\d+)*/g)||[]).some(number=>!numbers.includes(number))||/[£$€%]/.test(value)&&!/[£$€%]/.test(source))throw failure('grounding_rejected');
++ for(const word of ['no','not','never','without'])if(supplied.has(word)&&!words(value).includes(word))throw failure('grounding_rejected');
+ }
+ function validateSuggestion(value,draft){
+  try{
+   M.fields(value,['title','description','categoryId','missingDetails']);
+   const title=D.text(value.title,'Suggested title',draft.limits.title),description=D.text(value.description,'Suggested description',draft.limits.description);
+-  if(!Object.hasOwn(value,'categoryId')||value.categoryId!==null&&!draft.categories.some(category=>category.id===value.categoryId))throw unavailable();
+-  if(!Array.isArray(value.missingDetails)||value.missingDetails.length>5)throw unavailable();
++  if(!Object.hasOwn(value,'categoryId')||value.categoryId!==null&&!draft.categories.some(category=>category.id===value.categoryId))throw failure('malformed_output');
++  if(!Array.isArray(value.missingDetails)||value.missingDetails.length>5)throw failure('malformed_output');
+   const missingDetails=value.missingDetails.map(item=>D.text(item,'Missing detail',180));
+-  if(missingDetails.some(item=>!item.endsWith('?')))throw unavailable();
++  if(missingDetails.some(item=>!item.endsWith('?')))throw failure('malformed_output');
+   const source=`${draft.title}\n${draft.description}`;
+   grounded(source,`${title}\n${description}`);
+   const supplied=new Set(words(source)),clarifications=new Set([...neutral,'scope','timing','condition','preferences','constraints']);
+-  if(missingDetails.some(item=>words(item).some(word=>!supplied.has(word)&&!clarifications.has(word))))throw unavailable();
++  if(missingDetails.some(item=>words(item).some(word=>!supplied.has(word)&&!clarifications.has(word))))throw failure('grounding_rejected');
+   // Questions may request clarification, never introduce prices/specifications.
+   const numeric=source.match(/\d+(?:[.,]\d+)*/g)||[];
+-  if(missingDetails.some(item=>(item.match(/\d+(?:[.,]\d+)*/g)||[]).some(number=>!numeric.includes(number))))throw unavailable();
++  if(missingDetails.some(item=>(item.match(/\d+(?:[.,]\d+)*/g)||[]).some(number=>!numeric.includes(number))))throw failure('grounding_rejected');
+   return {title,description,category:value.categoryId===null?null:draft.categories.find(category=>category.id===value.categoryId),missingDetails};
+- }catch{throw unavailable();}
++ }catch(error){if(error instanceof AIFailure)throw error;throw failure('malformed_output');}
+ }
+ function createAIAssist({db,actor,provider=createAIProvider(),releaseControl=createAIReleaseControl({db}),now=Date.now,timeoutMs=15000}){
+  const usage=new Map();let concurrent=0;
+@@ -58,19 +59,28 @@ function createAIAssist({db,actor,provider=createAIProvider(),releaseControl=cre
+   if(clock-quota.minute>=60000){quota.minute=clock;quota.minuteCount=0;}
+   if(quota.pending||quota.minuteCount>=3||quota.hourCount>=10||concurrent>=4)D.fail('AI usage limit reached. Please wait before trying again.','resource-exhausted');
+   quota.pending=true;++quota.minuteCount;++quota.hourCount;++concurrent;
+-  const controller=new AbortController();let timer,validated=false;
++  const controller=new AbortController();let timer,validated=false,attempt;
+   // Keep quota reservation errors separate from provider errors, retaining 429.
+-  try{await releaseControl.reserve();}
++  try{attempt=await releaseControl.reserve();}
+   catch(error){quota.pending=false;--concurrent;throw error;}
+   try{
++   await attempt?.dispatch();
+    const draft={kind:input.kind,title,description,categoryId:input.categoryId||null,categories,limits,editorialWords:[...neutral]};
+-   const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(unavailable());},timeoutMs);});
+-   const raw=await Promise.race([Promise.resolve().then(()=>provider.suggest(draft,{signal:controller.signal})),deadline]);
++   const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(failure('provider_timeout'));},timeoutMs);});
++   const raw=await Promise.race([Promise.resolve().then(()=>provider.suggest(draft,{signal:controller.signal,onResponse:status=>attempt?.response(status)})),deadline]);
+    const suggestion=validateSuggestion(raw,draft);validated=true;const fresh=await actor(request);
+-   if(fresh.uid!==account.uid||fresh.profile.role!==p.role||fresh.profile.statusOperation||fresh.profile.reviewOperation||fresh.profile.provisioningOperation||p.role==='shop'&&fresh.profile.verificationStatus!=='approved')D.fail('Account access changed.','permission-denied');
+-   if(input.kind==='request'&&suggestion.category&&(await db.doc('serviceCategories/'+suggestion.category.id).get()).data()?.archived!==false)throw unavailable();
++   if(fresh.uid!==account.uid||fresh.profile.role!==p.role||!D.active(fresh.profile)||fresh.profile.statusOperation||fresh.profile.reviewOperation||fresh.profile.provisioningOperation||p.role==='shop'&&fresh.profile.verificationStatus!=='approved')D.fail('Account access changed.','permission-denied');
++   if(input.kind==='request'&&suggestion.category&&(await db.doc('serviceCategories/'+suggestion.category.id).get()).data()?.archived!==false)throw failure('category_changed');
++   await attempt?.finish({outputValidated:true});
+    return suggestion;
+-  }catch(error){if(validated&&error instanceof ApiError&&(error.code==='permission-denied'||error.code==='unauthenticated'))throw error;throw unavailable();}
++  }catch(error){
++   const access=validated&&error instanceof ApiError&&(error.code==='permission-denied'||error.code==='unauthenticated');
++   const safe=error instanceof AIFailure?error:failure(access?'account_changed':'unknown');
++   // Storage errors must never turn into a returned suggestion. A failed finish
++   // may have committed; leave that outcome uncertain and do not retry it.
++   if(safe.reason!=='diagnostic_storage')await attempt?.finish({error:safe,outputValidated:validated});
++   if(access)throw error;throw safe;
++  }
+   finally{clearTimeout(timer);controller.abort();quota.pending=false;--concurrent;}
+  };
+ }
+diff --git a/backend/ai-provider.cjs b/backend/ai-provider.cjs
+index db83500..bef809e 100644
+--- a/backend/ai-provider.cjs
++++ b/backend/ai-provider.cjs
+@@ -1,17 +1,13 @@
+-const {ApiError}=require('./errors.cjs');
+-const unavailable=()=>new ApiError('unavailable','AI Assist is unavailable. Your draft is unchanged; you can continue editing normally.');
++const {AIFailure,failure}=require('./ai-errors.cjs');
++const unavailable=()=>failure('configuration');
+ 
+ // Interface: {enabled, suggest(draft, {signal}) -> Promise<structured suggestion>}.
+ // Tests inject this interface or fetch; no runtime mock provider exists.
+ function createAIProvider({env=process.env,fetcher=fetch}={}){
+- // An explicit selection never falls back to another provider or model.
+- // Preserve the original OpenAI configuration when no provider was specified.
+- const provider=env.PMR_AI_PROVIDER?.trim()||'openai';
+- const model=env.PMR_AI_MODEL?.trim();
+- const key=provider==='gemini'?env.GEMINI_API_KEY?.trim():provider==='openai'?env.OPENAI_API_KEY?.trim():null;
+- const enabled=env.PMR_AI_ASSIST_ENABLED==='true'&&!!key&&!!model&&
+-  (provider==='openai'||provider==='gemini'&&model==='gemini-2.5-flash-lite');
+- return {enabled,async suggest(draft,{signal}){
++ // This testing phase requires explicit Gemini selection; no default or fallback.
++ const model=env.PMR_AI_MODEL?.trim(),key=env.GEMINI_API_KEY?.trim();
++ const enabled=env.PMR_AI_ASSIST_ENABLED==='true'&&env.PMR_AI_PROVIDER?.trim()==='gemini'&&!!key&&model==='gemini-2.5-flash-lite';
++ return {enabled,async suggest(draft,{signal,onResponse=async()=>{}}){
+   if(!enabled)throw unavailable();
+   const schema={type:'object',additionalProperties:false,required:['title','description','categoryId','missingDetails'],properties:{
+    title:{type:'string',maxLength:draft.limits.title},description:{type:'string',maxLength:draft.limits.description},
+@@ -22,34 +18,37 @@ function createAIProvider({env=process.env,fetcher=fetch}={}){
+    'Rewrite only the supplied title/description for clarity and professional tone. Never invent vehicles, specifications, technical requirements, services, prices, modifications, certifications, performance gains or warranties. '+
+    'Do not turn planned work into completed work. Use only words from the title/description plus the supplied editorialWords; never add factual content or technical words absent from the draft. Preserve negations. Use only supplied category IDs, or null if uncertain. '+
+    'missingDetails must be up to five brief neutral questions ending in ?, not assertions or recommendations for additional services. Stay within the supplied length limits. Return the required JSON object only.';
+-  if(provider==='gemini'){
++  try{
+    const response=await fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{
+     method:'POST',signal,headers:{'x-goog-api-key':key,'Content-Type':'application/json'},body:JSON.stringify({
+      systemInstruction:{parts:[{text:instructions}]},contents:[{role:'user',parts:[{text:JSON.stringify(draft)}]}],
+      generationConfig:{candidateCount:1,maxOutputTokens:1800,responseMimeType:'application/json',responseJsonSchema:schema},
+     }),
+    });
+-   if(!response.ok)throw unavailable();
+-   const body=await response.text();if(body.length>65536)throw unavailable();
++   await onResponse(response.status);
++   if(!response.ok){
++    let reason=response.status===401||response.status===403?'provider_auth':response.status===404?'model_unavailable':response.status===429?'provider_quota':'provider_http';
++    // Gemini can report an invalid key as HTTP 400. Inspect only an allowlisted
++    // machine reason; never retain/log error text, metadata or raw response.
++    if(response.status===400){
++     const text=await response.text();
++     if(text.length<=8192){try{
++      const error=JSON.parse(text)?.error;
++      if(error?.status==='UNAUTHENTICATED'||Array.isArray(error?.details)&&error.details.some(detail=>['API_KEY_INVALID','API_KEY_EXPIRED'].includes(detail?.reason)))reason='provider_auth';
++     }catch{ /* Preserve the generic status classification. */ }}
++    }
++    throw failure(reason);
++   }
++   const body=await response.text();if(body.length>65536)throw failure('malformed_output');
+    try{
+     const result=JSON.parse(body),candidate=result.candidates?.[0];
+-    if(result.promptFeedback?.blockReason||result.candidates?.length!==1||candidate.finishReason!=='STOP'||candidate.content?.role!=='model')throw unavailable();
++    if(result?.promptFeedback?.blockReason)throw failure('provider_blocked');
++    if(result?.candidates?.length!==1||candidate.finishReason!=='STOP'||candidate.content?.role!=='model')throw failure('malformed_output');
+     const parts=candidate.content.parts;
+-    if(!Array.isArray(parts)||!parts.length||parts.some(part=>typeof part.text!=='string'||Object.keys(part).some(key=>key!=='text')))throw unavailable();
++    if(!Array.isArray(parts)||!parts.length||parts.some(part=>typeof part.text!=='string'||Object.keys(part).some(key=>key!=='text')))throw failure('malformed_output');
+     return JSON.parse(parts.map(part=>part.text).join(''));
+-   }catch{throw unavailable();}
+-  }
+-  const response=await fetcher('https://api.openai.com/v1/responses',{method:'POST',signal,headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({
+-   model:env.PMR_AI_MODEL.trim(),store:false,max_output_tokens:1800,instructions,input:JSON.stringify(draft),
+-   text:{format:{type:'json_schema',name:'pmr_editorial_suggestion',strict:true,schema}},
+-  })});
+-  if(!response.ok)throw unavailable();
+-  const body=await response.text();if(body.length>65536)throw unavailable();
+-  let result;try{result=JSON.parse(body);}catch{throw unavailable();}
+-  const content=(result.output||[]).filter(item=>item.type==='message'&&item.role==='assistant').flatMap(item=>item.content||[]);
+-  if(result.status!=='completed'||content.some(item=>item.type==='refusal'))throw unavailable();
+-  const texts=content.filter(item=>item.type==='output_text');if(texts.length!==1)throw unavailable();
+-  try{return JSON.parse(texts[0].text);}catch{throw unavailable();}
++   }catch(error){if(error instanceof AIFailure)throw error;throw failure('malformed_output');}
++  }catch(error){if(error instanceof AIFailure)throw error;throw failure(signal?.aborted?'provider_timeout':'provider_network');}
+  }};
+ }
+ module.exports={createAIProvider,unavailable};
+diff --git a/backend/ai-release-control.cjs b/backend/ai-release-control.cjs
+index a5feb5a..7adbed1 100644
+--- a/backend/ai-release-control.cjs
++++ b/backend/ai-release-control.cjs
+@@ -1,34 +1,57 @@
++const {randomUUID}=require('node:crypto');
+ const {ApiError}=require('./errors.cjs');
+-const {unavailable}=require('./ai-provider.cjs');
+-// A permanent, project-wide one-attempt ceiling for the initial release.
+-// Never rotate this ID by instance, release SHA, date, model or account.
++const {AIFailure,failure}=require('./ai-errors.cjs');
++// Historical evidence only. Never read, update, delete or reuse as a daily counter.
+ const CONTROL_PATH='aiAssistControl/initial-provider-test-v1';
+-function createAIReleaseControl({db,env=process.env}={}){
+- const testUid=env.PMR_AI_TEST_UID?.trim();
++const DAILY_PREFIX='aiAssistDaily',ATTEMPT_PREFIX='aiAssistAttempts',DAILY_LIMIT=5;
++function createAIReleaseControl({db,env=process.env,now=Date.now}={}){
++ const configured=env.PMR_AI_TEST_UIDS??env.PMR_AI_TEST_UID??'';
++ const uids=configured.split(',').map(uid=>uid.trim());
++ const valid=uids.length<=50&&uids.every(uid=>uid.length>0&&uid.length<=128&&!/[\s\u0000-\u001f\u007f]/.test(uid));
+  return {
+   authorize(uid){
+-   if(!testUid||testUid.length>128||/[\s\u0000-\u001f\u007f]/.test(testUid))throw unavailable();
+-   if(uid!==testUid)throw new ApiError('permission-denied','AI Assist is restricted to the designated test account.');
++   if(!valid)throw failure('configuration');
++   if(!uids.includes(uid))throw new ApiError('permission-denied','AI Assist is restricted to designated test accounts.');
+   },
+   async reserve(){
+-   // The reservation commits BEFORE the provider is called. No refunds/retries:
+-   // crashes, provider errors and timeouts consume the single attempt as well.
+-   // A failed/uncertain transaction must never proceed to the provider.
++   const correlationId=randomUUID(),reservedAt=new Date(now()),day=reservedAt.toISOString().slice(0,10);
++   let attempt;
+    try{
++    const counter=db.doc(DAILY_PREFIX+'/'+day);attempt=db.doc(ATTEMPT_PREFIX+'/'+correlationId);
++    // Transaction callbacks perform no external work. Only a confirmed commit
++    // may dispatch; ambiguous commits retain their consumed reservation.
+     await db.runTransaction(async tx=>{
+-     const ref=db.doc(CONTROL_PATH),snapshot=await tx.get(ref);
+-     if(snapshot.exists){
+-      const value=snapshot.data();
+-      if(value?.version!==1||value.attempts!==1)throw unavailable();
+-      throw new ApiError('resource-exhausted','The initial AI test allowance has been used. AI Assist remains optional.');
+-     }
+-     tx.create(ref,{version:1,attempts:1});
++     const snapshot=await tx.get(counter),value=snapshot.data();
++     if(snapshot.exists&&(value?.version!==1||value.day!==day||!Number.isInteger(value.attempts)||value.attempts<1||value.attempts>DAILY_LIMIT))throw failure('quota_storage');
++     const attempts=snapshot.exists?value.attempts:0;
++     if(attempts>=DAILY_LIMIT)throw new ApiError('resource-exhausted','The daily AI test allowance has been used. Your draft is unchanged.');
++     tx.set(counter,{version:1,day,attempts:attempts+1});
++     tx.create(attempt,{version:1,correlationId,day,reservedAt,dispatchInitiatedAt:null,responseReceivedAt:null,
++      providerHttpStatus:null,outputValidated:false,failureStage:null,reasonCode:null,state:'unknown',finishedAt:null});
+     });
+-   }catch(error){
+-    if(error instanceof ApiError&&error.code==='resource-exhausted')throw error;
+-    throw unavailable();
++   }catch(error){if(error instanceof ApiError&&error.code==='resource-exhausted')throw error;
++    console.warn('AI Assist control unavailable',{correlationId,failureStage:'storage',reasonCode:'quota_storage'});throw failure('quota_storage');}
++   let closed=false;
++   async function update(fields){
++    try{await attempt.update(fields);}catch{console.warn('AI Assist diagnostics unavailable',{correlationId,failureStage:'storage',reasonCode:'diagnostic_storage'});throw failure('diagnostic_storage');}
+    }
++   return {
++    correlationId,
++    async dispatch(){
++     if(closed)throw failure('diagnostic_storage');
++     const checkDay=()=>{if(new Date(now()).toISOString().slice(0,10)!==day)throw failure('reservation_expired');};
++     checkDay();await update({dispatchInitiatedAt:new Date(now())});checkDay();
++    },
++    async response(status){if(closed)return;await update({responseReceivedAt:new Date(now()),providerHttpStatus:Number.isInteger(status)&&status>=100&&status<=599?status:null});},
++    async finish({error,outputValidated=false}={}){
++     if(closed)throw failure('diagnostic_storage');closed=true;
++     const safe=error instanceof AIFailure?error:error?failure('unknown'):null;
++     // A crash leaves unknown. Success means backend completion, not UI delivery.
++     await update({state:safe?(safe.stage==='storage'?'unknown':'failed'):'successful',outputValidated:outputValidated===true,
++      failureStage:safe?.stage??null,reasonCode:safe?.reason??null,finishedAt:new Date(now())});
++    },
++   };
+   },
+  };
+ }
+-module.exports={createAIReleaseControl,CONTROL_PATH};
++module.exports={createAIReleaseControl,CONTROL_PATH,DAILY_PREFIX,ATTEMPT_PREFIX,DAILY_LIMIT};
+diff --git a/backend/test/ai-assist.test.cjs b/backend/test/ai-assist.test.cjs
+index f1817f5..7ec5ca3 100644
+--- a/backend/test/ai-assist.test.cjs
++++ b/backend/test/ai-assist.test.cjs
+@@ -99,15 +99,10 @@ test('concurrent requests for one user are rejected and access/category changes
+  await assert.rejects(()=>revoked.call(),{code:'permission-denied'});
+ });
+ 
+-test('OpenAI adapter uses server credentials, strict JSON schema, no storage and only injected HTTP',async()=>{
+- const requests=[];const provider=createAIProvider({env:{PMR_AI_ASSIST_ENABLED:'true',OPENAI_API_KEY:'server-test-key',PMR_AI_MODEL:'test-model'},fetcher:async(url,options)=>{
+-  requests.push({url,options});return {ok:true,text:async()=>JSON.stringify({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:JSON.stringify(output)}]}]})};
+- }});
+- const result=await provider.suggest({kind:'request',...input,categories:[{id:'paint',name:'Paint'}],limits:{title:100,description:300}},{signal:new AbortController().signal});assert.deepEqual(result,output);
+- const request=requests[0],body=JSON.parse(request.options.body);assert.equal(request.url,'https://api.openai.com/v1/responses');assert.equal(request.options.headers.Authorization,'Bearer server-test-key');
+- assert.equal(body.store,false);assert.equal(body.text.format.strict,true);assert.deepEqual(body.text.format.schema.properties.categoryId.enum,[null,'paint']);assert.ok(!body.input.includes('server-test-key'));
+- for(const response of [{ok:false,text:async()=>''},{ok:true,text:async()=>'{"status":"incomplete"}'},{ok:true,text:async()=>'{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"refusal"}]}]}'},{ok:true,text:async()=>'<html>error</html>'}]){
+-  const adapter=createAIProvider({env:{PMR_AI_ASSIST_ENABLED:'true',OPENAI_API_KEY:'test',PMR_AI_MODEL:'test'},fetcher:async()=>response});await assert.rejects(()=>adapter.suggest({categories:[],limits:{title:100,description:300}},{signal:new AbortController().signal}),{code:'unavailable'});
++test('OpenAI, omitted provider and alternate models cannot activate or fall back',async()=>{
++ for(const change of [{PMR_AI_PROVIDER:'openai'},{PMR_AI_PROVIDER:undefined},{PMR_AI_MODEL:'another-model'}]){
++  const adapter=createAIProvider({env:{...geminiEnv,OPENAI_API_KEY:'unused',...change},fetcher:async()=>assert.fail('No provider dispatch')});
++  assert.equal(adapter.enabled,false);await assert.rejects(()=>adapter.suggest({},{}),{code:'unavailable'});
+  }
+ });
+ 
+@@ -170,14 +165,15 @@ test('Gemini output still passes existing category/grounding validation and dead
+ });
+ 
+ test('authenticated AI route restricts the initial release UID and enforces the durable allowance',async()=>{
+- const {createAIReleaseControl}=require('../ai-release-control.cjs');let row,calls=0,writes=0;
+- const control=createAIReleaseControl({env:{PMR_AI_TEST_UID:'owner'},db:{doc:()=>({}),runTransaction:async fn=>fn({get:async()=>({exists:!!row,data:()=>row}),create:(_,value)=>{row=value;writes++;}})}});
++ const {createAIReleaseControl}=require('../ai-release-control.cjs');const {store}=require('./helpers/ai-store.cjs');const db=store();let calls=0;
++ const control=createAIReleaseControl({env:{PMR_AI_TEST_UID:'owner'},db});
+  const provider=createAIProvider({env:geminiEnv,fetcher:async()=>{calls++;return {ok:true,text:async()=>JSON.stringify(geminiResponse(output))};}});
+  const f=fixture(provider,control),before=JSON.stringify(f.rows);
+  await http(f.app).post('/api/ai/assist').set('Authorization','Bearer other').send(input).expect(403);
+  await http(f.app).post('/api/ai/assist').set('Authorization','Bearer shop').send({...input,kind:'showcase',categoryId:'Wrap & Paint'}).expect(403);
+- assert.equal(calls,0);assert.equal(writes,0);
++ assert.equal(calls,0);assert.equal(db.attempts().length,0);
+  await http(f.app).post('/api/ai/assist').set('Authorization','Bearer owner').send(input).expect(200);
++ for(let i=0;i<4;i++)await control.reserve();
+  await http(f.app).post('/api/ai/assist').set('Authorization','Bearer owner').send(input).expect(429);
+- assert.equal(calls,1);assert.equal(writes,1);assert.equal(JSON.stringify(f.rows),before);
++ assert.equal(calls,1);assert.equal(db.attempts().length,5);assert.equal(JSON.stringify(f.rows),before);
+ });
+diff --git a/backend/test/ai-production-compatibility.test.cjs b/backend/test/ai-production-compatibility.test.cjs
+index bb0798d..293e073 100644
+--- a/backend/test/ai-production-compatibility.test.cjs
++++ b/backend/test/ai-production-compatibility.test.cjs
+@@ -1,29 +1,17 @@
+ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+ const {execFileSync}=require('node:child_process');
+-// Verified against GitHub main on 2026-10-22; NOT a claim about Render's running SHA.
+-const BASE='10e3c0fc089aba7cdf1420c5441220b0b6956b44',root=path.resolve(__dirname,'../..');
+-const baseline=file=>execFileSync('git',['show',`${BASE}:${file}`],{cwd:root,encoding:'utf8',windowsHide:true}).replace(/\r\n/g,'\n');
++// Read-only remote main verified 2026-10-23. Render's actual running SHA needs owner confirmation.
++const BASE='2fce64406d8a0d052b9ace7a9415755ce215b0ff',root=path.resolve(__dirname,'../..');
++const baseline=file=>execFileSync('git',['show',BASE+':'+file],{cwd:root,encoding:'utf8',windowsHide:true}).replace(/\r\n/g,'\n');
+ const current=file=>fs.readFileSync(path.join(root,file),'utf8').replace(/\r\n/g,'\n');
+-test('AI route is the only Express change relative to verified main',()=>{
+- assert.equal(current('backend/app.cjs').replace(" app.post('/api/ai/assist',action(services.aiAssist));\n",''),baseline('backend/app.cjs'));
+-});
+-test('AI service wiring leaves authentication and all existing services identical to main',()=>{
+- const stripped=current('backend/services.cjs')
+-  .replace("const {createAIAssist}=require('./ai-assist.cjs');\n",'')
+-  .replace(',aiProvider,aiReleaseControl','')
+-  .replace('const aiAssist=createAIAssist({db,actor,provider:aiProvider,releaseControl:aiReleaseControl});\n','')
+-  .replace(',messaging,aiAssist,photosApi',',messaging,photosApi');
+- assert.equal(stripped,baseline('backend/services.cjs'));
+-});
+-test('non-AI backend modules remain identical to main except the tested CORS configuration',()=>{
++test('daily AI changes leave all non-AI backend runtime, authentication, dependencies and rules identical to current main',()=>{
+  const files=execFileSync('git',['ls-tree','-r','--name-only',BASE,'backend'],{cwd:root,encoding:'utf8',windowsHide:true}).trim().split('\n');
+- const protectedFiles=files.filter(file=>/^backend\/[^/]+\.cjs$/.test(file)&&!['backend/services.cjs','backend/app.cjs'].includes(file));
+- for(const file of [...protectedFiles,'backend/package-lock.json','firestore.rules','render.yaml']){
+-  // The CORS repair intentionally changes corsOrigins; security.test.cjs covers
+-  // its browser allowlist. Keep every other configuration function protected.
+-  const unchanged=source=>file==='backend/config.cjs'?source.slice(source.indexOf('function storageConfig(')):source;
+-  assert.equal(unchanged(current(file)),unchanged(baseline(file)),file);
+- }
+- const deployed=JSON.parse(baseline('backend/package.json')),prepared=JSON.parse(current('backend/package.json'));
+- delete deployed.scripts.test;delete prepared.scripts.test;assert.deepEqual(prepared,deployed);
++ for(const file of files.filter(file=>/^backend\/[^/]+\.cjs$/.test(file)&&!file.startsWith('backend/ai-')))assert.equal(current(file),baseline(file),file);
++ for(const file of ['backend/package.json','backend/package-lock.json','firestore.rules','firestore.indexes.json','render.yaml'])assert.equal(current(file),baseline(file),file);
++});
++test('shared API client changes only suppress expected AI errors and retain marketplace behavior',()=>{
++ const added="  const expectedAI=path==='ai/assist'&&((response.status===503&&payload.error?.code==='unavailable')||(response.status===429&&payload.error?.code==='resource-exhausted')||(response.status===403&&payload.error?.code==='permission-denied'));\n  if(!expectedAI)console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});";
++ const original="  console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});";
++ assert.ok(current('src/shared/services/api.js').includes(added));
++ assert.equal(current('src/shared/services/api.js').replace(added,original),baseline('src/shared/services/api.js'));
+ });
+diff --git a/backend/test/ai-release-control.test.cjs b/backend/test/ai-release-control.test.cjs
+index 28e3230..2b0ec51 100644
+--- a/backend/test/ai-release-control.test.cjs
++++ b/backend/test/ai-release-control.test.cjs
+@@ -1,58 +1,72 @@
+ const {test}=require('node:test'),assert=require('node:assert/strict');
+-const {createAIReleaseControl,CONTROL_PATH}=require('../ai-release-control.cjs');
++const {createAIReleaseControl,CONTROL_PATH,DAILY_PREFIX}=require('../ai-release-control.cjs');
+ const {createAIAssist}=require('../ai-assist.cjs');
+-function store(){
+- let row,tail=Promise.resolve(),writes=0;
+- return {get writes(){return writes;},seed(value){row=value;},doc(path){assert.equal(path,CONTROL_PATH);return {path};},
+-  runTransaction(fn){
+-   const result=tail.then(async()=>{
+-    let pending;
+-    const value=await fn({get:async()=>({exists:row!==undefined,data:()=>row}),create(ref,data){assert.equal(ref.path,CONTROL_PATH);assert.equal(row,undefined);pending=data;}});
+-    if(pending){row=pending;writes++;}return value;
+-   });tail=result.catch(()=>{});return result;
+-  }};
+-}
+-const env={PMR_AI_TEST_UID:'designated-test-account'};
++const {createAIProvider}=require('../ai-provider.cjs');
++const {store}=require('./helpers/ai-store.cjs');
++const env={PMR_AI_TEST_UIDS:'tester-a,tester-b'};
+ const input={kind:'showcase',title:'Black wrap',description:'Wrap doors in black.',categoryId:'Wrap & Paint'};
+ const output={title:'Black wrap',description:'Wrap doors in black.',categoryId:'Wrap & Paint',missingDetails:[]};
+ const identity=uid=>({auth:{uid},data:input});
+ function assist(db,provider,options={}){
+  return createAIAssist({db,provider,releaseControl:createAIReleaseControl({db,env}),actor:async request=>({uid:request.auth.uid,profile:{role:'shop',accountStatus:'active',verificationStatus:'approved'}}),...options});
+ }
+-test('release access fails closed without a designated UID and denies everyone else without quota writes',async()=>{
+- const db=store();for(const config of [{},{PMR_AI_TEST_UID:' '},{PMR_AI_TEST_UID:'bad uid'}]){
+-  assert.throws(()=>createAIReleaseControl({db,env:config}).authorize('designated-test-account'),{code:'unavailable'});
+- }
+- const provider={enabled:true,suggest:async()=>assert.fail('An unrelated account must not call AI')};
+- await assert.rejects(()=>assist(db,provider)(identity('other')),{code:'permission-denied'});assert.equal(db.writes,0);
++test('allowlist is explicit, supports multiple testers and fails closed without storage or dispatch',async()=>{
++ const db=store();for(const config of [{},{PMR_AI_TEST_UIDS:''},{PMR_AI_TEST_UIDS:'bad uid'},{PMR_AI_TEST_UIDS:'a,'}])assert.throws(()=>createAIReleaseControl({db,env:config}).authorize('tester-a'),{reason:'configuration'});
++ const control=createAIReleaseControl({db,env});control.authorize('tester-a');control.authorize('tester-b');
++ await assert.rejects(()=>assist(db,{enabled:true,suggest:async()=>assert.fail('not authorised')})(identity('other')),{code:'permission-denied'});assert.equal(db.attempts().length,0);
+ });
+-test('initial release has one durable global attempt across concurrent instances, users and restarts',async()=>{
+- const db=store();let calls=0;const provider={enabled:true,suggest:async()=>{calls++;return output;}};
+- const results=await Promise.allSettled(Array.from({length:8},()=>assist(db,provider)(identity('designated-test-account'))));
+- assert.equal(results.filter(result=>result.status==='fulfilled').length,1);
+- assert.equal(results.filter(result=>result.status==='rejected'&&result.reason.code==='resource-exhausted').length,7);
+- assert.equal(calls,1);assert.equal(db.writes,1);
+- await assert.rejects(()=>assist(db,provider)(identity('designated-test-account')),{code:'resource-exhausted'});
+- const changed=createAIReleaseControl({db,env:{PMR_AI_TEST_UID:'replacement-account'}});changed.authorize('replacement-account');
+- await assert.rejects(()=>changed.reserve(),{code:'resource-exhausted'});assert.equal(calls,1);
++test('five global reservations survive concurrent instances/restarts and UTC midnight selects a new day',async()=>{
++ const db=store();let clock=Date.parse('2026-10-22T23:59:59Z');
++ const reserve=()=>createAIReleaseControl({db,env,now:()=>clock}).reserve();
++ const results=await Promise.allSettled(Array.from({length:20},reserve));
++ assert.equal(results.filter(r=>r.status==='fulfilled').length,5);assert.equal(results.filter(r=>r.reason?.code==='resource-exhausted').length,15);
++ await assert.rejects(reserve,{code:'resource-exhausted'});assert.equal(db.attempts().length,5);
++ assert.deepEqual(db.rows.get(CONTROL_PATH),{version:1,attempts:1});
++ clock=Date.parse('2026-10-23T00:00:00Z');await reserve();assert.equal(db.attempts().length,6);
++ assert.equal(db.rows.get(DAILY_PREFIX+'/2026-10-22').attempts,5);assert.equal(db.rows.get(DAILY_PREFIX+'/2026-10-23').attempts,1);
++ assert.ok(db.attempts().every(row=>row.state==='unknown'&&row.dispatchInitiatedAt===null));
+ });
+-test('provider failure or timeout consumes the allowance without a refund or a retry',async()=>{
++test('sixth request is rejected before provider dispatch; failed and timed-out requests still count',async()=>{
+  for(const timeout of [false,true]){
+   const db=store();let calls=0;
+-  const provider={enabled:true,suggest:async()=>{calls++;if(timeout)return new Promise(()=>{});throw Error('Sensitive provider error');}};
+-  await assert.rejects(()=>assist(db,provider,{timeoutMs:5})(identity('designated-test-account')),{code:'unavailable'});
+-  await assert.rejects(()=>assist(db,provider)(identity('designated-test-account')),{code:'resource-exhausted'});
+-  assert.equal(calls,1);assert.equal(db.writes,1);
++  const provider={enabled:true,suggest:async()=>{calls++;if(timeout)return new Promise(()=>{});throw Error('private provider detail');}};
++  for(let i=0;i<5;i++)await assert.rejects(()=>assist(db,provider,{timeoutMs:5})(identity(i%2?'tester-a':'tester-b')),{code:'unavailable'});
++  await assert.rejects(()=>assist(db,provider)(identity('tester-a')),{code:'resource-exhausted'});
++  assert.equal(calls,5);assert.equal(db.attempts().length,5);assert.ok(db.attempts().every(row=>row.state==='failed'&&row.dispatchInitiatedAt&&row.outputValidated===false));
++  if(timeout)assert.ok(db.attempts().every(row=>row.reasonCode==='provider_timeout'));
++ }
++});
++test('storage failures and uncertain commits fail closed, with no dispatch or refund',async()=>{
++ for(const mode of ['fail','uncertain','failUpdates']){
++  const db=store();db[mode]=true;
++  await assert.rejects(()=>assist(db,{enabled:true,suggest:async()=>assert.fail('must not dispatch')})(identity('tester-a')),{code:'unavailable'});
++  assert.equal(db.attempts().length,mode==='fail'?0:1);
++  assert.ok(db.attempts().every(row=>row.state==='unknown'));
+  }
++ const db=store(),day=new Date().toISOString().slice(0,10);db.rows.set(DAILY_PREFIX+'/'+day,{version:1,day,attempts:-1});
++ await assert.rejects(()=>createAIReleaseControl({db,env}).reserve(),{reason:'quota_storage'});
+ });
+-test('disabled AI, invalid input, or unavailable/corrupt quota storage never calls the provider',async()=>{
+- const db=store();let calls=0;const provider={enabled:true,suggest:async()=>{calls++;return output;}};
+- await assert.rejects(()=>assist(db,{...provider,enabled:false})(identity('designated-test-account')),{code:'unavailable'});
+- await assert.rejects(()=>assist(db,provider)({...identity('designated-test-account'),data:{...input,photos:[]}}),{code:'invalid-argument'});
+- assert.equal(db.writes,0);
+- for(const row of [{},{version:2,attempts:1},{version:1,attempts:0},{version:1,attempts:-1}]){
+-  db.seed(row);await assert.rejects(()=>assist(db,provider)(identity('designated-test-account')),{code:'unavailable'});
++test('content-free diagnostics distinguish provider HTTP, parsing, grounding and completion',async()=>{
++ const config={PMR_AI_ASSIST_ENABLED:'true',PMR_AI_PROVIDER:'gemini',PMR_AI_MODEL:'gemini-2.5-flash-lite',GEMINI_API_KEY:'secret-never-persist'};
++ const response=value=>JSON.stringify({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:JSON.stringify(value)}]}}]});
++ for(const [status,body,reason] of [[400,JSON.stringify({error:{status:'INVALID_ARGUMENT',message:'secret-never-persist',details:[{reason:'API_KEY_INVALID'}]}}),'provider_auth'],[401,'private','provider_auth'],[403,'private','provider_auth'],[404,'private','model_unavailable'],[429,'private','provider_quota'],[500,'private','provider_http'],[200,'not JSON','malformed_output'],[200,response({...output,description:'Invented turbo gains.'}),'grounding_rejected'],[200,response(output),null]]){
++  const db=store(),provider=createAIProvider({env:config,fetcher:async()=>({status,ok:status===200,text:async()=>body})});
++  const run=()=>assist(db,provider)(identity('tester-a'));
++  if(reason)await assert.rejects(run,{reason});else assert.equal((await run()).title,output.title);
++  const row=db.attempts()[0];assert.equal(row.reasonCode,reason);assert.equal(row.providerHttpStatus,status);assert.ok(row.responseReceivedAt);assert.ok(row.dispatchInitiatedAt);assert.equal(row.state,reason?'failed':'successful');assert.equal(row.outputValidated,!reason);
++  assert.match(row.correlationId,/^[a-f0-9-]{36}$/);const serial=JSON.stringify(row);for(const privateValue of ['secret-never-persist','Black wrap','tester-a','private','turbo'])assert.ok(!serial.includes(privateValue));
+  }
+- db.runTransaction=async()=>{throw Error('Database unavailable');};
+- await assert.rejects(()=>assist(db,provider)(identity('designated-test-account')),{code:'unavailable'});assert.equal(calls,0);
++});
++test('completion storage failure never returns output, and crashes remain unknown',async()=>{
++ const db=store();
++ await assert.rejects(()=>assist(db,{enabled:true,suggest:async()=>{db.failUpdates=true;return output;}})(identity('tester-a')),{reason:'diagnostic_storage'});
++ assert.equal(db.attempts()[0].state,'unknown');
++ const other=store(),attempt=await createAIReleaseControl({db:other,env}).reserve();await attempt.dispatch();assert.equal(other.attempts()[0].state,'unknown');
++});
++
++test('a reservation crossing UTC midnight cannot dispatch using the previous day allowance',async()=>{
++ const db=store();let clock=Date.parse('2026-10-22T23:59:59Z');
++ const control=createAIReleaseControl({db,env,now:()=>clock}),attempt=await control.reserve();
++ clock=Date.parse('2026-10-23T00:00:00Z');await assert.rejects(()=>attempt.dispatch(),{reason:'reservation_expired'});
++ assert.equal(db.attempts()[0].dispatchInitiatedAt,null);assert.equal(db.attempts()[0].state,'unknown');assert.equal(db.rows.get(DAILY_PREFIX+'/2026-10-22').attempts,1);
+ });
+diff --git a/backend/test/ai-release-integration.test.cjs b/backend/test/ai-release-integration.test.cjs
+index 380d2af..a1d43a5 100644
+--- a/backend/test/ai-release-integration.test.cjs
++++ b/backend/test/ai-release-integration.test.cjs
+@@ -2,20 +2,26 @@ const {test,after}=require('node:test'),assert=require('node:assert/strict');
+ require('../../scripts/assert-emulators.cjs').assertEmulators({auth:true});
+ const {initializeApp,deleteApp}=require('firebase-admin/app');
+ const {getFirestore}=require('firebase-admin/firestore');
+-const {createAIReleaseControl,CONTROL_PATH}=require('../ai-release-control.cjs');
++const {createAIReleaseControl,CONTROL_PATH,DAILY_PREFIX,ATTEMPT_PREFIX}=require('../ai-release-control.cjs');
+ const app=initializeApp({projectId:'demo-pmr-security'},'ai-release-tests'),db=getFirestore(app);
+-after(async()=>{await db.doc(CONTROL_PATH).delete();await db.terminate();await deleteApp(app);});
+-test('real Firestore transactions permit one reservation across concurrent instances and restarts',async()=>{
+- await db.doc(CONTROL_PATH).delete();
+- const reserve=async()=>{const control=createAIReleaseControl({db,env:{PMR_AI_TEST_UID:'synthetic-tester'}});control.authorize('synthetic-tester');return control.reserve();};
++const day='2040-01-02';
++after(async()=>{await db.doc(DAILY_PREFIX+'/'+day).delete();const rows=await db.collection(ATTEMPT_PREFIX).get();for(const row of rows.docs)await row.ref.delete();await db.terminate();await deleteApp(app);});
++test('real transactions allow five globally across instances and preserve historical allowance',async()=>{
++ const history=db.doc(CONTROL_PATH);if(!(await history.get()).exists)await history.create({version:1,attempts:1});
++ const before=await history.get();
++ const reserve=async()=>{const control=createAIReleaseControl({db,env:{PMR_AI_TEST_UIDS:'synthetic-tester,another-tester'},now:()=>Date.parse(day+'T12:00:00Z')});control.authorize('synthetic-tester');return control.reserve();};
+  const results=await Promise.allSettled(Array.from({length:12},reserve));
+- assert.equal(results.filter(value=>value.status==='fulfilled').length,1);
+- assert.equal(results.filter(value=>value.status==='rejected'&&value.reason.code==='resource-exhausted').length,11);
+- assert.deepEqual((await db.doc(CONTROL_PATH).get()).data(),{version:1,attempts:1});
++ assert.equal(results.filter(value=>value.status==='fulfilled').length,5);
++ assert.equal(results.filter(value=>value.status==='rejected'&&value.reason.code==='resource-exhausted').length,7);
+  await assert.rejects(reserve,{code:'resource-exhausted'});
+- const snapshot=await db.doc(CONTROL_PATH).get();assert.deepEqual(Object.keys(snapshot.data()).sort(),['attempts','version']);
++ assert.deepEqual((await db.doc(DAILY_PREFIX+'/'+day).get()).data(),{version:1,day,attempts:5});
++ const attempt=results.find(value=>value.status==='fulfilled').value;
++ const ref=db.doc(ATTEMPT_PREFIX+'/'+attempt.correlationId);assert.equal((await ref.get()).data().state,'unknown');
++ await attempt.dispatch();await attempt.response(200);await attempt.finish({outputValidated:true});
++ const data=(await ref.get()).data();assert.equal(data.state,'successful');assert.ok(data.reservedAt.toDate() instanceof Date);assert.equal(data.providerHttpStatus,200);
++ const after=await history.get();assert.deepEqual(after.data(),before.data());assert.ok(after.updateTime.isEqual(before.updateTime));
+ });
+-test('existing rules deny direct-client quota access and reset for owners, shops and administrators',async()=>{
++test('existing rules deny direct-client history, daily quota and diagnostic access',async()=>{
+  const fs=require('node:fs'),path=require('node:path');
+  const {initializeTestEnvironment,assertFails}=require('@firebase/rules-unit-testing');
+  const {doc,getDoc,setDoc,deleteDoc}=require('firebase/firestore');
+@@ -23,8 +29,10 @@ test('existing rules deny direct-client quota access and reset for owners, shops
+  const environment=await initializeTestEnvironment({projectId:'demo-pmr-security',firestore:{host:address.hostname,port:Number(address.port),rules:fs.readFileSync(path.resolve(__dirname,'../../firestore.rules'),'utf8')}});
+  try{
+   for(const [uid,claims] of [['synthetic-owner',{}],['synthetic-shop',{}],['synthetic-admin',{admin:true}]]){
+-   const ref=doc(environment.authenticatedContext(uid,claims).firestore(),CONTROL_PATH);
+-   await assertFails(getDoc(ref));await assertFails(setDoc(ref,{version:1,attempts:0}));await assertFails(deleteDoc(ref));
++   for(const path of [CONTROL_PATH,DAILY_PREFIX+'/'+day,ATTEMPT_PREFIX+'/synthetic-attempt']){
++    const ref=doc(environment.authenticatedContext(uid,claims).firestore(),path);
++    await assertFails(getDoc(ref));await assertFails(setDoc(ref,{version:1,attempts:0}));await assertFails(deleteDoc(ref));
++   }
+   }
+  }finally{await environment.cleanup();}
+ });
+diff --git a/src/shared/services/api.js b/src/shared/services/api.js
+index 23ac3bb..81b6cf8 100644
+--- a/src/shared/services/api.js
++++ b/src/shared/services/api.js
+@@ -74,7 +74,8 @@ export async function apiRequest(path,data,{multipart=false,expectedUid,authClie
+   const message=response.status===401?'Your session expired. Please sign out and sign in again.':response.status>=500?`The server could not complete this request (HTTP ${response.status}). Please try again shortly.`:payload.error?.message||'The request failed.';
+   const error=new Error(message);error.code=`api/${payload.error?.code||'internal'}`;error.status=response.status;error.responseBody=errorBody;error.requestUrl=requestUrl;
+   if(payload.error?.retryWithNewRequest===true)error.retryWithNewRequest=true;
+-  console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});
++  const expectedAI=path==='ai/assist'&&((response.status===503&&payload.error?.code==='unavailable')||(response.status===429&&payload.error?.code==='resource-exhausted')||(response.status===403&&payload.error?.code==='permission-denied'));
++  if(!expectedAI)console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});
+   throw error;
+  }
+  if(!result||typeof result!=='object'||!Object.prototype.hasOwnProperty.call(result,'data')){
+diff --git a/tests/api.test.cjs b/tests/api.test.cjs
+index 3b9d976..1173e7f 100644
+--- a/tests/api.test.cjs
++++ b/tests/api.test.cjs
+@@ -185,3 +185,12 @@ test('an isolated account change during token retrieval prevents sending its old
+  assert.ok(s.calls[0].url.endsWith('/health'));
+  assert.equal(s.auth.currentUser.uid,'u');
+ });
++
++test('expected AI failures remain handled errors without severe console errors or retries',async()=>{
++ for(const [status,code] of [[503,'unavailable'],[429,'resource-exhausted'],[403,'permission-denied']]){
++  const s=setup(async url=>url.endsWith('/health')?{ok:true,json:async()=>({ok:true})}:{ok:false,status,json:async()=>({error:{code,message:'AI Assist is optional.'}})});
++  await assert.rejects(()=>s.apiRequest('ai/assist',{}),{status,code:'api/'+code});assert.deepEqual(s.errors,[]);assert.equal(s.calls.length,2);
++ }
++ const s=setup(async url=>url.endsWith('/health')?{ok:true,json:async()=>({ok:true})}:{ok:false,status:500,json:async()=>({error:{code:'internal'}})});
++ await assert.rejects(()=>s.apiRequest('ai/assist',{}));assert.equal(s.errors.length,1);
++});
+diff --git a/backend/ai-errors.cjs b/backend/ai-errors.cjs
+new file mode 100644
+--- /dev/null
++++ b/backend/ai-errors.cjs
+@@ -0,0 +1,15 @@
++const {ApiError}=require('./errors.cjs');
++const reasons={
++ configuration:'configuration',provider_auth:'provider',model_unavailable:'provider',provider_quota:'provider',
++ provider_timeout:'provider',provider_http:'provider',provider_network:'provider',provider_blocked:'output',
++ malformed_output:'output',grounding_rejected:'validation',quota_storage:'storage',diagnostic_storage:'storage',
++ reservation_expired:'quota',account_changed:'access',category_changed:'validation',unknown:'backend',
++};
++class AIFailure extends ApiError{
++ constructor(reason='unknown'){
++  super('unavailable','AI Assist is unavailable. Your draft is unchanged; you can continue editing normally.');
++  this.reason=Object.hasOwn(reasons,reason)?reason:'unknown';this.stage=reasons[this.reason];
++ }
++}
++const failure=reason=>new AIFailure(reason);
++module.exports={AIFailure,failure};
+diff --git a/backend/test/helpers/ai-store.cjs b/backend/test/helpers/ai-store.cjs
+new file mode 100644
+--- /dev/null
++++ b/backend/test/helpers/ai-store.cjs
+@@ -0,0 +1,18 @@
++const assert=require('node:assert/strict');
++const {CONTROL_PATH,ATTEMPT_PREFIX}=require('../../ai-release-control.cjs');
++function store(){
++ const rows=new Map([[CONTROL_PATH,{version:1,attempts:1}]]);let tail=Promise.resolve();
++ const db={rows,fail:false,uncertain:false,failUpdates:false,
++  attempts:()=>[...rows].filter(([path])=>path.startsWith(ATTEMPT_PREFIX+'/')).map(([,row])=>row),
++  doc(path){assert.notEqual(path,CONTROL_PATH,'Historical record must never be accessed');return {path,async update(fields){if(db.failUpdates)throw Error('private storage detail');assert.ok(rows.has(path));rows.set(path,{...rows.get(path),...fields});}};},
++  runTransaction(fn){const result=tail.then(async()=>{
++   if(db.fail)throw Error('private storage detail');const pending=[];
++   const value=await fn({get:async ref=>({exists:rows.has(ref.path),data:()=>structuredClone(rows.get(ref.path))}),
++    set:(ref,row)=>pending.push([ref.path,row]),create:(ref,row)=>{assert.ok(!rows.has(ref.path));pending.push([ref.path,row]);}});
++   for(const [path,row] of pending)rows.set(path,structuredClone(row));
++   if(db.uncertain)throw Error('commit acknowledgement lost');return value;
++  });tail=result.catch(()=>{});return result;},
++ };
++ return db;
++}
++module.exports={store};

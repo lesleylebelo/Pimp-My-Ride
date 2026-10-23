@@ -1,3 +1,5 @@
+> Historical implementation/release notes. The daily testing policy and current release procedure are in [AI_DAILY_TESTING.md](AI_DAILY_TESTING.md). Its Gemini-only configuration supersedes the initial one-attempt/OpenAI instructions below.
+
 # AI Assist — Phase 1
 
 Implemented in the original project on `lesley`, preserving the existing uncommitted

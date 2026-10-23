@@ -99,15 +99,10 @@ test('concurrent requests for one user are rejected and access/category changes 
  await assert.rejects(()=>revoked.call(),{code:'permission-denied'});
 });
 
-test('OpenAI adapter uses server credentials, strict JSON schema, no storage and only injected HTTP',async()=>{
- const requests=[];const provider=createAIProvider({env:{PMR_AI_ASSIST_ENABLED:'true',OPENAI_API_KEY:'server-test-key',PMR_AI_MODEL:'test-model'},fetcher:async(url,options)=>{
-  requests.push({url,options});return {ok:true,text:async()=>JSON.stringify({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:JSON.stringify(output)}]}]})};
- }});
- const result=await provider.suggest({kind:'request',...input,categories:[{id:'paint',name:'Paint'}],limits:{title:100,description:300}},{signal:new AbortController().signal});assert.deepEqual(result,output);
- const request=requests[0],body=JSON.parse(request.options.body);assert.equal(request.url,'https://api.openai.com/v1/responses');assert.equal(request.options.headers.Authorization,'Bearer server-test-key');
- assert.equal(body.store,false);assert.equal(body.text.format.strict,true);assert.deepEqual(body.text.format.schema.properties.categoryId.enum,[null,'paint']);assert.ok(!body.input.includes('server-test-key'));
- for(const response of [{ok:false,text:async()=>''},{ok:true,text:async()=>'{"status":"incomplete"}'},{ok:true,text:async()=>'{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"refusal"}]}]}'},{ok:true,text:async()=>'<html>error</html>'}]){
-  const adapter=createAIProvider({env:{PMR_AI_ASSIST_ENABLED:'true',OPENAI_API_KEY:'test',PMR_AI_MODEL:'test'},fetcher:async()=>response});await assert.rejects(()=>adapter.suggest({categories:[],limits:{title:100,description:300}},{signal:new AbortController().signal}),{code:'unavailable'});
+test('OpenAI, omitted provider and alternate models cannot activate or fall back',async()=>{
+ for(const change of [{PMR_AI_PROVIDER:'openai'},{PMR_AI_PROVIDER:undefined},{PMR_AI_MODEL:'another-model'}]){
+  const adapter=createAIProvider({env:{...geminiEnv,OPENAI_API_KEY:'unused',...change},fetcher:async()=>assert.fail('No provider dispatch')});
+  assert.equal(adapter.enabled,false);await assert.rejects(()=>adapter.suggest({},{}),{code:'unavailable'});
  }
 });
 
@@ -170,14 +165,15 @@ test('Gemini output still passes existing category/grounding validation and dead
 });
 
 test('authenticated AI route restricts the initial release UID and enforces the durable allowance',async()=>{
- const {createAIReleaseControl}=require('../ai-release-control.cjs');let row,calls=0,writes=0;
- const control=createAIReleaseControl({env:{PMR_AI_TEST_UID:'owner'},db:{doc:()=>({}),runTransaction:async fn=>fn({get:async()=>({exists:!!row,data:()=>row}),create:(_,value)=>{row=value;writes++;}})}});
+ const {createAIReleaseControl}=require('../ai-release-control.cjs');const {store}=require('./helpers/ai-store.cjs');const db=store();let calls=0;
+ const control=createAIReleaseControl({env:{PMR_AI_TEST_UID:'owner'},db});
  const provider=createAIProvider({env:geminiEnv,fetcher:async()=>{calls++;return {ok:true,text:async()=>JSON.stringify(geminiResponse(output))};}});
  const f=fixture(provider,control),before=JSON.stringify(f.rows);
  await http(f.app).post('/api/ai/assist').set('Authorization','Bearer other').send(input).expect(403);
  await http(f.app).post('/api/ai/assist').set('Authorization','Bearer shop').send({...input,kind:'showcase',categoryId:'Wrap & Paint'}).expect(403);
- assert.equal(calls,0);assert.equal(writes,0);
+ assert.equal(calls,0);assert.equal(db.attempts().length,0);
  await http(f.app).post('/api/ai/assist').set('Authorization','Bearer owner').send(input).expect(200);
+ for(let i=0;i<4;i++)await control.reserve();
  await http(f.app).post('/api/ai/assist').set('Authorization','Bearer owner').send(input).expect(429);
- assert.equal(calls,1);assert.equal(writes,1);assert.equal(JSON.stringify(f.rows),before);
+ assert.equal(calls,1);assert.equal(db.attempts().length,5);assert.equal(JSON.stringify(f.rows),before);
 });

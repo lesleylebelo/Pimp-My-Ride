@@ -1,3 +1,5 @@
+> Historical implementation/release notes. The daily testing policy and current release procedure are in [AI_DAILY_TESTING.md](AI_DAILY_TESTING.md). Its Gemini-only configuration supersedes the initial one-attempt/OpenAI instructions below.
+
 # Gemini AI Assist: controlled Render release preparation
 
 Prepared on 2026-10-22 in the original `lesley` checkout. No commits, pushes,

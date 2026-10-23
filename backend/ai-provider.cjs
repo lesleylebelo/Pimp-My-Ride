@@ -1,17 +1,13 @@
-const {ApiError}=require('./errors.cjs');
-const unavailable=()=>new ApiError('unavailable','AI Assist is unavailable. Your draft is unchanged; you can continue editing normally.');
+const {AIFailure,failure}=require('./ai-errors.cjs');
+const unavailable=()=>failure('configuration');
 
 // Interface: {enabled, suggest(draft, {signal}) -> Promise<structured suggestion>}.
 // Tests inject this interface or fetch; no runtime mock provider exists.
 function createAIProvider({env=process.env,fetcher=fetch}={}){
- // An explicit selection never falls back to another provider or model.
- // Preserve the original OpenAI configuration when no provider was specified.
- const provider=env.PMR_AI_PROVIDER?.trim()||'openai';
- const model=env.PMR_AI_MODEL?.trim();
- const key=provider==='gemini'?env.GEMINI_API_KEY?.trim():provider==='openai'?env.OPENAI_API_KEY?.trim():null;
- const enabled=env.PMR_AI_ASSIST_ENABLED==='true'&&!!key&&!!model&&
-  (provider==='openai'||provider==='gemini'&&model==='gemini-2.5-flash-lite');
- return {enabled,async suggest(draft,{signal}){
+ // This testing phase requires explicit Gemini selection; no default or fallback.
+ const model=env.PMR_AI_MODEL?.trim(),key=env.GEMINI_API_KEY?.trim();
+ const enabled=env.PMR_AI_ASSIST_ENABLED==='true'&&env.PMR_AI_PROVIDER?.trim()==='gemini'&&!!key&&model==='gemini-2.5-flash-lite';
+ return {enabled,async suggest(draft,{signal,onResponse=async()=>{}}){
   if(!enabled)throw unavailable();
   const schema={type:'object',additionalProperties:false,required:['title','description','categoryId','missingDetails'],properties:{
    title:{type:'string',maxLength:draft.limits.title},description:{type:'string',maxLength:draft.limits.description},
@@ -22,34 +18,37 @@ function createAIProvider({env=process.env,fetcher=fetch}={}){
    'Rewrite only the supplied title/description for clarity and professional tone. Never invent vehicles, specifications, technical requirements, services, prices, modifications, certifications, performance gains or warranties. '+
    'Do not turn planned work into completed work. Use only words from the title/description plus the supplied editorialWords; never add factual content or technical words absent from the draft. Preserve negations. Use only supplied category IDs, or null if uncertain. '+
    'missingDetails must be up to five brief neutral questions ending in ?, not assertions or recommendations for additional services. Stay within the supplied length limits. Return the required JSON object only.';
-  if(provider==='gemini'){
+  try{
    const response=await fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{
     method:'POST',signal,headers:{'x-goog-api-key':key,'Content-Type':'application/json'},body:JSON.stringify({
      systemInstruction:{parts:[{text:instructions}]},contents:[{role:'user',parts:[{text:JSON.stringify(draft)}]}],
      generationConfig:{candidateCount:1,maxOutputTokens:1800,responseMimeType:'application/json',responseJsonSchema:schema},
     }),
    });
-   if(!response.ok)throw unavailable();
-   const body=await response.text();if(body.length>65536)throw unavailable();
+   await onResponse(response.status);
+   if(!response.ok){
+    let reason=response.status===401||response.status===403?'provider_auth':response.status===404?'model_unavailable':response.status===429?'provider_quota':'provider_http';
+    // Gemini can report an invalid key as HTTP 400. Inspect only an allowlisted
+    // machine reason; never retain/log error text, metadata or raw response.
+    if(response.status===400){
+     const text=await response.text();
+     if(text.length<=8192){try{
+      const error=JSON.parse(text)?.error;
+      if(error?.status==='UNAUTHENTICATED'||Array.isArray(error?.details)&&error.details.some(detail=>['API_KEY_INVALID','API_KEY_EXPIRED'].includes(detail?.reason)))reason='provider_auth';
+     }catch{ /* Preserve the generic status classification. */ }}
+    }
+    throw failure(reason);
+   }
+   const body=await response.text();if(body.length>65536)throw failure('malformed_output');
    try{
     const result=JSON.parse(body),candidate=result.candidates?.[0];
-    if(result.promptFeedback?.blockReason||result.candidates?.length!==1||candidate.finishReason!=='STOP'||candidate.content?.role!=='model')throw unavailable();
+    if(result?.promptFeedback?.blockReason)throw failure('provider_blocked');
+    if(result?.candidates?.length!==1||candidate.finishReason!=='STOP'||candidate.content?.role!=='model')throw failure('malformed_output');
     const parts=candidate.content.parts;
-    if(!Array.isArray(parts)||!parts.length||parts.some(part=>typeof part.text!=='string'||Object.keys(part).some(key=>key!=='text')))throw unavailable();
+    if(!Array.isArray(parts)||!parts.length||parts.some(part=>typeof part.text!=='string'||Object.keys(part).some(key=>key!=='text')))throw failure('malformed_output');
     return JSON.parse(parts.map(part=>part.text).join(''));
-   }catch{throw unavailable();}
-  }
-  const response=await fetcher('https://api.openai.com/v1/responses',{method:'POST',signal,headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({
-   model:env.PMR_AI_MODEL.trim(),store:false,max_output_tokens:1800,instructions,input:JSON.stringify(draft),
-   text:{format:{type:'json_schema',name:'pmr_editorial_suggestion',strict:true,schema}},
-  })});
-  if(!response.ok)throw unavailable();
-  const body=await response.text();if(body.length>65536)throw unavailable();
-  let result;try{result=JSON.parse(body);}catch{throw unavailable();}
-  const content=(result.output||[]).filter(item=>item.type==='message'&&item.role==='assistant').flatMap(item=>item.content||[]);
-  if(result.status!=='completed'||content.some(item=>item.type==='refusal'))throw unavailable();
-  const texts=content.filter(item=>item.type==='output_text');if(texts.length!==1)throw unavailable();
-  try{return JSON.parse(texts[0].text);}catch{throw unavailable();}
+   }catch(error){if(error instanceof AIFailure)throw error;throw failure('malformed_output');}
+  }catch(error){if(error instanceof AIFailure)throw error;throw failure(signal?.aborted?'provider_timeout':'provider_network');}
  }};
 }
 module.exports={createAIProvider,unavailable};
