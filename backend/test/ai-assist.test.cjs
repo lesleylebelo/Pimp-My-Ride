@@ -4,8 +4,8 @@ const {createAIAssist}=require('../ai-assist.cjs'),{createAIProvider}=require('.
 const {ApiError}=require('../errors.cjs');
 const input={kind:'request',title:'Black wrap',description:'Wrap doors in black.',categoryId:'paint'};
 const output={title:'Black wrap request',description:'I would like black wrap for the doors.',categoryId:'paint',missingDetails:['What details would you like to provide?']};
-const geminiEnv={PMR_AI_ASSIST_ENABLED:'true',PMR_AI_PROVIDER:'gemini',PMR_AI_MODEL:'gemini-2.5-flash-lite',GEMINI_API_KEY:'synthetic-server-key'};
-const geminiResponse=value=>({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:JSON.stringify(value)}]}}]});
+const geminiEnv={PMR_AI_ASSIST_ENABLED:'true',PMR_AI_PROVIDER:'gemini',PMR_AI_MODEL:'gemini-3.5-flash-lite',GEMINI_API_KEY:'synthetic-server-key'};
+const geminiResponse=(value,signature=false)=>({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:JSON.stringify(value),...(signature?{thoughtSignature:'synthetic-opaque-signature'}:{})}]}}]});
 // Only deterministic tests bypass the separately tested durable release control.
 const testReleaseControl={authorize(){},async reserve(){}};
 function fixture(provider,releaseControl=testReleaseControl){
@@ -100,7 +100,7 @@ test('concurrent requests for one user are rejected and access/category changes 
 });
 
 test('OpenAI, omitted provider and alternate models cannot activate or fall back',async()=>{
- for(const change of [{PMR_AI_PROVIDER:'openai'},{PMR_AI_PROVIDER:undefined},{PMR_AI_MODEL:'another-model'}]){
+ for(const change of [{PMR_AI_PROVIDER:'openai'},{PMR_AI_PROVIDER:undefined},{PMR_AI_MODEL:'another-model'},{PMR_AI_MODEL:'gemini-3.5-flash-lite-preview'},{PMR_AI_MODEL:'gemini-3.8-flash'}]){
   const adapter=createAIProvider({env:{...geminiEnv,OPENAI_API_KEY:'unused',...change},fetcher:async()=>assert.fail('No provider dispatch')});
   assert.equal(adapter.enabled,false);await assert.rejects(()=>adapter.suggest({},{}),{code:'unavailable'});
  }
@@ -110,7 +110,7 @@ test('Gemini adapter integrates with authenticated customer/shop HTTP without wr
  const calls=[];let sent;
  const provider=createAIProvider({env:geminiEnv,fetcher:async(url,options)=>{
   calls.push({url,options});sent=JSON.parse(options.body);const draft=JSON.parse(sent.contents[0].parts[0].text);
-  return {ok:true,text:async()=>JSON.stringify(geminiResponse({...output,categoryId:draft.kind==='request'?'paint':'Wrap & Paint'}))};
+  return {ok:true,text:async()=>JSON.stringify(geminiResponse({...output,categoryId:draft.kind==='request'?'paint':'Wrap & Paint'},true))};
  }});
  const f=fixture(provider),before=JSON.stringify(f.rows);
  await http(f.app).get('/health').expect(200,{ok:true});assert.equal(calls.length,0);
@@ -120,12 +120,12 @@ test('Gemini adapter integrates with authenticated customer/shop HTTP without wr
  await http(f.app).post('/api/ai/assist').set('Authorization','Bearer shop').send({...input,kind:'showcase',categoryId:'Wrap & Paint'}).expect(200);
  assert.equal(calls.length,2);assert.equal(JSON.stringify(f.rows),before);
  for(const {url,options} of calls){
-  assert.equal(url,'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent');
+  assert.equal(url,'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent');
   assert.equal(options.headers['x-goog-api-key'],'synthetic-server-key');assert.equal(options.headers.Authorization,undefined);
   assert.equal(options.signal instanceof AbortSignal,true);assert.ok(!options.body.includes('synthetic-server-key'));
   const body=JSON.parse(options.body);assert.equal(body.generationConfig.responseMimeType,'application/json');
   assert.deepEqual(body.generationConfig.responseJsonSchema.required,['title','description','categoryId','missingDetails']);
-  assert.equal(body.generationConfig.responseJsonSchema.additionalProperties,false);assert.equal(body.generationConfig.candidateCount,1);
+  assert.equal(body.generationConfig.responseJsonSchema.additionalProperties,false);assert.equal(Object.hasOwn(body.generationConfig,'candidateCount'),false);
   assert.match(body.systemInstruction.parts[0].text,/Never invent/);assert.equal(body.tools,undefined);
  }
  assert.equal(sent.generationConfig.responseJsonSchema.properties.description.maxLength,2000);
@@ -176,4 +176,40 @@ test('authenticated AI route restricts the initial release UID and enforces the 
  for(let i=0;i<4;i++)await control.reserve();
  await http(f.app).post('/api/ai/assist').set('Authorization','Bearer owner').send(input).expect(429);
  assert.equal(calls,1);assert.equal(db.attempts().length,5);assert.equal(JSON.stringify(f.rows),before);
+});
+
+test('both explicit Gemini models retain the same schema and bounds without model/provider fallback',async()=>{
+ const sent=[];
+ for(const model of ['gemini-2.5-flash-lite','gemini-3.5-flash-lite']){
+  let calls=0;
+  const provider=createAIProvider({env:{...geminiEnv,PMR_AI_MODEL:model,OPENAI_API_KEY:'inactive'},fetcher:async(url,options)=>{
+   calls++;assert.equal(url,'https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent');
+   const body=JSON.parse(options.body);sent.push(body);
+   assert.equal(body.contents.at(-1).role,'user');assert.equal(body.tools,undefined);
+   return {ok:true,status:200,text:async()=>JSON.stringify(geminiResponse(output,model==='gemini-3.5-flash-lite'))};
+  }});
+  assert.equal(provider.enabled,true);await fixture(provider).call();assert.equal(calls,1);
+  const failing=createAIProvider({env:{...geminiEnv,PMR_AI_MODEL:model,OPENAI_API_KEY:'inactive'},fetcher:async(url)=>{
+   calls++;assert.ok(url.endsWith('/'+model+':generateContent'));return {ok:false,status:404};
+  }});
+  await assert.rejects(()=>fixture(failing).call(),{reason:'model_unavailable'});assert.equal(calls,2,'404 must never retry or fall back');
+  const config=sent.at(-1).generationConfig;assert.equal(config.maxOutputTokens,1800);assert.equal(config.responseMimeType,'application/json');
+  assert.deepEqual(config.responseJsonSchema.properties.categoryId,{type:['string','null'],enum:[null,'paint']});
+  assert.equal(config.responseJsonSchema.properties.title.maxLength,100);assert.equal(config.responseJsonSchema.properties.description.maxLength,300);
+  assert.equal(config.responseJsonSchema.properties.missingDetails.maxItems,5);assert.equal(config.responseJsonSchema.properties.missingDetails.items.maxLength,180);
+ }
+ assert.equal(sent[0].generationConfig.candidateCount,1);assert.equal(Object.hasOwn(sent[1].generationConfig,'candidateCount'),false);
+ delete sent[0].generationConfig.candidateCount;assert.deepEqual(sent[0],sent[1]);
+});
+
+test('Gemini 3.5 discards only string thought signatures and still rejects non-text/unknown metadata',async()=>{
+ const signed=geminiResponse(output,true);
+ const provider=result=>createAIProvider({env:geminiEnv,fetcher:async()=>({status:200,ok:true,text:async()=>JSON.stringify(result)})});
+ const suggestion=await fixture(provider(signed)).call();assert.equal(suggestion.title,output.title);assert.equal(JSON.stringify(suggestion).includes('synthetic-opaque-signature'),false);
+ for(const extra of [{thoughtSignature:{}},{thoughtSignature:null},{thought:true},{inlineData:{mimeType:'image/png',data:'synthetic'}},{functionCall:{name:'unexpected'}},{unknown:'private'}]){
+  const result=geminiResponse(output);Object.assign(result.candidates[0].content.parts[0],extra);
+  await assert.rejects(()=>fixture(provider(result)).call(),{reason:'malformed_output'});
+ }
+ const legacy=createAIProvider({env:{...geminiEnv,PMR_AI_MODEL:'gemini-2.5-flash-lite'},fetcher:async()=>({status:200,ok:true,text:async()=>JSON.stringify(signed)})});
+ await assert.rejects(()=>fixture(legacy).call(),{reason:'malformed_output'});
 });
