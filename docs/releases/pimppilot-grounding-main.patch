@@ -1,0 +1,342 @@
+diff --git a/backend/ai-assist.cjs b/backend/ai-assist.cjs
+index d3e1e27..b182e9a 100644
+--- a/backend/ai-assist.cjs
++++ b/backend/ai-assist.cjs
+@@ -4,30 +4,16 @@ const {ApiError}=require('./errors.cjs');
+ const {AIFailure,failure}=require('./ai-errors.cjs');
+ const {createAIReleaseControl}=require('./ai-release-control.cjs');
+ const showcaseCategories=['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
+-const neutral=new Set(('a an the i we you your our it its this that these those to for of and or in on at by with from as is are be been was were have has would could can please request service work project showcase description title details information clarify explain provide consider prefer preferred which what when how any about want like need clearly accurately regarding includes').split(' '));
+-const words=value=>String(value).toLowerCase().match(/[\p{L}\p{N}]+/gu)||[];
+-function grounded(source,value){
+- const supplied=new Set(words(source));
+- if(words(value).some(word=>!supplied.has(word)&&!neutral.has(word)))throw failure('grounding_rejected');
+- const numbers=source.match(/\d+(?:[.,]\d+)*/g)||[];
+- if((value.match(/\d+(?:[.,]\d+)*/g)||[]).some(number=>!numbers.includes(number))||/[£$€%]/.test(value)&&!/[£$€%]/.test(source))throw failure('grounding_rejected');
+- for(const word of ['no','not','never','without'])if(supplied.has(word)&&!words(value).includes(word))throw failure('grounding_rejected');
+-}
++const {validateGrounding,editorialWords}=require('./ai-grounding.cjs');
+ function validateSuggestion(value,draft){
+  try{
+   M.fields(value,['title','description','categoryId','missingDetails']);
+   const title=D.text(value.title,'Suggested title',draft.limits.title),description=D.text(value.description,'Suggested description',draft.limits.description);
+-  if(!Object.hasOwn(value,'categoryId')||value.categoryId!==null&&!draft.categories.some(category=>category.id===value.categoryId))throw failure('malformed_output');
++  if(!Object.hasOwn(value,'categoryId')||value.categoryId!==null&&!draft.categories.some(category=>category.id===value.categoryId))throw failure('malformed_output',{rejectedField:'categoryId',validationRule:'category_unsupported'});
+   if(!Array.isArray(value.missingDetails)||value.missingDetails.length>5)throw failure('malformed_output');
+   const missingDetails=value.missingDetails.map(item=>D.text(item,'Missing detail',180));
+   if(missingDetails.some(item=>!item.endsWith('?')))throw failure('malformed_output');
+-  const source=`${draft.title}\n${draft.description}`;
+-  grounded(source,`${title}\n${description}`);
+-  const supplied=new Set(words(source)),clarifications=new Set([...neutral,'scope','timing','condition','preferences','constraints']);
+-  if(missingDetails.some(item=>words(item).some(word=>!supplied.has(word)&&!clarifications.has(word))))throw failure('grounding_rejected');
+-  // Questions may request clarification, never introduce prices/specifications.
+-  const numeric=source.match(/\d+(?:[.,]\d+)*/g)||[];
+-  if(missingDetails.some(item=>(item.match(/\d+(?:[.,]\d+)*/g)||[]).some(number=>!numeric.includes(number))))throw failure('grounding_rejected');
++  validateGrounding({title,description,missingDetails},draft);
+   return {title,description,category:value.categoryId===null?null:draft.categories.find(category=>category.id===value.categoryId),missingDetails};
+  }catch(error){if(error instanceof AIFailure)throw error;throw failure('malformed_output');}
+ }
+@@ -65,7 +51,7 @@ function createAIAssist({db,actor,provider=createAIProvider(),releaseControl=cre
+   catch(error){quota.pending=false;--concurrent;throw error;}
+   try{
+    await attempt?.dispatch();
+-   const draft={kind:input.kind,title,description,categoryId:input.categoryId||null,categories,limits,editorialWords:[...neutral]};
++   const draft={kind:input.kind,title,description,categoryId:input.categoryId||null,categories,limits,editorialWords:editorialWords(title+'\n'+description)};
+    const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(failure('provider_timeout'));},timeoutMs);});
+    const raw=await Promise.race([Promise.resolve().then(()=>provider.suggest(draft,{signal:controller.signal,onResponse:status=>attempt?.response(status)})),deadline]);
+    const suggestion=validateSuggestion(raw,draft);validated=true;const fresh=await actor(request);
+diff --git a/backend/ai-errors.cjs b/backend/ai-errors.cjs
+index 4824bc9..f0c881d 100644
+--- a/backend/ai-errors.cjs
++++ b/backend/ai-errors.cjs
+@@ -5,11 +5,15 @@ const reasons={
+  malformed_output:'output',grounding_rejected:'validation',quota_storage:'storage',diagnostic_storage:'storage',
+  reservation_expired:'quota',account_changed:'access',category_changed:'validation',unknown:'backend',
+ };
++const validationFields=['title','description','missingDetails','categoryId'];
++const validationRules=['negation_changed','number_changed','currency_changed','work_status_changed','new_content_term','sensitive_structure_changed','source_fact_omitted','question_numeric_reference','question_assumption','question_unprovided_term','category_unsupported'];
+ class AIFailure extends ApiError{
+- constructor(reason='unknown'){
++ constructor(reason='unknown',details={}){
+   super('unavailable','AI Assist is unavailable. Your draft is unchanged; you can continue editing normally.');
+   this.reason=Object.hasOwn(reasons,reason)?reason:'unknown';this.stage=reasons[this.reason];
++  this.rejectedField=validationFields.includes(details?.rejectedField)?details.rejectedField:null;
++  this.validationRule=validationRules.includes(details?.validationRule)?details.validationRule:null;
+  }
+ }
+-const failure=reason=>new AIFailure(reason);
++const failure=(reason,details)=>new AIFailure(reason,details);
+ module.exports={AIFailure,failure};
+diff --git a/backend/ai-release-control.cjs b/backend/ai-release-control.cjs
+index 7adbed1..0a1c221 100644
+--- a/backend/ai-release-control.cjs
++++ b/backend/ai-release-control.cjs
+@@ -27,7 +27,7 @@ function createAIReleaseControl({db,env=process.env,now=Date.now}={}){
+      if(attempts>=DAILY_LIMIT)throw new ApiError('resource-exhausted','The daily AI test allowance has been used. Your draft is unchanged.');
+      tx.set(counter,{version:1,day,attempts:attempts+1});
+      tx.create(attempt,{version:1,correlationId,day,reservedAt,dispatchInitiatedAt:null,responseReceivedAt:null,
+-      providerHttpStatus:null,outputValidated:false,failureStage:null,reasonCode:null,state:'unknown',finishedAt:null});
++      providerHttpStatus:null,outputValidated:false,failureStage:null,reasonCode:null,rejectedField:null,validationRule:null,state:'unknown',finishedAt:null});
+     });
+    }catch(error){if(error instanceof ApiError&&error.code==='resource-exhausted')throw error;
+     console.warn('AI Assist control unavailable',{correlationId,failureStage:'storage',reasonCode:'quota_storage'});throw failure('quota_storage');}
+@@ -48,7 +48,7 @@ function createAIReleaseControl({db,env=process.env,now=Date.now}={}){
+      const safe=error instanceof AIFailure?error:error?failure('unknown'):null;
+      // A crash leaves unknown. Success means backend completion, not UI delivery.
+      await update({state:safe?(safe.stage==='storage'?'unknown':'failed'):'successful',outputValidated:outputValidated===true,
+-      failureStage:safe?.stage??null,reasonCode:safe?.reason??null,finishedAt:new Date(now())});
++      failureStage:safe?.stage??null,reasonCode:safe?.reason??null,rejectedField:safe?.rejectedField??null,validationRule:safe?.validationRule??null,finishedAt:new Date(now())});
+     },
+    };
+   },
+diff --git a/backend/package.json b/backend/package.json
+index 726336e..e778e19 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -10,7 +10,7 @@
+     "start": "node server.cjs",
+     "start:local": "node --env-file=.env.local local-server.cjs",
+     "check:local-config": "node check-local-config.cjs",
+-    "test": "node --test test/http.test.cjs test/storage.test.cjs test/reviews.test.cjs test/security.test.cjs test/cleanup.test.cjs test/documents.test.cjs test/reliability.test.cjs test/trusted-admin-operations.test.cjs test/marketplace.test.cjs test/photos.test.cjs test/photo-cleanup.test.cjs test/posts.test.cjs test/ai-assist.test.cjs test/ai-release-control.test.cjs test/ai-production-compatibility.test.cjs"
++    "test": "node --test test/http.test.cjs test/storage.test.cjs test/reviews.test.cjs test/security.test.cjs test/cleanup.test.cjs test/documents.test.cjs test/reliability.test.cjs test/trusted-admin-operations.test.cjs test/marketplace.test.cjs test/photos.test.cjs test/photo-cleanup.test.cjs test/posts.test.cjs test/ai-assist.test.cjs test/ai-grounding.test.cjs test/ai-release-control.test.cjs test/ai-production-compatibility.test.cjs"
+   },
+   "dependencies": {
+     "@supabase/supabase-js": "^2.0.0",
+diff --git a/backend/test/ai-production-compatibility.test.cjs b/backend/test/ai-production-compatibility.test.cjs
+index f66b74a..3d97257 100644
+--- a/backend/test/ai-production-compatibility.test.cjs
++++ b/backend/test/ai-production-compatibility.test.cjs
+@@ -1,23 +1,25 @@
+ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+ const {execFileSync}=require('node:child_process');
+-// Read-only remote main verified 2026-10-23. Render's actual running SHA needs owner confirmation.
+-const BASE='0ef47b54a4083bf1a29deab96c383ddb08b98e6c',root=path.resolve(__dirname,'../..');
++// Current production main verified read-only on 2026-10-23.
++const BASE='9fa8c2731d5a4be81eeb53f43a6f781229b6d775',root=path.resolve(__dirname,'../..');
+ const baseline=file=>execFileSync('git',['show',BASE+':'+file],{cwd:root,encoding:'utf8',windowsHide:true}).replace(/\r\n/g,'\n');
+ const current=file=>fs.readFileSync(path.join(root,file),'utf8').replace(/\r\n/g,'\n');
+-test('model migration preserves daily quota, diagnostics, auth, validation and all non-provider runtime',()=>{
++test('grounding changes preserve provider/model config, non-AI runtime, dependencies, rules and UI',()=>{
++ const allowed=['backend/ai-assist.cjs','backend/ai-errors.cjs','backend/ai-release-control.cjs'];
+  const files=execFileSync('git',['ls-tree','-r','--name-only',BASE,'backend'],{cwd:root,encoding:'utf8',windowsHide:true}).trim().split('\n');
+- for(const file of files.filter(file=>/^backend\/[^/]+\.cjs$/.test(file)&&file!=='backend/ai-provider.cjs'))assert.equal(current(file),baseline(file),file);
+- for(const file of ['backend/package.json','backend/package-lock.json','firestore.rules','firestore.indexes.json','render.yaml'])assert.equal(current(file),baseline(file),file);
++ for(const file of files.filter(file=>/^backend\/[^/]+\.cjs$/.test(file)&&!allowed.includes(file)))assert.equal(current(file),baseline(file),file);
++ for(const file of ['backend/.env.example','backend/package-lock.json','firestore.rules','firestore.indexes.json','render.yaml','src/shared/services/api.js','src/features/marketplace/services/aiAssistApi.js','src/features/marketplace/services/pimpPilotPresentation.js','src/features/marketplace/components/AIAssistButton.js'])assert.equal(current(file),baseline(file),file);
++ const old=JSON.parse(baseline('backend/package.json')),next=JSON.parse(current('backend/package.json'));delete old.scripts.test;delete next.scripts.test;assert.deepEqual(next,old);
+ });
+-test('model migration leaves the application API client unchanged',()=>{
+- assert.equal(current('src/shared/services/api.js'),baseline('src/shared/services/api.js'));
++test('daily quota and storage guards differ only by content-free diagnostic fields',()=>{
++ const restored=current('backend/ai-release-control.cjs')
++  .replace('reasonCode:null,rejectedField:null,validationRule:null,state:','reasonCode:null,state:')
++  .replace('reasonCode:safe?.reason??null,rejectedField:safe?.rejectedField??null,validationRule:safe?.validationRule??null,finishedAt:','reasonCode:safe?.reason??null,finishedAt:');
++ assert.equal(restored,baseline('backend/ai-release-control.cjs'));
+ });
+-test('provider changes only add the selected model and adapt only documented Gemini 3 request/response metadata',()=>{
+- const restored=current('backend/ai-provider.cjs')
+-  .replace("&&['gemini-2.5-flash-lite','gemini-3.5-flash-lite'].includes(model);","&&model==='gemini-2.5-flash-lite';")
+-  .replace("     // Gemini 3 does not support candidateCount; still require exactly one returned candidate.\n",'')
+-  .replace("generationConfig:{...(model==='gemini-2.5-flash-lite'?{candidateCount:1}:{}),maxOutputTokens:1800","generationConfig:{candidateCount:1,maxOutputTokens:1800");
+- assert.equal(restored
+-  .replace("    // Stateless editing discards Gemini 3 transport signatures; never expose/store them.\n",'')
+-  .replace("key!=='text'&&!(model==='gemini-3.5-flash-lite'&&key==='thoughtSignature'&&typeof part.thoughtSignature==='string')","key!=='text'"),baseline('backend/ai-provider.cjs'));
++test('authentication, request validation, rate limits, timeout and post-provider access checks stay unchanged',()=>{
++ const previous=baseline('backend/ai-assist.cjs'),next=current('backend/ai-assist.cjs');
++ const section=source=>source.slice(source.indexOf('function createAIAssist'));
++ const restored=section(next).replace("editorialWords:editorialWords(title+'\\n'+description)",'editorialWords:[...neutral]');
++ assert.equal(restored,section(previous));
+ });
+diff --git a/backend/test/ai-release-integration.test.cjs b/backend/test/ai-release-integration.test.cjs
+index fa93b35..cfcd3f9 100644
+--- a/backend/test/ai-release-integration.test.cjs
++++ b/backend/test/ai-release-integration.test.cjs
+@@ -44,7 +44,7 @@ test('Gemini 3.5 mocked dispatch preserves real persistent quota and failure dia
+  const input={kind:'showcase',title:'Black wrap',description:'Wrap doors in black.',categoryId:'Wrap & Paint'};
+  const output={title:input.title,description:input.description,categoryId:input.categoryId,missingDetails:[]};
+  const response=value=>JSON.stringify({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:JSON.stringify(value),thoughtSignature:'synthetic-opaque-signature'}]}}]});
+- const replies=[{status:200,text:response(output)},{status:404,text:''},{status:200,text:'not JSON'},
++ const replies=[{status:200,text:response({...output,description:'I would like my doors wrapped in black.',missingDetails:['What is your budget?']})},{status:404,text:''},{status:200,text:'not JSON'},
+   {status:200,text:response({...output,description:'Invented turbo gains.'})},{status:200,text:response(output)}];let calls=0;
+  const provider=createAIProvider({env,fetcher:async(url,options)=>{
+   assert.equal(url,'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent');
+@@ -66,5 +66,7 @@ test('Gemini 3.5 mocked dispatch preserves real persistent quota and failure dia
+  const rows=(await db.collection(ATTEMPT_PREFIX).where('day','==','2040-01-03').get()).docs.map(doc=>doc.data());
+  assert.equal(rows.length,5);assert.equal(rows.filter(row=>row.state==='successful'&&row.outputValidated===true).length,2);
+  assert.deepEqual(rows.filter(row=>row.state==='failed').map(row=>row.reasonCode).sort(),['grounding_rejected','malformed_output','model_unavailable']);
++ const rejected=rows.find(row=>row.reasonCode==='grounding_rejected');assert.equal(rejected.rejectedField,'description');assert.equal(rejected.validationRule,'new_content_term');
++ assert.ok(rows.every(row=>!JSON.stringify(row).includes('Invented turbo')&&!JSON.stringify(row).includes('What is your budget')));
+  assert.ok(rows.every(row=>row.dispatchInitiatedAt&&row.responseReceivedAt));assert.equal(rows.find(row=>row.reasonCode==='model_unavailable').providerHttpStatus,404);
+ });
+diff --git a/backend/ai-grounding.cjs b/backend/ai-grounding.cjs
+new file mode 100644
+--- /dev/null
++++ b/backend/ai-grounding.cjs
+@@ -0,0 +1,84 @@
++const {failure}=require('./ai-errors.cjs');
++// Closed grammatical vocabulary: no specifications, service names, prices or claims.
++const editorial=new Set(('a an the i we you your our my me mine us their its it this that these those to for of and or in on at by with from as is are be been was were have has had would could can please request requested requesting work project showcase description title details information clarify explain provide consider prefer preferred which what when how any about want wants like need needs clearly accurately regarding also so into onto them they there do does did am being').split(' '));
++const questions=new Set(('scope timing condition preferences constraints budget vehicle vehicles make model year colour color finish areas parts existing issues additional requirements intended desired schedule start date completion detail specific choice available options other should done more further').split(' '));
++const forms=[['wrap','wraps','wrapped','wrapping'],['paint','paints','painted','painting'],['install','installs','installed','installing'],['repair','repairs','repaired','repairing'],['replace','replaces','replaced','replacing'],['fit','fits','fitted','fitting'],['tint','tints','tinted','tinting'],['tune','tunes','tuned','tuning'],['service','services','serviced','servicing']];
++const inflections=new Map(forms.flatMap(group=>group.map(word=>[word,group[0]])));
++const past=new Set(forms.map(group=>group[2]));
++const negators=new Set(['no','not','never','without','neither','nor','avoid','excluding']);
++const critical=new Set(('if unless before after until within only must required require requires should will shall optional prefer preferred planned planning plan budget price cost warranty guarantee guarantees guaranteed certified certification engine gearbox transmission turbo supercharger horsepower hp kw nm litre liter cc ecu stage specification specifications front rear left right one two three four five six seven eight nine ten first second third all both some less additional monday tuesday wednesday thursday friday saturday sunday january february march april may june july august september october november december').split(' '));
++const colours=new Set(('black white red blue green yellow silver grey gray orange purple brown pink').split(' '));
++function normal(value){return String(value).normalize('NFKC').toLowerCase().replace(/[\u2018\u2019]/g,"'")
++ .replace(/\b(can't|cannot)\b/g,'can not').replace(/\bwon't\b/g,'will not').replace(/\bshan't\b/g,'shall not')
++ .replace(/\b(\p{L}+)n't\b/gu,'$1 not').replace(/\bit's\b/g,'it is').replace(/\bi'm\b/g,'i am').replace(/\b(you|we|they)'re\b/g,'$1 are')
++ .replace(/\b(\p{L}+)'s\b/gu,'$1').replace(/\br\s+(?=\d)/g,'r');}
++const words=value=>normal(value).match(/[\p{L}\p{N}]+/gu)||[];
++const spellings=new Map([['color','colour'],['gray','grey'],['tire','tyre'],['tires','tyres'],['optimize','optimise']]);
++const canonical=word=>spellings.get(word)||inflections.get(word)||word;
++const numbers=value=>normal(value).match(/[-+]?\d+(?:[.,:/-]\d+)*/g)||[];
++const money=value=>normal(value).match(/[\u00a3$\u20ac%]|\br(?=\d)/g)||[];
++const same=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
++function reject(field,rule){throw failure('grounding_rejected',{rejectedField:field,validationRule:rule});}
++const copulas=new Set('is are have has had did was were'.split(' '));
++const protectedStatus=value=>completed(value)||words(value).some(word=>copulas.has(word));
++const statusWords=new Set('have has had been was were is are be need needs want wants would could to will shall plan planned planning'.split(' '));
++function content(value,preserveStatus=false){return words(value).filter(word=>!editorial.has(word)||critical.has(word)||negators.has(word)||preserveStatus&&statusWords.has(word)).map(canonical);}
++function negative(value){return words(value).filter(word=>negators.has(word));}
++function sensitive(value){const list=words(value);return numbers(value).length||negative(value).length||list.some(word=>critical.has(word))||new Set(list.filter(word=>colours.has(word))).size>1||new Set(list.filter(word=>inflections.has(word)).map(canonical)).size>1;}
++function signature(value,preserveStatus=false){
++ // Keep sensitive facts attached to their original clause, order and negation.
++ // Sentence punctuation/newlines are equivalent boundaries, not decimal separators.
++ return normal(value).replace(/(?<!\d)[,.;!?]|[,.;!?](?!\d)|\n/g,' | ').split('|').map(part=>content(part,preserveStatus)).filter(part=>part.length);
++}
++function completed(value){
++ const text=normal(value),list=words(value),participles=[...past,'completed','finished','done'].join('|');
++ if(/\b(already|successfully)\b/.test(text)||new RegExp('\\b(?:have|has|had|was|were|is|are)\\s+(?:been\\s+)?(?:'+participles+')\\b').test(text))return true;
++ const requested=/\b(need|needs|want|wants|would|could|please|request|plan|planned|planning|to)\b/.test(text);
++ return !requested&&(list.some(word=>past.has(word))||/\b(completed|finished|done)\b/.test(text));
++}
++function newAssertion(original,value){
++ // Permit request framing, not fresh assertions of possession/state/completion.
++ const requested=normal(value)
++  .replace(/\b(?:is|are)\s+to\s+be\b/g,'to be')
++  .replace(/\b(request|work|project)\s+is\s+(to|for)\b/g,'$1 $2')
++  .replace(/\b(would like|want|wants|need|needs)\s+to\s+have\b/g,'$1 to')
++  .replace(/\b(could|can)\s+you\s+(please\s+)?have\b/g,'$1 you');
++ const before=words(original),after=words(requested);
++ return [...copulas].some(word=>after.filter(item=>item===word).length>before.filter(item=>item===word).length);
++}
++function editorialWords(source){
++ const supplied=new Set(words(source));
++ return [...new Set([...editorial,...forms.filter(group=>group.some(word=>supplied.has(word))).flat()])];
++}
++function validateGrounding(value,draft){
++ const source=draft.title+'\n'+draft.description,supplied=new Set(words(source).map(canonical));
++ for(const field of ['title','description']){
++  const text=value[field],original=draft[field],list=words(text);
++  if(!same(negative(original),negative(text)))reject(field,'negation_changed');
++  if(!same(numbers(original),numbers(text)))reject(field,'number_changed');
++  if(!same(money(original),money(text)))reject(field,'currency_changed');
++  if(newAssertion(original,text)||completed(text)&&!completed(original)||completed(original)&&!completed(text))reject(field,'work_status_changed');
++  if(list.some(word=>!editorial.has(word)&&!supplied.has(canonical(word))))reject(field,'new_content_term');
++  // This deliberately stays conservative for technical, dated, numeric or
++  // negated text. Purely editorial rewrites may restructure ordinary sentences.
++  if((sensitive(source)||protectedStatus(source))&&!same(signature(original,protectedStatus(source)),signature(text,protectedStatus(source))))reject(field,'sensitive_structure_changed');
++ }
++ const descriptionFacts=new Set(content(value.description));
++ if(content(draft.description).some(word=>!descriptionFacts.has(word)))reject('description','source_fact_omitted');
++ const retained=new Set(content(value.title+'\n'+value.description));
++ if(content(draft.title).some(word=>!retained.has(word)))reject('title','source_fact_omitted');
++ for(const text of value.missingDetails){
++  if(numbers(text).length||money(text).length)reject('missingDetails','question_numeric_reference');
++  const list=words(text),open=/^(what|which|when|how)\b/.test(normal(text));
++  const neutralFrame=/^(could|can) you (please )?(provide|clarify|describe)\b/.test(normal(text))||/^(do you have|are there) any\b/.test(normal(text));
++  if(!open&&!neutralFrame)reject('missingDetails','question_assumption');
++  // Questions may introduce general missing-information topics, never new
++  // services/specifications. No completed-work assumptions or source negation
++  // reversal may hide inside a syntactically valid question.
++  if(negative(text).length||completed(text)||/\b(must|required|guarantee|guaranteed|already)\b/.test(normal(text)))reject('missingDetails','question_assumption');
++  if(list.some(word=>!editorial.has(word)&&!questions.has(word)&&!supplied.has(canonical(word))))reject('missingDetails','question_unprovided_term');
++  const domain=list.filter(word=>!editorial.has(word)&&!questions.has(word));
++  if(domain.length&&(negative(source).length||/\b(is|are|has|have|was|were)\b/.test(normal(text))))reject('missingDetails','question_assumption');
++ }
++}
++module.exports={validateGrounding,editorialWords};
+diff --git a/backend/test/ai-grounding.test.cjs b/backend/test/ai-grounding.test.cjs
+new file mode 100644
+--- /dev/null
++++ b/backend/test/ai-grounding.test.cjs
+@@ -0,0 +1,78 @@
++const {test}=require('node:test'),assert=require('node:assert/strict');
++const {validateSuggestion}=require('../ai-assist.cjs');
++const {failure}=require('../ai-errors.cjs');
++const {createAIAssist}=require('../ai-assist.cjs');
++const {createAIReleaseControl}=require('../ai-release-control.cjs');
++const {store}=require('./helpers/ai-store.cjs');
++const sample=(description='Wrap doors in black.',title='Black wrap')=>({title,description,limits:{title:100,description:2000},categories:[{id:'wrap',name:'Wrap'}]});
++const value=(draft,change={})=>({title:draft.title,description:draft.description,categoryId:'wrap',missingDetails:[],...change});
++const check=(draft,change)=>validateSuggestion(value(draft,change),draft);
++
++test('closed editorial additions, punctuation and sourced action inflections allow harmless rewrites',()=>{
++ for(const description of ['Please wrap the doors in black for me.','I would like my doors wrapped in black.','For my doors, I would like a black wrap.','Wrap the doors in black!','WRAP THE DOORS IN BLACK.','The doors need to be wrapped in black.'])assert.equal(check(sample(),{description}).description,description);
++ const draft=sample('I need the doors repaired.','Door repair');assert.ok(check(draft,{description:'Please repair the doors for me.'}));
++ const spelling=sample('Please paint the tyres grey.','Tyre colour');assert.ok(check(spelling,{description:'Please paint the tires gray.'}));
++ const negative=sample("Don't install a turbo.",'Turbo work');assert.ok(check(negative,{description:'Do not install a turbo.'}));
++});
++test('non-presupposing clarification topics can request missing information without new service claims',()=>{
++ const questions=['What is your budget?','What is the make and model of your vehicle?','When would you like this work done?','Are there any existing issues or constraints?','Could you clarify your preferred timing?'];
++ assert.deepEqual(check(sample(),{missingDetails:questions}).missingDetails,questions);
++ assert.ok(check(sample(),{missingDetails:['What colour would you prefer?','Which areas should we wrap?']}));
++});
++test('new specifications, services, prices, warranties and completion claims fail with content-free field/rule codes',()=>{
++ const draft=sample();
++ for(const [change,field,rule] of [
++  [{title:'Turbo wrap'},'title','new_content_term'],
++  [{description:'Wrap doors with a turbo.'},'description','new_content_term'],
++  [{description:'Wrap doors in black for R500.'},'description','number_changed'],
++  [{description:'Wrap doors in black with a warranty.'},'description','new_content_term'],
++  [{description:'Wrap doors in black and install an exhaust.'},'description','new_content_term'],
++  [{description:'Doors have been wrapped in black.'},'description','work_status_changed'],
++  [{description:'Black wrap is on the doors.'},'description','work_status_changed'],
++  [{description:'I had black wrap for the doors.'},'description','work_status_changed'],
++  [{description:'I did wrap doors in black.'},'description','work_status_changed'],
++  [{description:'Completed black wrap for doors.'},'description','work_status_changed'],
++  [{description:'Wrap doors.'},'description','source_fact_omitted'],
++  [{description:'Wrap both doors in black.'},'description','new_content_term'],
++ ])assert.throws(()=>check(draft,change),error=>error.reason==='grounding_rejected'&&error.rejectedField===field&&error.validationRule===rule&&!JSON.stringify(error).includes(change.description||change.title));
++});
++test('changed numeric associations, budgets, dates, requirements and negation scope stay protected',()=>{
++ for(const [description,rewrite,rule] of [
++  ['Front wheels 18 inches. Rear wheels 19 inches.','Front wheels 19 inches. Rear wheels 18 inches.','number_changed'],
++  ['Front wheels 18 inches. Rear wheels 19 inches.','Rear wheels 18 inches. Front wheels 19 inches.','sensitive_structure_changed'],
++  ['Wrap doors for R500 by Friday.','Wrap doors for R600 by Friday.','number_changed'],
++  ['Wrap doors for R500 by Friday.','Wrap doors for $500 by Friday.','currency_changed'],
++  ['Wrap doors before Friday.','Wrap doors after Friday.','new_content_term'],
++  ['Do not wrap doors. Wrap wheels.','Wrap doors. Do not wrap wheels.','sensitive_structure_changed'],
++  ['Do not wrap doors. Wrap wheels.','Wrap doors. Wrap wheels.','negation_changed'],
++  ['Do not wrap doors. Wrap wheels.','Do not wrap doors and wheels.','sensitive_structure_changed'],
++  ['Optional wheel repairs.','Required wheel repairs.','new_content_term'],
++  ['Manual gearbox and automatic engine.','Automatic gearbox and manual engine.','sensitive_structure_changed'],
++  ['Doors have been wrapped. Wheels need repair.','Doors need wrap. Wheels have been repaired.','sensitive_structure_changed'],
++  ['Blue doors and red wheels.','Red doors and blue wheels.','sensitive_structure_changed'],
++  ['Wrap doors. Repair wheels.','Repair doors. Wrap wheels.','sensitive_structure_changed'],
++ ])assert.throws(()=>check(sample(description,'Work request'),{description:rewrite}),{reason:'grounding_rejected',rejectedField:'description',validationRule:rule});
++});
++test('questions cannot introduce specifications, new services, numbers or completed-work assumptions',()=>{
++ for(const [question,rule] of [
++  ['What turbo would you prefer?','question_unprovided_term'],
++  ['Which exhaust should we install?','question_unprovided_term'],
++  ['What is your R500 budget?','question_numeric_reference'],
++  ['What work has been completed?','question_assumption'],
++  ['Is a turbo required?','question_assumption'],
++ ])assert.throws(()=>check(sample(),{missingDetails:[question]}),{reason:'grounding_rejected',rejectedField:'missingDetails',validationRule:rule});
++ assert.throws(()=>check(sample('Do not install a turbo.','Work request'),{missingDetails:['Which turbo would you prefer?']}),{validationRule:'question_assumption'});
++});
++test('unsupported categories and malformed model output remain rejected',()=>{
++ assert.throws(()=>check(sample(),{categoryId:'invented'}),{reason:'malformed_output',rejectedField:'categoryId',validationRule:'category_unsupported'});
++ for(const change of [{extra:'private'},{title:''},{description:'x'.repeat(2001)},{missingDetails:['An assertion.']},{missingDetails:null}])assert.throws(()=>check(sample(),change),{reason:'malformed_output'});
++});
++test('rejected field and rule are allowlisted, cannot contain private text, and persist with the correlation ID',async()=>{
++ const forged=failure('grounding_rejected',{rejectedField:'private input',validationRule:'private response'});assert.equal(forged.rejectedField,null);assert.equal(forged.validationRule,null);
++ const db=store(),control=createAIReleaseControl({db,env:{PMR_AI_TEST_UID:'tester'}});
++ const provider={enabled:true,suggest:async()=>({title:'Black wrap',description:'Invented turbo.',categoryId:'Wrap & Paint',missingDetails:[]})};
++ const assist=createAIAssist({db,releaseControl:control,provider,actor:async()=>({uid:'tester',profile:{role:'shop',accountStatus:'active',verificationStatus:'approved'}})});
++ await assert.rejects(()=>assist({data:{kind:'showcase',title:'Black wrap',description:'Wrap doors in black.',categoryId:'Wrap & Paint'}}),{validationRule:'new_content_term'});
++ const row=db.attempts()[0];assert.equal(row.rejectedField,'description');assert.equal(row.validationRule,'new_content_term');assert.equal(row.reasonCode,'grounding_rejected');assert.equal(row.state,'failed');assert.equal(row.outputValidated,false);assert.match(row.correlationId,/^[a-f0-9-]{36}$/);
++ assert.ok(!JSON.stringify(row).includes('turbo'));assert.ok(!JSON.stringify(row).includes('Black wrap'));assert.ok(!JSON.stringify(row).includes('tester'));
++});

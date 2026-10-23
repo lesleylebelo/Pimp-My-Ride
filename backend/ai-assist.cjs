@@ -4,30 +4,16 @@ const {ApiError}=require('./errors.cjs');
 const {AIFailure,failure}=require('./ai-errors.cjs');
 const {createAIReleaseControl}=require('./ai-release-control.cjs');
 const showcaseCategories=['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
-const neutral=new Set(('a an the i we you your our it its this that these those to for of and or in on at by with from as is are be been was were have has would could can please request service work project showcase description title details information clarify explain provide consider prefer preferred which what when how any about want like need clearly accurately regarding includes').split(' '));
-const words=value=>String(value).toLowerCase().match(/[\p{L}\p{N}]+/gu)||[];
-function grounded(source,value){
- const supplied=new Set(words(source));
- if(words(value).some(word=>!supplied.has(word)&&!neutral.has(word)))throw failure('grounding_rejected');
- const numbers=source.match(/\d+(?:[.,]\d+)*/g)||[];
- if((value.match(/\d+(?:[.,]\d+)*/g)||[]).some(number=>!numbers.includes(number))||/[£$€%]/.test(value)&&!/[£$€%]/.test(source))throw failure('grounding_rejected');
- for(const word of ['no','not','never','without'])if(supplied.has(word)&&!words(value).includes(word))throw failure('grounding_rejected');
-}
+const {validateGrounding,editorialWords}=require('./ai-grounding.cjs');
 function validateSuggestion(value,draft){
  try{
   M.fields(value,['title','description','categoryId','missingDetails']);
   const title=D.text(value.title,'Suggested title',draft.limits.title),description=D.text(value.description,'Suggested description',draft.limits.description);
-  if(!Object.hasOwn(value,'categoryId')||value.categoryId!==null&&!draft.categories.some(category=>category.id===value.categoryId))throw failure('malformed_output');
+  if(!Object.hasOwn(value,'categoryId')||value.categoryId!==null&&!draft.categories.some(category=>category.id===value.categoryId))throw failure('malformed_output',{rejectedField:'categoryId',validationRule:'category_unsupported'});
   if(!Array.isArray(value.missingDetails)||value.missingDetails.length>5)throw failure('malformed_output');
   const missingDetails=value.missingDetails.map(item=>D.text(item,'Missing detail',180));
   if(missingDetails.some(item=>!item.endsWith('?')))throw failure('malformed_output');
-  const source=`${draft.title}\n${draft.description}`;
-  grounded(source,`${title}\n${description}`);
-  const supplied=new Set(words(source)),clarifications=new Set([...neutral,'scope','timing','condition','preferences','constraints']);
-  if(missingDetails.some(item=>words(item).some(word=>!supplied.has(word)&&!clarifications.has(word))))throw failure('grounding_rejected');
-  // Questions may request clarification, never introduce prices/specifications.
-  const numeric=source.match(/\d+(?:[.,]\d+)*/g)||[];
-  if(missingDetails.some(item=>(item.match(/\d+(?:[.,]\d+)*/g)||[]).some(number=>!numeric.includes(number))))throw failure('grounding_rejected');
+  validateGrounding({title,description,missingDetails},draft);
   return {title,description,category:value.categoryId===null?null:draft.categories.find(category=>category.id===value.categoryId),missingDetails};
  }catch(error){if(error instanceof AIFailure)throw error;throw failure('malformed_output');}
 }
@@ -65,7 +51,7 @@ function createAIAssist({db,actor,provider=createAIProvider(),releaseControl=cre
   catch(error){quota.pending=false;--concurrent;throw error;}
   try{
    await attempt?.dispatch();
-   const draft={kind:input.kind,title,description,categoryId:input.categoryId||null,categories,limits,editorialWords:[...neutral]};
+   const draft={kind:input.kind,title,description,categoryId:input.categoryId||null,categories,limits,editorialWords:editorialWords(title+'\n'+description)};
    const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(failure('provider_timeout'));},timeoutMs);});
    const raw=await Promise.race([Promise.resolve().then(()=>provider.suggest(draft,{signal:controller.signal,onResponse:status=>attempt?.response(status)})),deadline]);
    const suggestion=validateSuggestion(raw,draft);validated=true;const fresh=await actor(request);
