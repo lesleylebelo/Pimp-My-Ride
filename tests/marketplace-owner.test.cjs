@@ -16,7 +16,7 @@ const says=(tree,text)=>tree.root.findAllByType('Text').some(node=>String([node.
 const change=(tree,label,value)=>act(async()=>field(tree,label).props.onChangeText(value));
 const press=(tree,title)=>act(async()=>button(tree,title).props.onPress());
 const unmount=tree=>act(async()=>tree.unmount());
-const scrollToBottom=tree=>act(async()=>{const view=tree.root.findAllByType('View').find(node=>node.props.onScroll);assert.ok(view,'Scrollable page must expose onScroll for pagination');view.props.onScroll({nativeEvent:{contentOffset:{y:500},contentSize:{height:1200},layoutMeasurement:{height:600}}});});
+const scrollToBottom=tree=>act(async()=>{const view=[...tree.root.findAllByType('View'),...tree.root.findAllByType('ScrollView')].find(node=>node.props.onScroll);assert.ok(view,'Scrollable page must expose onScroll for pagination');view.props.onScroll({nativeEvent:{contentOffset:{y:500},contentSize:{height:1200},layoutMeasurement:{height:600}}});});
 function setup({api=async()=>({id:'saved'}),read,auth={user:{uid:'owner'},profile:{role:'owner'},offline:false},aiComponent}={}){
   const calls=[],reads=[],moves=[];
   const navigation={navigate:(...args)=>moves.push(['navigate',...args]),replace:(...args)=>moves.push(['replace',...args]),goBack:()=>moves.push(['back'])};
@@ -97,7 +97,7 @@ test('garage appends vehicles while scrolling',async t=>{
 test('garage loads another page when its content does not fill the viewport',async t=>{
   const context=setup({read:(_op,input)=>({items:input.cursor?[secondVehicle]:[vehicle],cursor:input.cursor?null:'short-garage-page'})});
   const tree=await mount(context,'GarageScreen');t.after(()=>unmount(tree));
-  const page=tree.root.findAllByType('View').find(node=>node.props.onScroll);
+  const page=tree.root.findAllByType('ScrollView').find(node=>node.props.onScroll);
   assert.equal(typeof page.props.onLayout,'function');assert.equal(typeof page.props.onContentSizeChange,'function');
   await act(async()=>page.props.onContentSizeChange(400,900));
   assert.equal(context.reads.some(([_op,input])=>input.cursor),false);

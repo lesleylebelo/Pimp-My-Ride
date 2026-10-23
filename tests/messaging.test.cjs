@@ -21,7 +21,7 @@ function screens(){
 test('chat shows context and chronology, sends as the authenticated user and never acknowledges reads on opening',async()=>{
  const c=screens(),tree=await mount(c.exports.ChatScreen,{navigation:c.navigation,route:{params:{id:'c'}}});
  assert.ok(says(tree,'Approved Motors'));assert.ok(says(tree,'Please confirm the finish.'));assert.ok(says(tree,'SAST'));assert.equal(c.calls.length,0);
- await press(tree,'Mark displayed messages read');assert.deepEqual(c.calls[0],{op:'read',data:{id:'c',through:1}});
+ await press(tree,'Conversation details');await press(tree,'Mark displayed messages read');await press(tree,'Close details');assert.deepEqual(c.calls[0],{op:'read',data:{id:'c',through:1}});
  await act(async()=>input(tree).props.onChangeText('Metallic silver, please.'));await press(tree,'Send message');
  assert.equal(c.calls[1].op,'send');assert.equal(c.calls[1].data.text,'Metallic silver, please.');assert.equal(Object.hasOwn(c.calls[1].data,'senderId'),false);assert.equal(input(tree).props.value,'');
  await press(tree,'View related request');assert.deepEqual(c.moves,[['OwnerRequest',{id:'request'}]]);await unmount(tree);
@@ -37,7 +37,7 @@ test('failed sends retain a draft and request ID, prevent double taps, and can r
 test('pending, revoked, expired, offline and blurred chats cannot send; history remains visible when authorised to read',async()=>{
  const c=screens();c.state.feed={...c.state.feed,data:{...conversation,canSend:false,consent:'pending',reason:'Awaiting approval'}};
  const props={navigation:c.navigation,route:{params:{id:'c'}}},tree=await mount(c.exports.ChatScreen,props);
- assert.ok(says(tree,'Please confirm the finish.'));assert.equal(input(tree).props.editable,false);assert.ok(button(tree,'Approve communication'));assert.ok(button(tree,'Reject enquiry'));
+ await press(tree,'Conversation details');assert.ok(says(tree,'Please confirm the finish.'));assert.equal(input(tree).props.editable,false);assert.ok(button(tree,'Approve communication'));assert.ok(button(tree,'Reject enquiry'));
  await press(tree,'Reject enquiry');assert.equal(c.calls[0].op,'consent');assert.equal(c.calls[0].data.decision,'rejected');
  c.state.feed={...c.state.feed,data:{...conversation,expiresAt:Date.now()-1}};await act(async()=>tree.update(React.createElement(c.exports.ChatScreen,props)));assert.equal(input(tree).props.editable,false);
  c.state.feed={...c.state.feed,data:conversation};c.state.auth.offline=true;await act(async()=>tree.update(React.createElement(c.exports.ChatScreen,props)));assert.equal(input(tree).props.editable,false);
@@ -45,13 +45,13 @@ test('pending, revoked, expired, offline and blurred chats cannot send; history 
 });
 test('consent is customer-controlled and stale term approval can be renewed explicitly',async()=>{
  const c=screens();c.state.feed={...c.state.feed,data:{...conversation,consent:'approved',canSend:false}};
- const props={navigation:c.navigation,route:{params:{id:'c'}}},tree=await mount(c.exports.ChatScreen,props);await press(tree,'Approve communication');assert.equal(c.calls[0].data.decision,'approved');
+ const props={navigation:c.navigation,route:{params:{id:'c'}}},tree=await mount(c.exports.ChatScreen,props);await press(tree,'Conversation details');await press(tree,'Approve communication');assert.equal(c.calls[0].data.decision,'approved');
  c.state.auth={user:{uid:'shop'},profile:{role:'shop'},offline:false};await act(async()=>tree.update(React.createElement(c.exports.ChatScreen,props)));
  assert.equal(button(tree,'Approve communication'),undefined);assert.equal(button(tree,'Revoke communication'),undefined);await unmount(tree);
 });
 test('inbox exposes unread enquiries, pagination and private chat navigation',async()=>{
  const c=screens();let more=0;c.state.feed={...c.state.feed,data:null,items:[{...conversation,consent:'pending',canSend:false,lastMessage:'',enquiry:'May we talk?',unreadCount:2}],loadMore:async()=>{more++;}};
- const tree=await mount(c.exports.MessagesScreen,{navigation:c.navigation});assert.ok(says(tree,'2 unread'));assert.ok(says(tree,'Awaiting customer approval'));assert.ok(says(tree,'May we talk?'));
+ const tree=await mount(c.exports.MessagesScreen,{navigation:c.navigation});assert.equal(button(tree,'Open conversation: Approved Motors').props.accessibilityValue.text,'2 unread messages');assert.ok(says(tree,'Awaiting customer approval'));assert.ok(says(tree,'May we talk?'));
  await press(tree,'Open conversation: Approved Motors');assert.deepEqual(c.moves,[['Chat',{id:'c'}]]);await press(tree,'Load more conversations');assert.equal(more,1);await unmount(tree);
 });
 test('shop enquiry action does not open chat until the backend creates its pending request',async()=>{

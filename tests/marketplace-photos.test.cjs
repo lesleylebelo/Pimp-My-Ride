@@ -11,6 +11,7 @@ async function screen(options={}){
  const Button=loadUI('src/shared/components/PrimaryButton.js').default;
  const Gallery=loadUI('src/features/marketplace/components/PhotoGallery.js',{
   '../../auth/context/AuthContext':{useAuth:()=>state.auth},'@react-navigation/native':{useIsFocused:()=>state.focused},
+  ...(options.theme?{'../../../shared/theme/ThemeContext':{useTheme:()=>({theme:options.theme})}}:{}),
   'expo-document-picker':{getDocumentAsync:async input=>{state.calls.picker.push(input);return options.pick?options.pick():{canceled:false,assets:[selected()]};}},
   './MarketplaceUI':{Button,Card:({children,...rest})=>React.createElement('View',rest,children),Notice:({busy,error})=>React.createElement('Text',null,busy?'Loading...':error)},
   '../services/photoApi':{
@@ -34,6 +35,34 @@ async function screen(options={}){
   close:async()=>act(async()=>tree.unmount()),
  };
 }
+
+test('garage thumbnails and large previews sign on demand, preserve ordering and expire together',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout'],now:1800000000000});
+ const s=await screen({items:[photo('2'),photo('1')],props:{presentation:'garage'},view:async(_target,_id,photoId)=>({url:`https://example.invalid/${photoId}`,expiresAt:Date.now()+900000})});
+ t.after(()=>s.close());
+ assert.equal(s.state.calls.view.length,0);assert.equal(s.images().length,0);
+ const thumbnails=s.tree.root.findAllByType('Pressable').filter(n=>n.props.accessibilityLabel?.startsWith('Preview saved-'));
+ assert.deepEqual(thumbnails.map(n=>n.props.accessibilityLabel),['Preview saved-2.jpg','Preview saved-1.jpg']);
+ await s.press('Preview saved-2.jpg');assert.deepEqual(s.state.calls.view[0],['vehicle','car','photo-2','owner']);
+ assert.equal(s.images().find(n=>n.props.accessibilityLabel==='Large vehicle photo preview').props.resizeMode,'contain');
+ assert.equal(s.images().find(n=>n.props.accessibilityLabel==='Thumbnail of saved-2.jpg').props.resizeMode,'cover');
+ await s.press('Preview saved-1.jpg');assert.ok(s.images().every(n=>n.props.source.uri==='https://example.invalid/photo-1'));
+ await act(async()=>t.mock.timers.tick(60000));assert.equal(s.images().length,0);assert.match(s.text(),/preview expired/);assert.equal(s.state.calls.view.length,2);
+});
+
+test('garage selected-photo previews stay local until the existing upload confirmation',async t=>{
+ const s=await screen({props:{presentation:'garage'}});t.after(()=>s.close());
+ await s.press('Choose photo','1');const image=s.images().find(n=>n.props.accessibilityLabel==='Selected photo: selected.jpg');
+ assert.equal(image.props.source.uri,'file:///photos/selected.jpg');assert.equal(s.state.calls.upload.length,0);
+ await s.press('Upload photo','1');await s.press('Cancel');assert.equal(s.state.calls.upload.length,0);
+ await s.press('Discard selection','1');assert.equal(s.images().length,0);
+});
+
+test('garage gallery respects light-theme colors and clears all displayed signed images on blur',async t=>{
+ const {palettes}=loadUI('src/shared/theme/colors.js'),s=await screen({items:[photo()],props:{presentation:'garage'},theme:palettes.light});t.after(()=>s.close());
+ const heading=s.tree.root.findAllByType('Text').find(n=>n.props.children==='Private photo library');assert.equal(heading.props.style.color,palettes.light.textPrimary);
+ await s.press('Preview saved-1.jpg');assert.equal(s.images().length,2);await s.update({focused:false});assert.equal(s.images().length,0);
+});
 
 test('photo metadata loads independently and only View mints a short-lived preview',async t=>{
  t.mock.timers.enable({apis:['Date','setTimeout'],now:1800000000000});

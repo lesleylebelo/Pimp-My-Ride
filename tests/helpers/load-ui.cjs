@@ -2,6 +2,16 @@ const fs=require('node:fs'),path=require('node:path'),babel=require('@babel/core
 function loadUI(file,mocks={}) {
  const native=Object.fromEntries(['View','Text','Pressable','TextInput','ScrollView','ActivityIndicator','Image'].map(n=>[n,n]));
  native.StyleSheet={create:v=>v};native.Modal=({visible,children})=>visible?React.createElement('Modal',null,children):null;
+ // Exercise section render callbacks; native virtualization is verified on device.
+ native.SectionList=({sections,renderItem,renderSectionHeader,ListHeaderComponent,ListEmptyComponent,ListFooterComponent,...props})=>React.createElement('SectionList',props,
+  ListHeaderComponent,sections.length?sections.map(section=>React.createElement(React.Fragment,{key:section.key},renderSectionHeader({section}),section.data.map((item,index)=>React.createElement(React.Fragment,{key:item.id},renderItem({item,index,section}))))):ListEmptyComponent,ListFooterComponent);
+ native.KeyboardAvoidingView='KeyboardAvoidingView';native.Platform={OS:'ios'};
+ native.RefreshControl='RefreshControl';native.useWindowDimensions=()=>({width:390,height:844,fontScale:1,scale:1});
+ native.Keyboard={dismiss(){}};
+ native.FlatList=React.forwardRef(({data,renderItem,ListHeaderComponent,ListEmptyComponent,ListFooterComponent,...props},ref)=>{
+  React.useImperativeHandle(ref,()=>({scrollToOffset(){},scrollToEnd(){}}));
+  return React.createElement('FlatList',props,ListHeaderComponent,data.length?data.map((item,index)=>React.createElement(React.Fragment,{key:item.id},renderItem({item,index}))):ListEmptyComponent,ListFooterComponent);
+ });
  native.AppState={currentState:'active',addEventListener:()=>({remove(){}})};
  // Complete the timing calls synchronously; UI tests do not run a native driver.
  class AnimatedValue {

@@ -45,6 +45,46 @@ async function validQuote(tree) {
   await change(tree, 'Item 1 amount (R)', '123.45');
 }
 
+test('quotation review shows unchanged amounts and context, and back-to-edit never submits',async()=>{
+ const c=setup(),tree=await mount(c.screens.QuoteFormScreen,{navigation:c.navigation,route:{params:{request}}});
+ try{
+  await validQuote(tree);await change(tree,'Warranty / guarantee terms','Six months');
+  await act(async()=>button(tree,'Fixed deposit').props.onPress());await change(tree,'Fixed deposit amount (R)','20.15');
+  await act(async()=>button(tree,'Review quotation').props.onPress());
+  assert.equal(c.state.calls.length,0);assert.match(text(tree),/R123\.45/);assert.match(text(tree),/R20\.15/);assert.match(text(tree),/Six months/);assert.match(text(tree),/Terms revision: 1/);
+  assert.ok(button(tree,'Send quotation'));await act(async()=>button(tree,'Back to edit').props.onPress());
+  assert.equal(button(tree,'Send quotation'),undefined);assert.equal(input(tree,'Fixed deposit amount (R)').props.value,'20.15');
+  await change(tree,'Item 1 amount (R)','150.05');await act(async()=>button(tree,'Review quotation').props.onPress());
+  assert.match(text(tree),/R150\.05/);assert.equal(c.state.calls.length,0);
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test('a changed request revision closes quotation review before any submission',async()=>{
+ const c=setup(),props={navigation:c.navigation,route:{params:{request}}},tree=await mount(c.screens.QuoteFormScreen,props);
+ try{
+  await validQuote(tree);await act(async()=>button(tree,'Review quotation').props.onPress());assert.ok(button(tree,'Send quotation'));
+  c.state.data={request:{...request,version:2,termsVersion:2},quotes:[]};await act(async()=>tree.update(React.createElement(c.screens.QuoteFormScreen,props)));
+  assert.equal(button(tree,'Send quotation'),undefined);assert.equal(c.state.calls.length,0);
+  await act(async()=>button(tree,'Review quotation').props.onPress());assert.match(text(tree),/Terms revision: 2/);
+  await act(async()=>button(tree,'Send quotation').props.onPress());assert.equal(c.state.calls[0].input.termsVersion,2);
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test('same-revision request refresh invalidates a previously reviewed snapshot',async()=>{
+ const c=setup(),props={navigation:c.navigation,route:{params:{request}}},tree=await mount(c.screens.QuoteFormScreen,props);
+ try{
+  await validQuote(tree);await act(async()=>button(tree,'Review quotation').props.onPress());
+  c.state.data={request:{...request,title:'Updated context'},quotes:[]};await act(async()=>tree.update(React.createElement(c.screens.QuoteFormScreen,props)));
+  await act(async()=>button(tree,'Send quotation').props.onPress());assert.equal(c.state.calls.length,0);assert.match(text(tree),/Review the current quotation again/);
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test('network failures cannot expose an enabled quotation review action',async()=>{
+ const c=setup({error:'Request unavailable'}),tree=await mount(c.screens.QuoteFormScreen,{navigation:c.navigation,route:{params:{request}}});
+ try{await validQuote(tree);assert.equal(button(tree,'Review quotation').props.disabled,true);await act(async()=>button(tree,'Review quotation').props.onPress());assert.equal(c.state.calls.length,0);assert.equal(button(tree,'Send quotation'),undefined);}
+ finally{await act(async()=>tree.unmount());}
+});
+
 test('Find Jobs renders both attached request photos in saved order and opens a private preview',async()=>{
  const job={...request,photoIds:['second','first'],photos:[{id:'first',name:'First.jpg'},{id:'second',name:'Second.jpg'}]};
  const {state,screens,navigation}=setup({data:{items:[job],cursor:null}}),tree=await mount(screens.ShopJobsScreen,{navigation});
@@ -217,12 +257,12 @@ test('fresh closed requests and existing quotations block submission despite ope
   const props = {navigation, route: {params: {request}}};
   const tree = await mount(screens.QuoteFormScreen, props);
   assert.deepEqual(state.reads.at(-1), {op: 'request', input: {id: request.id}});
-  assert.equal(button(tree, 'Send quotation').props.disabled, true);
-  await act(async () => button(tree, 'Send quotation').props.onPress());
+  assert.equal(button(tree, 'Review quotation').props.disabled, true);
+  await act(async () => button(tree, 'Review quotation').props.onPress());
   assert.equal(state.calls.length, 0);
   state.data = {request, quotes: [{...quote, status: 'withdrawn'}]};
   await act(async () => tree.update(React.createElement(screens.QuoteFormScreen, props)));
-  assert.equal(button(tree, 'Send quotation').props.disabled, true);
+  assert.equal(button(tree, 'Review quotation').props.disabled, true);
   assert.match(text(tree), /cannot be resubmitted or replaced/);
   await act(async () => tree.unmount());
   const detail = await mount(screens.ShopRequestScreen, {navigation, route: {params: {id: request.id}}});
@@ -245,8 +285,9 @@ test('shop can start a clearly labelled replacement only when its prior quotatio
 
   const draft = await mount(screens.QuoteFormScreen, props);
   assert.match(text(draft), /previous quotation is outdated/);
-  assert.notEqual(button(draft, 'Submit replacement quotation').props.disabled, true);
+  assert.notEqual(button(draft, 'Review quotation').props.disabled, true);
   await validQuote(draft);
+  await act(async () => button(draft, 'Review quotation').props.onPress());
   await act(async () => button(draft, 'Submit replacement quotation').props.onPress());
   assert.equal(state.calls.at(-1).input.termsVersion, 2);
   assert.equal(state.calls.at(-1).op, 'quoteSubmit');
@@ -257,13 +298,13 @@ test('quote submission validates actual fields, computes cents, prevents duplica
   let reject;
   const {state, screens, navigation} = setup({api: () => new Promise((_, fail) => { reject = fail; })});
   const tree = await mount(screens.QuoteFormScreen, {navigation, route: {params: {request}}});
-  await act(async () => button(tree, 'Send quotation').props.onPress());
+  await act(async () => button(tree, 'Review quotation').props.onPress());
   assert.equal(state.calls.length, 0);
   assert.match(text(tree), /Scope of work is required/);
   await validQuote(tree);
   await change(tree, 'Item 1 amount (R)', '12.345');
   assert.match(text(tree), /positive amount with at most two decimal places/);
-  await act(async () => button(tree, 'Send quotation').props.onPress());
+  await act(async () => button(tree, 'Review quotation').props.onPress());
   assert.equal(state.calls.length, 0);
   await change(tree, 'Item 1 amount (R)', '123.45');
   await act(async () => button(tree, 'Add line item').props.onPress());
@@ -273,6 +314,7 @@ test('quote submission validates actual fields, computes cents, prevents duplica
   await act(async () => button(tree, 'Percentage deposit').props.onPress());
   await change(tree, 'Deposit percentage (whole %, 1–99)', '33');
   assert.match(text(tree), /Required deposit: R40.92/);
+  await act(async () => button(tree, 'Review quotation').props.onPress());
   let pending;
   await act(async () => { const send = button(tree, 'Send quotation').props.onPress; pending = send(); void send(); });
   assert.equal(state.calls.length, 1);
@@ -282,6 +324,7 @@ test('quote submission validates actual fields, computes cents, prevents duplica
   assert.equal(input(tree, 'Work included').props.value, 'Prepare and repaint bonnet');
   assert.equal(input(tree, 'Item 2 amount (R)').props.value, '0.55');
   state.api = async () => ({id: 'quote-1'});
+  await act(async () => button(tree, 'Review quotation').props.onPress());
   await act(async () => button(tree, 'Send quotation').props.onPress());
   assert.equal(state.calls.length, 2);
   assert.match(text(tree), /Quotation submitted/);
@@ -299,9 +342,9 @@ test('offline quote draft cannot submit and account switching clears draft value
   await validQuote(tree);
   state.auth = {...state.auth, offline: true};
   await act(async () => tree.update(React.createElement(screens.QuoteFormScreen, props)));
-  await act(async () => button(tree, 'Send quotation').props.onPress());
+  await act(async () => button(tree, 'Review quotation').props.onPress());
   assert.equal(state.calls.length, 0);
-  assert.equal(button(tree, 'Send quotation').props.disabled, true);
+  assert.equal(button(tree, 'Review quotation').props.disabled, true);
   assert.equal(input(tree, 'Work included').props.value, 'Prepare and repaint bonnet');
   state.auth = {...state.auth, offline: false, user: {uid: 'shop-2'}};
   await act(async () => tree.update(React.createElement(screens.QuoteFormScreen, props)));
@@ -340,13 +383,14 @@ test('a delayed quotation response cannot mark another account draft as submitte
   const props = {navigation, route: {params: {request}}};
   const tree = await mount(screens.QuoteFormScreen, props);
   await validQuote(tree);
+  await act(async () => button(tree, 'Review quotation').props.onPress());
   let pending;
   await act(async () => {pending = button(tree, 'Send quotation').props.onPress();});
   state.auth = {...state.auth, user: {uid: 'another-shop'}};
   await act(async () => tree.update(React.createElement(screens.QuoteFormScreen, props)));
   await act(async () => {release({id: 'old-account-quote'}); await pending;});
   assert.equal(input(tree, 'Work included').props.value, '');
-  assert.ok(button(tree, 'Send quotation'));
+  assert.ok(button(tree, 'Review quotation'));
   assert.doesNotMatch(text(tree), /Quotation submitted/);
   assert.deepEqual(state.navigations, []);
   await act(async () => tree.unmount());
@@ -368,7 +412,7 @@ test('expired current offer exposes renewal and submits a separate freshly valid
  const {state,screens,navigation}=setup({data:{request,quotes:[expired]}}),props={navigation,route:{params:{request,id:request.id}}};
  let tree=await mount(screens.ShopRequestScreen,props);assert.ok(button(tree,'Renew expired quotation'));assert.equal(!!button(tree,'Renew expired quotation').props.disabled,false);assert.match(text(tree),/Renew it with current pricing/);
  await act(async()=>button(tree,'Renew expired quotation').props.onPress());assert.equal(state.navigations[0][0],'QuoteForm');await act(async()=>tree.unmount());
- tree=await mount(screens.QuoteFormScreen,props);await validQuote(tree);await act(async()=>button(tree,'Submit renewal quotation').props.onPress());
+ tree=await mount(screens.QuoteFormScreen,props);await validQuote(tree);await act(async()=>button(tree,'Review quotation').props.onPress());await act(async()=>button(tree,'Submit renewal quotation').props.onPress());
  assert.equal(state.calls[0].op,'quoteSubmit');assert.equal(state.calls[0].input.termsVersion,1);assert.equal(state.calls[0].input.items[0].amountCents,12345);assert.equal(state.calls[0].input.depositType,'none');assert.match(text(tree),/Quotation submitted/);await act(async()=>tree.unmount());
  const zero=setup({data:{request,quotes:[{...quote,validUntil:0}]}}),zeroTree=await mount(zero.screens.ShopRequestScreen,{navigation:zero.navigation,route:{params:{id:request.id}}});assert.ok(button(zeroTree,'Renew expired quotation'));await act(async()=>zeroTree.unmount());
 });
@@ -387,6 +431,7 @@ test('shop explicitly declares full scope, mandatory services and complete charg
   await act(async()=>button(tree,'Confirm: full requested scope included').props.onPress());
   await act(async()=>button(tree,'Include: Preparation').props.onPress());
   await act(async()=>button(tree,'Confirm: total includes all required fees and taxes').props.onPress());
+  await act(async()=>button(tree,'Review quotation').props.onPress());
   await act(async()=>button(tree,'Send quotation').props.onPress());
   assert.equal(state.calls[0].input.scopeConfirmed,true);
   assert.equal(state.calls[0].input.allChargesIncluded,true);
@@ -404,6 +449,7 @@ test('a material request refresh clears prior scope and fee confirmations before
  state.data={request:{...request,version:2,termsVersion:2,mandatoryServices:['Paint','Preparation']},quotes:[]};
  await act(async()=>tree.update(React.createElement(screens.QuoteFormScreen,props)));
  assert.ok(button(tree,'Confirm: full requested scope included'));assert.ok(button(tree,'Include: Paint'));
+ await act(async()=>button(tree,'Review quotation').props.onPress());
  await act(async()=>button(tree,'Send quotation').props.onPress());
  assert.equal(state.calls[0].input.termsVersion,2);assert.equal(state.calls[0].input.scopeConfirmed,false);assert.equal(state.calls[0].input.allChargesIncluded,false);assert.deepEqual(state.calls[0].input.coveredServices,[]);
  await act(async()=>tree.unmount());
