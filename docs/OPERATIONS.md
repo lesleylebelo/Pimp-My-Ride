@@ -97,7 +97,10 @@ Do not deploy until separately instructed. These are review steps for the owner:
 3. `CORS_ORIGINS` is an exact comma-separated HTTP(S) origin list with no paths,
    credentials or wildcards. Include `http://localhost:8081` and
    `http://127.0.0.1:8081` for browser development and the actual hosted web origin
-   when one is chosen. An absent production list allows no browser origins.
+   when one is chosen. An absent production list defaults to only
+   `http://localhost:8081`. An explicit list replaces the defaults; an empty
+   value disables all browser origins. Changing `backend/.env.local` does not
+   change the existing Render service environment.
    Native requests without an Origin remain authenticated normally.
 4. `cors` is already a backend production dependency and present in its lockfile.
    CORS runs before authentication, including OPTIONS; it never grants API access.

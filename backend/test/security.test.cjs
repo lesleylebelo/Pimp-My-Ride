@@ -1,14 +1,70 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),request=require('supertest');
 const {createApp}=require('../app.cjs'),{corsOrigins,storageConfig,validateEmulatorHost}=require('../config.cjs'),{createServices}=require('../services.cjs');
 const {memoryDb}=require('./helpers/memory-db.cjs');
+const {ApiError}=require('../errors.cjs');
 test('CORS supports explicit origins, preflight without authentication, errors and native requests',async()=>{
  let verifies=0;const app=createApp({allowedOrigins:corsOrigins('https://demo.example,http://localhost:8082'),auth:{verifyIdToken:async()=>{verifies++;return {uid:'u'};}},services:{adminApi:async()=>({ok:true}),sessionEvent:async()=>({}),completeProfile:async()=>({})}});
  for(const origin of ['https://demo.example','http://localhost:8082']){const r=await request(app).options('/api/admin').set('Origin',origin).set('Access-Control-Request-Method','POST').set('Access-Control-Request-Headers','authorization,content-type');assert.equal(r.status,204);assert.equal(r.headers['access-control-allow-origin'],origin);}
  assert.equal(verifies,0);const denied=await request(app).options('/api/admin').set('Origin','https://evil.example').set('Access-Control-Request-Method','POST');assert.equal(denied.headers['access-control-allow-origin'],undefined);
  const error=await request(app).post('/api/admin').set('Origin','https://demo.example').send({});assert.equal(error.status,401);assert.equal(error.headers['access-control-allow-origin'],'https://demo.example');
  await request(app).post('/api/admin').set('Authorization','Bearer native').send({}).expect(200);
- assert.throws(()=>corsOrigins('*'));assert.throws(()=>corsOrigins('https://demo.example/path'));assert.deepEqual(corsOrigins(undefined,true),[]);
+ assert.throws(()=>corsOrigins('*'));assert.throws(()=>corsOrigins('https://demo.example/path'));assert.deepEqual(corsOrigins(undefined,true),['http://localhost:8081']);
 });
+test('production Expo Web CORS preserves bearer authentication, permissions and error responses',async()=>{
+ const origin='http://localhost:8081',verifications=[];
+ const app=createApp({allowedOrigins:corsOrigins(undefined,true),
+  auth:{verifyIdToken:async(token,revoked)=>{verifications.push([token,revoked]);if(token!=='good')throw Error('Invalid token');return {uid:'owner'};}},
+  services:{marketplace:async({auth,data})=>{assert.equal(auth.uid,'owner');if(data.op==='restricted')throw new ApiError('permission-denied','Denied');return {ok:true};}}
+ });
+ const health=await request(app).get('/health').set('Origin',origin).expect(200);
+ assert.equal(health.headers['access-control-allow-origin'],origin);
+ assert.match(health.headers.vary,/Origin/);
+ assert.equal(health.headers['access-control-allow-credentials'],undefined);
+ for(const [path,method] of [['/api/marketplace','POST'],['/api/posts','GET'],['/api/posts/item','PATCH'],['/api/posts/item','DELETE'],['/api/posts/images','POST']]){
+  const preflight=await request(app).options(path).set('Origin',origin).set('Access-Control-Request-Method',method).set('Access-Control-Request-Headers','authorization,content-type').expect(204);
+  assert.equal(preflight.headers['access-control-allow-origin'],origin);
+  assert.ok(preflight.headers['access-control-allow-methods'].split(',').includes(method));
+  assert.deepEqual(preflight.headers['access-control-allow-headers'].toLowerCase().split(',').sort(),['authorization','content-type']);
+ }
+ assert.equal(verifications.length,0);
+ const success=await request(app).post('/api/marketplace').set('Origin',origin).set('Authorization','Bearer good').send({op:'list'}).expect(200);
+ assert.equal(success.headers['access-control-allow-origin'],origin);
+ assert.deepEqual(verifications,[['good',true]]);
+ for(const [token,body,status] of [[null,{},401],['bad',{},401],['good',{op:'restricted'},403],['good','{',400]]){
+  let call=request(app).post('/api/marketplace').set('Origin',origin).set('Content-Type','application/json');
+  if(token)call=call.set('Authorization','Bearer '+token);
+  const response=await call.send(body).expect(status);
+  assert.equal(response.headers['access-control-allow-origin'],origin);
+ }
+ const missing=await request(app).get('/missing').set('Origin',origin).expect(404);
+ assert.equal(missing.headers['access-control-allow-origin'],origin);
+ for(const unknown of ['https://evil.example','http://localhost:8082','http://localhost:8081.evil.example','null']){
+  for(const method of ['get','options']){
+   const response=await request(app)[method]('/health').set('Origin',unknown).set('Access-Control-Request-Method','GET');
+   assert.equal(response.headers['access-control-allow-origin'],undefined);
+  }
+  const response=await request(app).post('/api/marketplace').set('Origin',unknown).send({}).expect(401);
+  assert.equal(response.headers['access-control-allow-origin'],undefined);
+ }
+ // iOS/Android HTTP clients omit Origin; authentication still applies.
+ await request(app).post('/api/marketplace').set('Authorization','Bearer good').send({}).expect(200);
+ await request(app).post('/api/marketplace').send({}).expect(401);
+});
+
+test('explicit web allowlists replace defaults, reject wildcards and can disable browser access',async()=>{
+ const origins=corsOrigins(' http://localhost:8081,https://web.example,https://web.example ',true);
+ assert.deepEqual(origins,['http://localhost:8081','https://web.example']);
+ assert.deepEqual(corsOrigins('https://web.example',true),['https://web.example']);
+ assert.deepEqual(corsOrigins('',true),[]);
+ assert.deepEqual(corsOrigins(undefined,false),['http://localhost:8081','http://127.0.0.1:8081']);
+ for(const invalid of ['*','https://*.example','https://web.example/path','https://web.example/','null','https://user:pass@web.example'])assert.throws(()=>corsOrigins(invalid,true));
+ for(const allowedOrigins of [origins,[]]){
+  const app=createApp({allowedOrigins,auth:{},services:{}});
+  const response=await request(app).get('/health').set('Origin','https://web.example').expect(200);
+  assert.equal(response.headers['access-control-allow-origin'],allowedOrigins.length?'https://web.example':undefined);
+ }
+});
+
 test('storage credentials and endpoint are required and validated at startup',()=>{
  assert.throws(()=>storageConfig({}),/SUPABASE_URL/);
  assert.throws(()=>storageConfig({SUPABASE_URL:'https://storage.example'}),/SUPABASE_SECRET_KEY/);
