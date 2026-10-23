@@ -47,14 +47,14 @@ test('storage failures and uncertain commits fail closed, with no dispatch or re
  await assert.rejects(()=>createAIReleaseControl({db,env}).reserve(),{reason:'quota_storage'});
 });
 test('content-free diagnostics distinguish provider HTTP, parsing, grounding and completion',async()=>{
- const config={PMR_AI_ASSIST_ENABLED:'true',PMR_AI_PROVIDER:'gemini',PMR_AI_MODEL:'gemini-2.5-flash-lite',GEMINI_API_KEY:'secret-never-persist'};
- const response=value=>JSON.stringify({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:JSON.stringify(value)}]}}]});
+ const config={PMR_AI_ASSIST_ENABLED:'true',PMR_AI_PROVIDER:'gemini',PMR_AI_MODEL:'gemini-3.5-flash-lite',GEMINI_API_KEY:'secret-never-persist'};
+ const response=value=>JSON.stringify({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:JSON.stringify(value),thoughtSignature:'synthetic-opaque-signature'}]}}]});
  for(const [status,body,reason] of [[400,JSON.stringify({error:{status:'INVALID_ARGUMENT',message:'secret-never-persist',details:[{reason:'API_KEY_INVALID'}]}}),'provider_auth'],[401,'private','provider_auth'],[403,'private','provider_auth'],[404,'private','model_unavailable'],[429,'private','provider_quota'],[500,'private','provider_http'],[200,'not JSON','malformed_output'],[200,response({...output,description:'Invented turbo gains.'}),'grounding_rejected'],[200,response(output),null]]){
   const db=store(),provider=createAIProvider({env:config,fetcher:async()=>({status,ok:status===200,text:async()=>body})});
   const run=()=>assist(db,provider)(identity('tester-a'));
   if(reason)await assert.rejects(run,{reason});else assert.equal((await run()).title,output.title);
   const row=db.attempts()[0];assert.equal(row.reasonCode,reason);assert.equal(row.providerHttpStatus,status);assert.ok(row.responseReceivedAt);assert.ok(row.dispatchInitiatedAt);assert.equal(row.state,reason?'failed':'successful');assert.equal(row.outputValidated,!reason);
-  assert.match(row.correlationId,/^[a-f0-9-]{36}$/);const serial=JSON.stringify(row);for(const privateValue of ['secret-never-persist','Black wrap','tester-a','private','turbo'])assert.ok(!serial.includes(privateValue));
+  assert.match(row.correlationId,/^[a-f0-9-]{36}$/);const serial=JSON.stringify(row);for(const privateValue of ['secret-never-persist','Black wrap','tester-a','private','turbo','synthetic-opaque-signature'])assert.ok(!serial.includes(privateValue));
  }
 });
 test('completion storage failure never returns output, and crashes remain unknown',async()=>{

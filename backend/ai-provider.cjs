@@ -6,7 +6,7 @@ const unavailable=()=>failure('configuration');
 function createAIProvider({env=process.env,fetcher=fetch}={}){
  // This testing phase requires explicit Gemini selection; no default or fallback.
  const model=env.PMR_AI_MODEL?.trim(),key=env.GEMINI_API_KEY?.trim();
- const enabled=env.PMR_AI_ASSIST_ENABLED==='true'&&env.PMR_AI_PROVIDER?.trim()==='gemini'&&!!key&&model==='gemini-2.5-flash-lite';
+ const enabled=env.PMR_AI_ASSIST_ENABLED==='true'&&env.PMR_AI_PROVIDER?.trim()==='gemini'&&!!key&&['gemini-2.5-flash-lite','gemini-3.5-flash-lite'].includes(model);
  return {enabled,async suggest(draft,{signal,onResponse=async()=>{}}){
   if(!enabled)throw unavailable();
   const schema={type:'object',additionalProperties:false,required:['title','description','categoryId','missingDetails'],properties:{
@@ -22,7 +22,8 @@ function createAIProvider({env=process.env,fetcher=fetch}={}){
    const response=await fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{
     method:'POST',signal,headers:{'x-goog-api-key':key,'Content-Type':'application/json'},body:JSON.stringify({
      systemInstruction:{parts:[{text:instructions}]},contents:[{role:'user',parts:[{text:JSON.stringify(draft)}]}],
-     generationConfig:{candidateCount:1,maxOutputTokens:1800,responseMimeType:'application/json',responseJsonSchema:schema},
+     // Gemini 3 does not support candidateCount; still require exactly one returned candidate.
+     generationConfig:{...(model==='gemini-2.5-flash-lite'?{candidateCount:1}:{}),maxOutputTokens:1800,responseMimeType:'application/json',responseJsonSchema:schema},
     }),
    });
    await onResponse(response.status);
@@ -45,7 +46,8 @@ function createAIProvider({env=process.env,fetcher=fetch}={}){
     if(result?.promptFeedback?.blockReason)throw failure('provider_blocked');
     if(result?.candidates?.length!==1||candidate.finishReason!=='STOP'||candidate.content?.role!=='model')throw failure('malformed_output');
     const parts=candidate.content.parts;
-    if(!Array.isArray(parts)||!parts.length||parts.some(part=>typeof part.text!=='string'||Object.keys(part).some(key=>key!=='text')))throw failure('malformed_output');
+    // Stateless editing discards Gemini 3 transport signatures; never expose/store them.
+    if(!Array.isArray(parts)||!parts.length||parts.some(part=>typeof part.text!=='string'||Object.keys(part).some(key=>key!=='text'&&!(model==='gemini-3.5-flash-lite'&&key==='thoughtSignature'&&typeof part.thoughtSignature==='string'))))throw failure('malformed_output');
     return JSON.parse(parts.map(part=>part.text).join(''));
    }catch(error){if(error instanceof AIFailure)throw error;throw failure('malformed_output');}
   }catch(error){if(error instanceof AIFailure)throw error;throw failure(signal?.aborted?'provider_timeout':'provider_network');}

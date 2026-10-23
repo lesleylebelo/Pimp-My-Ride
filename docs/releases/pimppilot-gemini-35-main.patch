@@ -1,0 +1,244 @@
+diff --git a/backend/.env.example b/backend/.env.example
+index ea706ca..fafd774 100644
+--- a/backend/.env.example
++++ b/backend/.env.example
+@@ -20,8 +20,9 @@ PMR_AI_ASSIST_ENABLED=false
+ # Explicit selection; never falls back to another provider.
+ PMR_AI_PROVIDER=gemini
+ GEMINI_API_KEY=
+-# Only this Gemini model is authorised; other providers/models fail closed.
+-PMR_AI_MODEL=gemini-2.5-flash-lite
++# Explicitly supported: gemini-3.5-flash-lite and legacy gemini-2.5-flash-lite.
++# All other providers/models fail closed; selection never falls back.
++PMR_AI_MODEL=gemini-3.5-flash-lite
+ # Comma-separated Firebase test UIDs; maximum five global attempts per UTC day.
+ # Missing/invalid allowlist or unavailable storage fails closed. No provider retries.
+ PMR_AI_TEST_UIDS=
+diff --git a/backend/ai-provider.cjs b/backend/ai-provider.cjs
+index bef809e..0dce7bd 100644
+--- a/backend/ai-provider.cjs
++++ b/backend/ai-provider.cjs
+@@ -6,7 +6,7 @@ const unavailable=()=>failure('configuration');
+ function createAIProvider({env=process.env,fetcher=fetch}={}){
+  // This testing phase requires explicit Gemini selection; no default or fallback.
+  const model=env.PMR_AI_MODEL?.trim(),key=env.GEMINI_API_KEY?.trim();
+- const enabled=env.PMR_AI_ASSIST_ENABLED==='true'&&env.PMR_AI_PROVIDER?.trim()==='gemini'&&!!key&&model==='gemini-2.5-flash-lite';
++ const enabled=env.PMR_AI_ASSIST_ENABLED==='true'&&env.PMR_AI_PROVIDER?.trim()==='gemini'&&!!key&&['gemini-2.5-flash-lite','gemini-3.5-flash-lite'].includes(model);
+  return {enabled,async suggest(draft,{signal,onResponse=async()=>{}}){
+   if(!enabled)throw unavailable();
+   const schema={type:'object',additionalProperties:false,required:['title','description','categoryId','missingDetails'],properties:{
+@@ -22,7 +22,8 @@ function createAIProvider({env=process.env,fetcher=fetch}={}){
+    const response=await fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{
+     method:'POST',signal,headers:{'x-goog-api-key':key,'Content-Type':'application/json'},body:JSON.stringify({
+      systemInstruction:{parts:[{text:instructions}]},contents:[{role:'user',parts:[{text:JSON.stringify(draft)}]}],
+-     generationConfig:{candidateCount:1,maxOutputTokens:1800,responseMimeType:'application/json',responseJsonSchema:schema},
++     // Gemini 3 does not support candidateCount; still require exactly one returned candidate.
++     generationConfig:{...(model==='gemini-2.5-flash-lite'?{candidateCount:1}:{}),maxOutputTokens:1800,responseMimeType:'application/json',responseJsonSchema:schema},
+     }),
+    });
+    await onResponse(response.status);
+@@ -45,7 +46,8 @@ function createAIProvider({env=process.env,fetcher=fetch}={}){
+     if(result?.promptFeedback?.blockReason)throw failure('provider_blocked');
+     if(result?.candidates?.length!==1||candidate.finishReason!=='STOP'||candidate.content?.role!=='model')throw failure('malformed_output');
+     const parts=candidate.content.parts;
+-    if(!Array.isArray(parts)||!parts.length||parts.some(part=>typeof part.text!=='string'||Object.keys(part).some(key=>key!=='text')))throw failure('malformed_output');
++    // Stateless editing discards Gemini 3 transport signatures; never expose/store them.
++    if(!Array.isArray(parts)||!parts.length||parts.some(part=>typeof part.text!=='string'||Object.keys(part).some(key=>key!=='text'&&!(model==='gemini-3.5-flash-lite'&&key==='thoughtSignature'&&typeof part.thoughtSignature==='string'))))throw failure('malformed_output');
+     return JSON.parse(parts.map(part=>part.text).join(''));
+    }catch(error){if(error instanceof AIFailure)throw error;throw failure('malformed_output');}
+   }catch(error){if(error instanceof AIFailure)throw error;throw failure(signal?.aborted?'provider_timeout':'provider_network');}
+diff --git a/backend/test/ai-assist.test.cjs b/backend/test/ai-assist.test.cjs
+index 7ec5ca3..6baffed 100644
+--- a/backend/test/ai-assist.test.cjs
++++ b/backend/test/ai-assist.test.cjs
+@@ -4,8 +4,8 @@ const {createAIAssist}=require('../ai-assist.cjs'),{createAIProvider}=require('.
+ const {ApiError}=require('../errors.cjs');
+ const input={kind:'request',title:'Black wrap',description:'Wrap doors in black.',categoryId:'paint'};
+ const output={title:'Black wrap request',description:'I would like black wrap for the doors.',categoryId:'paint',missingDetails:['What details would you like to provide?']};
+-const geminiEnv={PMR_AI_ASSIST_ENABLED:'true',PMR_AI_PROVIDER:'gemini',PMR_AI_MODEL:'gemini-2.5-flash-lite',GEMINI_API_KEY:'synthetic-server-key'};
+-const geminiResponse=value=>({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:JSON.stringify(value)}]}}]});
++const geminiEnv={PMR_AI_ASSIST_ENABLED:'true',PMR_AI_PROVIDER:'gemini',PMR_AI_MODEL:'gemini-3.5-flash-lite',GEMINI_API_KEY:'synthetic-server-key'};
++const geminiResponse=(value,signature=false)=>({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:JSON.stringify(value),...(signature?{thoughtSignature:'synthetic-opaque-signature'}:{})}]}}]});
+ // Only deterministic tests bypass the separately tested durable release control.
+ const testReleaseControl={authorize(){},async reserve(){}};
+ function fixture(provider,releaseControl=testReleaseControl){
+@@ -100,7 +100,7 @@ test('concurrent requests for one user are rejected and access/category changes
+ });
+ 
+ test('OpenAI, omitted provider and alternate models cannot activate or fall back',async()=>{
+- for(const change of [{PMR_AI_PROVIDER:'openai'},{PMR_AI_PROVIDER:undefined},{PMR_AI_MODEL:'another-model'}]){
++ for(const change of [{PMR_AI_PROVIDER:'openai'},{PMR_AI_PROVIDER:undefined},{PMR_AI_MODEL:'another-model'},{PMR_AI_MODEL:'gemini-3.5-flash-lite-preview'},{PMR_AI_MODEL:'gemini-3.8-flash'}]){
+   const adapter=createAIProvider({env:{...geminiEnv,OPENAI_API_KEY:'unused',...change},fetcher:async()=>assert.fail('No provider dispatch')});
+   assert.equal(adapter.enabled,false);await assert.rejects(()=>adapter.suggest({},{}),{code:'unavailable'});
+  }
+@@ -110,7 +110,7 @@ test('Gemini adapter integrates with authenticated customer/shop HTTP without wr
+  const calls=[];let sent;
+  const provider=createAIProvider({env:geminiEnv,fetcher:async(url,options)=>{
+   calls.push({url,options});sent=JSON.parse(options.body);const draft=JSON.parse(sent.contents[0].parts[0].text);
+-  return {ok:true,text:async()=>JSON.stringify(geminiResponse({...output,categoryId:draft.kind==='request'?'paint':'Wrap & Paint'}))};
++  return {ok:true,text:async()=>JSON.stringify(geminiResponse({...output,categoryId:draft.kind==='request'?'paint':'Wrap & Paint'},true))};
+  }});
+  const f=fixture(provider),before=JSON.stringify(f.rows);
+  await http(f.app).get('/health').expect(200,{ok:true});assert.equal(calls.length,0);
+@@ -120,12 +120,12 @@ test('Gemini adapter integrates with authenticated customer/shop HTTP without wr
+  await http(f.app).post('/api/ai/assist').set('Authorization','Bearer shop').send({...input,kind:'showcase',categoryId:'Wrap & Paint'}).expect(200);
+  assert.equal(calls.length,2);assert.equal(JSON.stringify(f.rows),before);
+  for(const {url,options} of calls){
+-  assert.equal(url,'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent');
++  assert.equal(url,'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent');
+   assert.equal(options.headers['x-goog-api-key'],'synthetic-server-key');assert.equal(options.headers.Authorization,undefined);
+   assert.equal(options.signal instanceof AbortSignal,true);assert.ok(!options.body.includes('synthetic-server-key'));
+   const body=JSON.parse(options.body);assert.equal(body.generationConfig.responseMimeType,'application/json');
+   assert.deepEqual(body.generationConfig.responseJsonSchema.required,['title','description','categoryId','missingDetails']);
+-  assert.equal(body.generationConfig.responseJsonSchema.additionalProperties,false);assert.equal(body.generationConfig.candidateCount,1);
++  assert.equal(body.generationConfig.responseJsonSchema.additionalProperties,false);assert.equal(Object.hasOwn(body.generationConfig,'candidateCount'),false);
+   assert.match(body.systemInstruction.parts[0].text,/Never invent/);assert.equal(body.tools,undefined);
+  }
+  assert.equal(sent.generationConfig.responseJsonSchema.properties.description.maxLength,2000);
+@@ -177,3 +177,39 @@ test('authenticated AI route restricts the initial release UID and enforces the
+  await http(f.app).post('/api/ai/assist').set('Authorization','Bearer owner').send(input).expect(429);
+  assert.equal(calls,1);assert.equal(db.attempts().length,5);assert.equal(JSON.stringify(f.rows),before);
+ });
++
++test('both explicit Gemini models retain the same schema and bounds without model/provider fallback',async()=>{
++ const sent=[];
++ for(const model of ['gemini-2.5-flash-lite','gemini-3.5-flash-lite']){
++  let calls=0;
++  const provider=createAIProvider({env:{...geminiEnv,PMR_AI_MODEL:model,OPENAI_API_KEY:'inactive'},fetcher:async(url,options)=>{
++   calls++;assert.equal(url,'https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent');
++   const body=JSON.parse(options.body);sent.push(body);
++   assert.equal(body.contents.at(-1).role,'user');assert.equal(body.tools,undefined);
++   return {ok:true,status:200,text:async()=>JSON.stringify(geminiResponse(output,model==='gemini-3.5-flash-lite'))};
++  }});
++  assert.equal(provider.enabled,true);await fixture(provider).call();assert.equal(calls,1);
++  const failing=createAIProvider({env:{...geminiEnv,PMR_AI_MODEL:model,OPENAI_API_KEY:'inactive'},fetcher:async(url)=>{
++   calls++;assert.ok(url.endsWith('/'+model+':generateContent'));return {ok:false,status:404};
++  }});
++  await assert.rejects(()=>fixture(failing).call(),{reason:'model_unavailable'});assert.equal(calls,2,'404 must never retry or fall back');
++  const config=sent.at(-1).generationConfig;assert.equal(config.maxOutputTokens,1800);assert.equal(config.responseMimeType,'application/json');
++  assert.deepEqual(config.responseJsonSchema.properties.categoryId,{type:['string','null'],enum:[null,'paint']});
++  assert.equal(config.responseJsonSchema.properties.title.maxLength,100);assert.equal(config.responseJsonSchema.properties.description.maxLength,300);
++  assert.equal(config.responseJsonSchema.properties.missingDetails.maxItems,5);assert.equal(config.responseJsonSchema.properties.missingDetails.items.maxLength,180);
++ }
++ assert.equal(sent[0].generationConfig.candidateCount,1);assert.equal(Object.hasOwn(sent[1].generationConfig,'candidateCount'),false);
++ delete sent[0].generationConfig.candidateCount;assert.deepEqual(sent[0],sent[1]);
++});
++
++test('Gemini 3.5 discards only string thought signatures and still rejects non-text/unknown metadata',async()=>{
++ const signed=geminiResponse(output,true);
++ const provider=result=>createAIProvider({env:geminiEnv,fetcher:async()=>({status:200,ok:true,text:async()=>JSON.stringify(result)})});
++ const suggestion=await fixture(provider(signed)).call();assert.equal(suggestion.title,output.title);assert.equal(JSON.stringify(suggestion).includes('synthetic-opaque-signature'),false);
++ for(const extra of [{thoughtSignature:{}},{thoughtSignature:null},{thought:true},{inlineData:{mimeType:'image/png',data:'synthetic'}},{functionCall:{name:'unexpected'}},{unknown:'private'}]){
++  const result=geminiResponse(output);Object.assign(result.candidates[0].content.parts[0],extra);
++  await assert.rejects(()=>fixture(provider(result)).call(),{reason:'malformed_output'});
++ }
++ const legacy=createAIProvider({env:{...geminiEnv,PMR_AI_MODEL:'gemini-2.5-flash-lite'},fetcher:async()=>({status:200,ok:true,text:async()=>JSON.stringify(signed)})});
++ await assert.rejects(()=>fixture(legacy).call(),{reason:'malformed_output'});
++});
+diff --git a/backend/test/ai-production-compatibility.test.cjs b/backend/test/ai-production-compatibility.test.cjs
+index 293e073..f66b74a 100644
+--- a/backend/test/ai-production-compatibility.test.cjs
++++ b/backend/test/ai-production-compatibility.test.cjs
+@@ -1,17 +1,23 @@
+ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+ const {execFileSync}=require('node:child_process');
+ // Read-only remote main verified 2026-10-23. Render's actual running SHA needs owner confirmation.
+-const BASE='2fce64406d8a0d052b9ace7a9415755ce215b0ff',root=path.resolve(__dirname,'../..');
++const BASE='0ef47b54a4083bf1a29deab96c383ddb08b98e6c',root=path.resolve(__dirname,'../..');
+ const baseline=file=>execFileSync('git',['show',BASE+':'+file],{cwd:root,encoding:'utf8',windowsHide:true}).replace(/\r\n/g,'\n');
+ const current=file=>fs.readFileSync(path.join(root,file),'utf8').replace(/\r\n/g,'\n');
+-test('daily AI changes leave all non-AI backend runtime, authentication, dependencies and rules identical to current main',()=>{
++test('model migration preserves daily quota, diagnostics, auth, validation and all non-provider runtime',()=>{
+  const files=execFileSync('git',['ls-tree','-r','--name-only',BASE,'backend'],{cwd:root,encoding:'utf8',windowsHide:true}).trim().split('\n');
+- for(const file of files.filter(file=>/^backend\/[^/]+\.cjs$/.test(file)&&!file.startsWith('backend/ai-')))assert.equal(current(file),baseline(file),file);
++ for(const file of files.filter(file=>/^backend\/[^/]+\.cjs$/.test(file)&&file!=='backend/ai-provider.cjs'))assert.equal(current(file),baseline(file),file);
+  for(const file of ['backend/package.json','backend/package-lock.json','firestore.rules','firestore.indexes.json','render.yaml'])assert.equal(current(file),baseline(file),file);
+ });
+-test('shared API client changes only suppress expected AI errors and retain marketplace behavior',()=>{
+- const added="  const expectedAI=path==='ai/assist'&&((response.status===503&&payload.error?.code==='unavailable')||(response.status===429&&payload.error?.code==='resource-exhausted')||(response.status===403&&payload.error?.code==='permission-denied'));\n  if(!expectedAI)console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});";
+- const original="  console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});";
+- assert.ok(current('src/shared/services/api.js').includes(added));
+- assert.equal(current('src/shared/services/api.js').replace(added,original),baseline('src/shared/services/api.js'));
++test('model migration leaves the application API client unchanged',()=>{
++ assert.equal(current('src/shared/services/api.js'),baseline('src/shared/services/api.js'));
++});
++test('provider changes only add the selected model and adapt only documented Gemini 3 request/response metadata',()=>{
++ const restored=current('backend/ai-provider.cjs')
++  .replace("&&['gemini-2.5-flash-lite','gemini-3.5-flash-lite'].includes(model);","&&model==='gemini-2.5-flash-lite';")
++  .replace("     // Gemini 3 does not support candidateCount; still require exactly one returned candidate.\n",'')
++  .replace("generationConfig:{...(model==='gemini-2.5-flash-lite'?{candidateCount:1}:{}),maxOutputTokens:1800","generationConfig:{candidateCount:1,maxOutputTokens:1800");
++ assert.equal(restored
++  .replace("    // Stateless editing discards Gemini 3 transport signatures; never expose/store them.\n",'')
++  .replace("key!=='text'&&!(model==='gemini-3.5-flash-lite'&&key==='thoughtSignature'&&typeof part.thoughtSignature==='string')","key!=='text'"),baseline('backend/ai-provider.cjs'));
+ });
+diff --git a/backend/test/ai-release-control.test.cjs b/backend/test/ai-release-control.test.cjs
+index 2b0ec51..1952f95 100644
+--- a/backend/test/ai-release-control.test.cjs
++++ b/backend/test/ai-release-control.test.cjs
+@@ -47,14 +47,14 @@ test('storage failures and uncertain commits fail closed, with no dispatch or re
+  await assert.rejects(()=>createAIReleaseControl({db,env}).reserve(),{reason:'quota_storage'});
+ });
+ test('content-free diagnostics distinguish provider HTTP, parsing, grounding and completion',async()=>{
+- const config={PMR_AI_ASSIST_ENABLED:'true',PMR_AI_PROVIDER:'gemini',PMR_AI_MODEL:'gemini-2.5-flash-lite',GEMINI_API_KEY:'secret-never-persist'};
+- const response=value=>JSON.stringify({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:JSON.stringify(value)}]}}]});
++ const config={PMR_AI_ASSIST_ENABLED:'true',PMR_AI_PROVIDER:'gemini',PMR_AI_MODEL:'gemini-3.5-flash-lite',GEMINI_API_KEY:'secret-never-persist'};
++ const response=value=>JSON.stringify({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:JSON.stringify(value),thoughtSignature:'synthetic-opaque-signature'}]}}]});
+  for(const [status,body,reason] of [[400,JSON.stringify({error:{status:'INVALID_ARGUMENT',message:'secret-never-persist',details:[{reason:'API_KEY_INVALID'}]}}),'provider_auth'],[401,'private','provider_auth'],[403,'private','provider_auth'],[404,'private','model_unavailable'],[429,'private','provider_quota'],[500,'private','provider_http'],[200,'not JSON','malformed_output'],[200,response({...output,description:'Invented turbo gains.'}),'grounding_rejected'],[200,response(output),null]]){
+   const db=store(),provider=createAIProvider({env:config,fetcher:async()=>({status,ok:status===200,text:async()=>body})});
+   const run=()=>assist(db,provider)(identity('tester-a'));
+   if(reason)await assert.rejects(run,{reason});else assert.equal((await run()).title,output.title);
+   const row=db.attempts()[0];assert.equal(row.reasonCode,reason);assert.equal(row.providerHttpStatus,status);assert.ok(row.responseReceivedAt);assert.ok(row.dispatchInitiatedAt);assert.equal(row.state,reason?'failed':'successful');assert.equal(row.outputValidated,!reason);
+-  assert.match(row.correlationId,/^[a-f0-9-]{36}$/);const serial=JSON.stringify(row);for(const privateValue of ['secret-never-persist','Black wrap','tester-a','private','turbo'])assert.ok(!serial.includes(privateValue));
++  assert.match(row.correlationId,/^[a-f0-9-]{36}$/);const serial=JSON.stringify(row);for(const privateValue of ['secret-never-persist','Black wrap','tester-a','private','turbo','synthetic-opaque-signature'])assert.ok(!serial.includes(privateValue));
+  }
+ });
+ test('completion storage failure never returns output, and crashes remain unknown',async()=>{
+diff --git a/backend/test/ai-release-integration.test.cjs b/backend/test/ai-release-integration.test.cjs
+index a1d43a5..fa93b35 100644
+--- a/backend/test/ai-release-integration.test.cjs
++++ b/backend/test/ai-release-integration.test.cjs
+@@ -5,7 +5,7 @@ const {getFirestore}=require('firebase-admin/firestore');
+ const {createAIReleaseControl,CONTROL_PATH,DAILY_PREFIX,ATTEMPT_PREFIX}=require('../ai-release-control.cjs');
+ const app=initializeApp({projectId:'demo-pmr-security'},'ai-release-tests'),db=getFirestore(app);
+ const day='2040-01-02';
+-after(async()=>{await db.doc(DAILY_PREFIX+'/'+day).delete();const rows=await db.collection(ATTEMPT_PREFIX).get();for(const row of rows.docs)await row.ref.delete();await db.terminate();await deleteApp(app);});
++after(async()=>{await db.doc(DAILY_PREFIX+'/'+day).delete();await db.doc(DAILY_PREFIX+'/2040-01-03').delete();const rows=await db.collection(ATTEMPT_PREFIX).get();for(const row of rows.docs)await row.ref.delete();await db.terminate();await deleteApp(app);});
+ test('real transactions allow five globally across instances and preserve historical allowance',async()=>{
+  const history=db.doc(CONTROL_PATH);if(!(await history.get()).exists)await history.create({version:1,attempts:1});
+  const before=await history.get();
+@@ -36,3 +36,35 @@ test('existing rules deny direct-client history, daily quota and diagnostic acce
+   }
+  }finally{await environment.cleanup();}
+ });
++
++test('Gemini 3.5 mocked dispatch preserves real persistent quota and failure diagnostics',async()=>{
++ const {createAIProvider}=require('../ai-provider.cjs'),{createAIAssist}=require('../ai-assist.cjs');
++ const env={PMR_AI_ASSIST_ENABLED:'true',PMR_AI_PROVIDER:'gemini',PMR_AI_MODEL:'gemini-3.5-flash-lite',GEMINI_API_KEY:'synthetic-key',PMR_AI_TEST_UIDS:'synthetic-tester,another-tester'};
++ const control=createAIReleaseControl({db,env,now:()=>Date.parse('2040-01-03T12:00:00Z')});
++ const input={kind:'showcase',title:'Black wrap',description:'Wrap doors in black.',categoryId:'Wrap & Paint'};
++ const output={title:input.title,description:input.description,categoryId:input.categoryId,missingDetails:[]};
++ const response=value=>JSON.stringify({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:JSON.stringify(value),thoughtSignature:'synthetic-opaque-signature'}]}}]});
++ const replies=[{status:200,text:response(output)},{status:404,text:''},{status:200,text:'not JSON'},
++  {status:200,text:response({...output,description:'Invented turbo gains.'})},{status:200,text:response(output)}];let calls=0;
++ const provider=createAIProvider({env,fetcher:async(url,options)=>{
++  assert.equal(url,'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent');
++  assert.equal(Object.hasOwn(JSON.parse(options.body).generationConfig,'candidateCount'),false);
++  const reply=replies[calls++];assert.ok(reply,'no sixth dispatch');return {status:reply.status,ok:reply.status===200,text:async()=>reply.text};
++ }});
++ const actor=async request=>({uid:request.auth.uid,profile:{role:'shop',accountStatus:'active',verificationStatus:'approved'}});
++ const assist=createAIAssist({db,actor,provider,releaseControl:control});
++ const request=uid=>({auth:{uid},data:input});
++ await assert.rejects(()=>assist(request('unlisted')),{code:'permission-denied'});assert.equal(calls,0);
++ for(const [index,reason] of [null,'model_unavailable','malformed_output','grounding_rejected',null].entries()){
++  const run=()=>assist(request(index%2?'another-tester':'synthetic-tester'));
++  if(reason)await assert.rejects(run,{reason});else assert.equal((await run()).title,input.title);
++ }
++ // Another process has fresh minute counters but shares the exhausted daily quota.
++ const restarted=createAIAssist({db,actor,provider,releaseControl:createAIReleaseControl({db,env,now:()=>Date.parse('2040-01-03T12:00:00Z')})});
++ await assert.rejects(()=>restarted(request('synthetic-tester')),{code:'resource-exhausted'});assert.equal(calls,5);
++ const counter=(await db.doc(DAILY_PREFIX+'/2040-01-03').get()).data();assert.equal(counter.attempts,5);
++ const rows=(await db.collection(ATTEMPT_PREFIX).where('day','==','2040-01-03').get()).docs.map(doc=>doc.data());
++ assert.equal(rows.length,5);assert.equal(rows.filter(row=>row.state==='successful'&&row.outputValidated===true).length,2);
++ assert.deepEqual(rows.filter(row=>row.state==='failed').map(row=>row.reasonCode).sort(),['grounding_rejected','malformed_output','model_unavailable']);
++ assert.ok(rows.every(row=>row.dispatchInitiatedAt&&row.responseReceivedAt));assert.equal(rows.find(row=>row.reasonCode==='model_unavailable').providerHttpStatus,404);
++});
