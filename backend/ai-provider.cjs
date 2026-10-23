@@ -40,16 +40,35 @@ function createAIProvider({env=process.env,fetcher=fetch}={}){
     }
     throw failure(reason);
    }
-   const body=await response.text();if(body.length>65536)throw failure('malformed_output');
-   try{
-    const result=JSON.parse(body),candidate=result.candidates?.[0];
-    if(result?.promptFeedback?.blockReason)throw failure('provider_blocked');
-    if(result?.candidates?.length!==1||candidate.finishReason!=='STOP'||candidate.content?.role!=='model')throw failure('malformed_output');
-    const parts=candidate.content.parts;
-    // Stateless editing discards Gemini 3 transport signatures; never expose/store them.
-    if(!Array.isArray(parts)||!parts.length||parts.some(part=>typeof part.text!=='string'||Object.keys(part).some(key=>key!=='text'&&!(model==='gemini-3.5-flash-lite'&&key==='thoughtSignature'&&typeof part.thoughtSignature==='string'))))throw failure('malformed_output');
-    return JSON.parse(parts.map(part=>part.text).join(''));
-   }catch(error){if(error instanceof AIFailure)throw error;throw failure('malformed_output');}
+   const bad=(outputStage,outputRule,reason='malformed_output')=>failure(reason,{outputStage,outputRule});
+   const body=await response.text();if(body.length>65536)throw bad('envelope','body_too_large');
+   let result;try{result=JSON.parse(body);}catch{throw bad('envelope','envelope_json');}
+   if(!result||typeof result!=='object'||Array.isArray(result))throw bad('envelope','envelope_type');
+   if(result.promptFeedback?.blockReason)throw bad('envelope','prompt_blocked','provider_blocked');
+   if(!Array.isArray(result.candidates))throw bad('candidate','candidates_missing');
+   if(!result.candidates.length)throw bad('candidate','candidates_empty');
+   if(result.candidates.length!==1)throw bad('candidate','candidate_count');
+   const candidate=result.candidates[0];
+   if(!candidate||typeof candidate!=='object'||Array.isArray(candidate))throw bad('candidate','candidate_type');
+   if(['SAFETY','RECITATION','BLOCKLIST','PROHIBITED_CONTENT','SPII','IMAGE_SAFETY','IMAGE_PROHIBITED_CONTENT'].includes(candidate.finishReason))throw bad('candidate','candidate_blocked','provider_blocked');
+   if(candidate.finishReason==='MAX_TOKENS')throw bad('candidate','finish_max_tokens');
+   if(candidate.finishReason==='CONTINUATION')throw bad('candidate','finish_continuation');
+   if(candidate.finishReason!=='STOP')throw bad('candidate','finish_not_stop');
+   if(candidate.content?.role!=='model')throw bad('candidate','content_role');
+   const parts=candidate.content.parts;
+   if(!Array.isArray(parts)||!parts.length)throw bad('parts','parts_missing');
+   const answer=[];
+   for(const part of parts){
+    if(!part||typeof part!=='object'||Array.isArray(part)||typeof part.text!=='string')throw bad('parts','part_type');
+    // Documented thought flags/signatures are transport metadata, not JSON.
+    // Discard thought summaries and signatures in this stateless, text-only flow.
+    if(Object.keys(part).some(key=>!['text','thought','thoughtSignature'].includes(key))||
+     Object.hasOwn(part,'thought')&&typeof part.thought!=='boolean'||
+     Object.hasOwn(part,'thoughtSignature')&&typeof part.thoughtSignature!=='string')throw bad('parts','part_metadata');
+    if(part.thought!==true)answer.push(part.text);
+   }
+   const text=answer.join('');if(!text.trim())throw bad('parts','answer_text_missing');
+   try{return JSON.parse(text);}catch{throw bad('json','answer_json');}
   }catch(error){if(error instanceof AIFailure)throw error;throw failure(signal?.aborted?'provider_timeout':'provider_network');}
  }};
 }
