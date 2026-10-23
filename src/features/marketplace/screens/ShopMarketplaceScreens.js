@@ -1,5 +1,5 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {Modal, Pressable, ScrollView, StyleSheet, View} from 'react-native';
+import {Keyboard, Modal, Pressable, ScrollView, StyleSheet, useWindowDimensions, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
 import {FeedSearchInput, FeedServicePill, FeedSourceSelector} from '../../../shared/components/landing/FeedControls';
@@ -9,7 +9,7 @@ import ConfirmationButton from '../../../shared/components/ConfirmationButton';
 import colors from '../../../shared/theme/colors';
 import {marketApi} from '../services/marketApi';
 import {useMarketData} from '../hooks/useMarketData';
-import {Page, Card, Field, Button, Notice, useInfiniteCursor, formatMoney, QuoteCard} from '../components/MarketplaceUI';
+import {Page, Card, Field, Button, Notice, useInfiniteCursor, formatMoney} from '../components/MarketplaceUI';
 import {parseMoney, quoteErrors} from '../utils/validation';
 import PhotoGallery from '../components/PhotoGallery';
 import RequestPhotos from '../components/RequestPhotos';
@@ -17,6 +17,8 @@ import MessagesHeaderButton from '../components/MessagesHeaderButton';
 import NotificationsHeaderButton from '../components/NotificationsHeaderButton';
 import {usePostsFeed} from '../hooks/usePostsFeed';
 import {PostCard,postTime} from '../components/PostCard';
+import {useTheme} from '../../../shared/theme/ThemeContext';
+import {QuotationPage, QuotationSection, QuotationAction, QuotationCard, QuotationSteps, QuotationEmpty, quotationStyles} from '../components/QuotationUI';
 
 const offlineMessage = 'Connect to the internet to view requests and manage quotations.';
 const errorMessage = error => error?.message || 'Unable to complete this action. Please retry.';
@@ -249,6 +251,7 @@ function initials(name = '') {
 }
 
 export function ShopRequestScreen({navigation, route}) {
+  const {theme}=useTheme(),styles=quotationStyles(theme),Card=QuotationSection,Button=QuotationAction;
   const {offline} = useAuth();
   const {data, busy, error, refresh} = useMarketData('request', {id: route.params?.id});
   const request = data?.request, quotes = data?.quotes || [];
@@ -258,8 +261,8 @@ export function ShopRequestScreen({navigation, route}) {
   const hasAcceptedQuote = quotes.some(quote => quote.status === 'accepted');
   const hasWithdrawnQuote = quotes.some(quote => quote.status === 'withdrawn');
   const hasOutdatedQuote = quotes.some(quote => quote.status === 'submitted' && !quoteMatchesRequest(quote, request));
-  const canQuote = !offline && !busy && request?.status === 'open' && !hasCurrentQuote && !hasAcceptedQuote && !hasWithdrawnQuote;
-  return <Page title="Service request" navigation={navigation}>
+  const canQuote = !offline && !busy && !error && request?.status === 'open' && !hasCurrentQuote && !hasAcceptedQuote && !hasWithdrawnQuote;
+  return <QuotationPage title="Service request" subtitle="Review the request before preparing your offer" navigation={navigation} maxWidth={820}>
     <Notice busy={busy} error={offline ? offlineMessage : error}/>
     {request && <>
       <Card><RequestSummary request={request} detailed/></Card>
@@ -268,7 +271,7 @@ export function ShopRequestScreen({navigation, route}) {
       {quotes.length > 0 ? <>
         <Text style={styles.heading}>Your quotation</Text>
         {quotes.map(quote => <React.Fragment key={quote.id}>
-          <QuoteCard quote={quote}/>
+          <QuotationCard quote={quote} request={request}/>
           {quote.status === 'submitted' && !quoteMatchesRequest(quote, request) && <Text>This quotation is outdated or has no revision record, so the customer cannot accept it.</Text>}
         </React.Fragment>)}
         {hasWithdrawnQuote && <Text style={styles.muted}>Withdrawal is final for this request. Your withdrawn quotation remains in history and cannot be resubmitted or replaced.</Text>}
@@ -282,7 +285,7 @@ export function ShopRequestScreen({navigation, route}) {
       </>}
     </>}
     <Button title="Refresh request" disabled={busy || offline} onPress={reload(refresh)}/>
-  </Page>;
+  </QuotationPage>;
 }
 
 export function QuoteFormScreen(props) {
@@ -292,16 +295,18 @@ export function QuoteFormScreen(props) {
 }
 
 function QuoteDraft({navigation, requestId}) {
-  const {offline} = useAuth();
+  const {offline,profile} = useAuth(),{theme}=useTheme(),styles=quotationStyles(theme),Card=QuotationSection,Button=QuotationAction;
   // Reload the request: navigation parameters never decide whether quoting is allowed.
   const {data, busy, error, refresh} = useMarketData('request', {id: requestId});
   const [form, setForm] = useState({scope: '', items: [{description: '', amount: ''}], completionDays: '7', warranty: '', validForDays: '14', depositType:'none',depositValue:'',scopeConfirmed:false,allChargesIncluded:false,coveredServices:[]});
   const [touched, setTouched] = useState({}), [submitted, setSubmitted] = useState(false);
   const [saving, setSaving] = useState(false), [failure, setFailure] = useState(''), [sent, setSent] = useState(false);
+  const [reviewing,setReviewing]=useState(false),reviewed=useRef(null);
   const lock = useRef(false), active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const request = data?.request, quotes = data?.quotes || [];
   const coverageRevision = request ? requestTermsVersion(request) : null;
+  useEffect(()=>{setReviewing(false);reviewed.current=null;},[coverageRevision,request?.id,offline,error]);
   useEffect(() => {
     if (coverageRevision !== null) setForm(current => ({...current,scopeConfirmed:false,allChargesIncluded:false,coveredServices:[]}));
   }, [coverageRevision, request?.id]);
@@ -312,7 +317,7 @@ function QuoteDraft({navigation, requestId}) {
   const hasWithdrawnQuote = quotes.some(quote => quote.status === 'withdrawn');
   const hasOutdatedQuote = quotes.some(quote => quote.status === 'submitted' && !quoteMatchesRequest(quote, request));
   const errors = quoteErrors(form);
-  const disabled = busy || saving || offline || !request || request.status !== 'open' || hasCurrentQuote || hasAcceptedQuote || hasWithdrawnQuote;
+  const disabled = busy || saving || offline || !!error || !request || request.status !== 'open' || hasCurrentQuote || hasAcceptedQuote || hasWithdrawnQuote;
   const fieldError = key => (submitted || touched[key]) ? errors[key] : undefined;
   const touch = key => setTouched(value => ({...value, [key]: true}));
   const change = (key, value) => { touch(key); setForm(current => ({...current, [key]: value})); };
@@ -322,8 +327,13 @@ function QuoteDraft({navigation, requestId}) {
   };
   const total = form.items.reduce((sum, item) => sum + (parseMoney(item.amount) || 0), 0);
   const depositAmount=form.depositType==='percentage'&&/^\d+$/.test(form.depositValue)?Math.floor((total*Number(form.depositValue)+50)/100):form.depositType==='fixed'?parseMoney(form.depositValue):null;
+  function review(){
+    setSubmitted(true);if(disabled||Object.values(errors).some(Boolean))return;
+    Keyboard.dismiss();reviewed.current={request,form};setFailure('');setReviewing(true);
+  }
   async function send() {
     if (lock.current || disabled || sent) return;
+    if(!reviewing||reviewed.current?.request!==request||reviewed.current?.form!==form){setReviewing(false);setFailure('Request details changed. Review the current quotation again before submitting.');return;}
     setSubmitted(true);
     if (Object.values(errors).some(Boolean)) return;
     lock.current = true; setSaving(true); setFailure('');
@@ -341,10 +351,13 @@ function QuoteDraft({navigation, requestId}) {
         setSent(true);
         setForm({scope: '', items: [{description: '', amount: ''}], completionDays: '7', warranty: '', validForDays: '14', depositType:'none',depositValue:'',scopeConfirmed:false,allChargesIncluded:false,coveredServices:[]});
       }
-    } catch (e) { if (active.current) setFailure(errorMessage(e)); }
+    } catch (e) { if (active.current) {setFailure(errorMessage(e));setReviewing(false);} }
     finally { lock.current = false; if (active.current) setSaving(false); }
   }
-  return <Page title="Prepare quotation" navigation={navigation}>
+  const submitLabel=hasExpiredQuote?'Submit renewal quotation':hasOutdatedQuote?'Submit replacement quotation':'Send quotation';
+  const reviewQuote={shopName:profile?.shop?.shopName,scope:form.scope,items:form.items.map(item=>({description:item.description,amountCents:parseMoney(item.amount)})),totalCents:total,depositType:form.depositType,depositValue:form.depositType==='percentage'?Number(form.depositValue):parseMoney(form.depositValue),depositAmountCents:depositAmount,completionDays:Number(form.completionDays),validForDays:Number(form.validForDays),warranty:form.warranty,scopeConfirmed:form.scopeConfirmed,allChargesIncluded:form.allChargesIncluded,coveredServices:form.coveredServices};
+  return <QuotationPage title={hasExpiredQuote?'Renew quotation':hasOutdatedQuote?'Replace outdated quotation':'Prepare quotation'} subtitle="Build a clear offer for this service request" navigation={navigation} keyboard maxWidth={820}>
+    <QuotationSteps step={sent?2:reviewing?1:0}/>
     <Notice busy={busy || saving} error={offline ? offlineMessage : failure || error}/>
     {sent ? <Card>
       <Text style={styles.heading}>Quotation submitted</Text>
@@ -360,15 +373,16 @@ function QuoteDraft({navigation, requestId}) {
       {request && request.status !== 'open' && <Text>This request is closed and no longer accepts quotations.</Text>}
       <Card>
         <Text style={styles.heading}>Scope of work</Text>
-        <Field label="Work included" value={form.scope} onChangeText={value => change('scope', value)} onBlur={() => touch('scope')} error={fieldError('scope')} multiline maxLength={2000} editable={!disabled}/>
+        <Text style={styles.muted}>Fields marked * are required. Prices are in ZAR.</Text>
+        <Field label="Work included *" accessibilityLabel="Work included" helperText="Describe the work included in this offer, up to 2,000 characters." value={form.scope} onChangeText={value => change('scope', value)} onBlur={() => touch('scope')} error={fieldError('scope')} multiline maxLength={2000} editable={!disabled}/>
         <Text>For recommendations, confirm the full request description, vehicle and any photo requirements are covered. Leave unconfirmed for partial work.</Text>
         <Button title={`${form.scopeConfirmed ? 'Confirmed' : 'Confirm'}: full requested scope included`} outline={!form.scopeConfirmed} disabled={disabled} onPress={() => {if (!disabled) change('scopeConfirmed', !form.scopeConfirmed);}}/>
         {(request?.mandatoryServices || []).map(service => <Button key={service} title={`${form.coveredServices.includes(service) ? 'Included' : 'Include'}: ${service}`} outline={!form.coveredServices.includes(service)} disabled={disabled} onPress={() => {if (!disabled) change('coveredServices', form.coveredServices.includes(service) ? form.coveredServices.filter(value => value !== service) : [...form.coveredServices, service]);}}/>)}
         <Text style={styles.heading}>Price breakdown</Text>
         <Text style={styles.muted}>Enter the full amount for each line, including any applicable charges. All prices are in South African rand.</Text>
         {form.items.map((item, index) => <View key={index} style={styles.lineItem}>
-          <Field label={`Item ${index + 1} description`} value={item.description} onChangeText={value => changeItem(index, 'description', value)} onBlur={() => touch(`items.${index}.description`)} error={fieldError(`items.${index}.description`)} maxLength={200} editable={!disabled}/>
-          <Field label={`Item ${index + 1} amount (R)`} value={item.amount} onChangeText={value => changeItem(index, 'amount', value)} onBlur={() => touch(`items.${index}.amount`)} error={fieldError(`items.${index}.amount`)} keyboardType="decimal-pad" maxLength={12} editable={!disabled}/>
+          <Field label={`Item ${index + 1} description *`} accessibilityLabel={`Item ${index + 1} description`} value={item.description} onChangeText={value => changeItem(index, 'description', value)} onBlur={() => touch(`items.${index}.description`)} error={fieldError(`items.${index}.description`)} maxLength={200} editable={!disabled}/>
+          <Field label={`Item ${index + 1} amount (R) *`} accessibilityLabel={`Item ${index + 1} amount (R)`} helperText="Full line amount, with up to two decimal places." value={item.amount} onChangeText={value => changeItem(index, 'amount', value)} onBlur={() => touch(`items.${index}.amount`)} error={fieldError(`items.${index}.amount`)} keyboardType="decimal-pad" maxLength={12} editable={!disabled}/>
           {form.items.length > 1 && <Button title={`Remove item ${index + 1}`} disabled={disabled} onPress={() => { if (!disabled) { setForm(current => ({...current, items: current.items.filter((_, position) => position !== index)})); setTouched({}); } }}/>}
         </View>)}
         <Notice error={fieldError('items')}/>
@@ -377,9 +391,10 @@ function QuoteDraft({navigation, requestId}) {
         <Button title={`${form.allChargesIncluded ? 'Confirmed' : 'Confirm'}: total includes all required fees and taxes`} outline={!form.allChargesIncluded} disabled={disabled} onPress={() => {if (!disabled) change('allChargesIncluded', !form.allChargesIncluded);}}/>
       </Card>
       <Card>
-        <Field label="Estimated completion (days)" value={form.completionDays} onChangeText={value => change('completionDays', value)} onBlur={() => touch('completionDays')} error={fieldError('completionDays')} keyboardType="number-pad" maxLength={3} editable={!disabled}/>
+        <Text style={styles.heading}>Turnaround & terms</Text>
+        <Field label="Estimated completion (days) *" accessibilityLabel="Estimated completion (days)" helperText="Enter 1 to 365 working days." value={form.completionDays} onChangeText={value => change('completionDays', value)} onBlur={() => touch('completionDays')} error={fieldError('completionDays')} keyboardType="number-pad" maxLength={3} editable={!disabled}/>
         <Field label="Warranty / guarantee terms" value={form.warranty} onChangeText={value => change('warranty', value)} onBlur={() => touch('warranty')} error={fieldError('warranty')} multiline maxLength={500} editable={!disabled}/>
-        <Field label="Quotation valid for (days)" value={form.validForDays} onChangeText={value => change('validForDays', value)} onBlur={() => touch('validForDays')} error={fieldError('validForDays')} keyboardType="number-pad" maxLength={2} editable={!disabled}/>
+        <Field label="Quotation valid for (days) *" accessibilityLabel="Quotation valid for (days)" helperText="Enter 1 to 90 days." value={form.validForDays} onChangeText={value => change('validForDays', value)} onBlur={() => touch('validForDays')} error={fieldError('validForDays')} keyboardType="number-pad" maxLength={2} editable={!disabled}/>
         <Text style={styles.heading}>Optional deposit</Text>
         <Text style={styles.muted}>Set a required deposit for this quotation. Customers cannot change the amount; percentages are rounded to the nearest cent.</Text>
         <Button title={`${form.depositType==='none'?'Selected: ':''}No deposit`} outline={form.depositType!=='none'} disabled={disabled} onPress={()=>{if(!disabled)setForm(current=>({...current,depositType:'none',depositValue:''}));}}/>
@@ -388,11 +403,21 @@ function QuoteDraft({navigation, requestId}) {
         {form.depositType!=='none'&&<Field label={form.depositType==='percentage'?'Deposit percentage (whole %, 1–99)':'Fixed deposit amount (R)'} value={form.depositValue} onChangeText={value=>change('depositValue',value)} onBlur={()=>touch('depositValue')} error={fieldError('depositValue')} keyboardType={form.depositType==='percentage'?'number-pad':'decimal-pad'} maxLength={form.depositType==='percentage'?2:12} editable={!disabled}/>}
         {form.depositType!=='none'&&<Text>Required deposit: {depositAmount>0?formatMoney(depositAmount):'Enter valid deposit terms'}</Text>}
         <Text style={styles.muted}>Only the customer and your shop can view this quotation. Check the details before sending. A replacement is a separate historical quotation.</Text>
-        <Button title={hasExpiredQuote?'Submit renewal quotation':hasOutdatedQuote ? 'Submit replacement quotation' : 'Send quotation'} disabled={disabled} onPress={send}/>
+        <Text style={styles.muted}>Next, review the full offer. Nothing is submitted until you confirm.</Text>
+        {submitted&&Object.values(errors).some(Boolean)&&<Text accessibilityRole="alert" style={styles.error}>{Object.values(errors).filter(Boolean).join('\n')}</Text>}
+        <Button title="Review quotation" disabled={disabled} onPress={review}/>
       </Card>
       <Button title="Refresh request" disabled={saving || busy || offline} onPress={reload(refresh)}/>
     </>}
-  </Page>;
+    <Modal visible={reviewing&&!sent} transparent animationType="fade" onRequestClose={()=>{if(!saving)setReviewing(false);}}><View style={styles.backdrop}><View accessibilityViewIsModal style={styles.dialog}>
+      <View style={styles.dialogHeader}><Text accessibilityRole="header" style={styles.heading}>Review quotation</Text><Button title="Back to edit" outline disabled={saving} onPress={()=>{if(!saving)setReviewing(false);}}/></View>
+      <ScrollView contentContainerStyle={styles.dialogContent}><Text style={styles.heading}>{request?.title}</Text><Text style={styles.muted}>{[request?.vehicle?.year,request?.vehicle?.make,request?.vehicle?.model].filter(Boolean).join(' · ')}</Text><Text style={styles.small}>Request: {requestId} · Terms revision: {coverageRevision}</Text>
+        <QuotationCard quote={reviewQuote} draft/>
+        <Text style={styles.body}>Full requested scope: {form.scopeConfirmed?'Confirmed':'Not confirmed'}</Text><Text style={styles.body}>All required fees and taxes: {form.allChargesIncluded?'Confirmed':'Not confirmed'}</Text>{form.coveredServices.map(service=><Text key={service} style={styles.body}>Included: {service}</Text>)}
+        <Text style={styles.muted}>Confirm this offer is ready for the customer. Submission does not create a booking or collect payment.</Text><Notice busy={saving} error={failure||error}/><Button title={saving?'Submitting quotation…':submitLabel} disabled={disabled} onPress={send}/>
+      </ScrollView>
+    </View></View></Modal>
+  </QuotationPage>;
 }
 
 export function ShopQuotesScreen(props) {
@@ -401,6 +426,7 @@ export function ShopQuotesScreen(props) {
 }
 
 function QuotesList({navigation}) {
+  const {theme}=useTheme(),styles=quotationStyles(theme),Button=QuotationAction,wide=useWindowDimensions().width>=850;
   const {offline} = useAuth(), [cursor,setCursor]=useState(null);
   const {data, busy, error, refresh} = useMarketData('quotes', {cursor});
   const feed=useInfiniteCursor(data,busy,setCursor,{pageCursor:cursor});
@@ -421,25 +447,25 @@ function QuotesList({navigation}) {
     } catch (e) { if (active.current) setMessage(errorMessage(e)); throw e; }
     finally { lock.current = false; if (active.current) setSaving(false); }
   }
-  return <Page title="My quotations" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
+  return <QuotationPage title="My quotations" subtitle="Your offers, current status and next steps" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
     <Text style={styles.muted}>Your submitted, accepted and withdrawn quotations. Accepted offers link to their booking. Withdrawing an unaccepted offer keeps its history.</Text>
     <Notice busy={busy || saving} error={offline ? offlineMessage : error}/>
     {!!message && <Text accessibilityLiveRegion="polite">{message}</Text>}
-    {feed.items.map(original => {
+    <View style={styles.grid}>{feed.items.map(original => {
       const quote = withdrawn[original.id] ? {...original, status: 'withdrawn'} : original;
-      return <View key={quote.id} style={styles.quote}>
+      return <View key={quote.id} style={[styles.gridCell,wide&&styles.wideCell,styles.quote]}>
         <Text style={styles.heading}>{quote.requestTitle || 'Service request'}</Text>
         {!!quote.vehicle && <Text>{[quote.vehicle.year, quote.vehicle.make, quote.vehicle.model].filter(Boolean).join(' ')}</Text>}
-        <QuoteCard quote={quote}/>
+        <QuotationCard quote={quote} compact/>
         {!!quote.bookingId && <Button title="View booking" disabled={disabled} onPress={() => { if (!disabled) navigation.navigate('BookingDetail', {id: quote.bookingId}); }}/>}
         <Button title="View request" disabled={disabled} onPress={() => { if (!disabled) navigation.navigate('ShopRequest', {id: quote.serviceRequestId}); }}/>
-        {quote.status === 'submitted' && <ConfirmationButton title="Withdraw quotation" message="Withdrawal is final for this request. The quotation remains in history and cannot be resubmitted or replaced." disabled={disabled} danger onConfirm={() => withdraw(quote.id)}/>}
+        {quote.status === 'submitted' && <ConfirmationButton palette={theme} title="Withdraw quotation" message="Withdrawal is final for this request. The quotation remains in history and cannot be resubmitted or replaced." disabled={disabled} danger onConfirm={() => withdraw(quote.id)}/>}
       </View>;
-    })}
-    {!busy && data && !feed.items.length && <Text>You have not submitted a quotation yet.</Text>}
+    })}</View>
+    {!busy && !error && data && !feed.items.length && <QuotationEmpty>You have not submitted a quotation yet.</QuotationEmpty>}
     <Button title="Refresh quotations" disabled={disabled} onPress={reload(refresh)}/>
     {busy && !!feed.items.length && <Text style={styles.muted}>Loading more quotations...</Text>}
-  </Page>;
+  </QuotationPage>;
 }
 
 const styles = StyleSheet.create({

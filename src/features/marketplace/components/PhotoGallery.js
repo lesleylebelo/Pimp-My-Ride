@@ -1,5 +1,6 @@
 import React, {useCallback,useEffect,useRef,useState} from 'react';
-import {Image,StyleSheet,Text,View} from 'react-native';
+import {Image,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
+import {Ionicons} from '@expo/vector-icons';
 import {useIsFocused} from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import {useAuth} from '../../auth/context/AuthContext';
@@ -9,8 +10,10 @@ import {listPhotos,viewPhoto,uploadVehiclePhoto,removeVehiclePhoto} from '../ser
 import {PHOTO_LIMIT,PICKER_PHOTO_TYPES,preparePhoto,photoFileError} from '../utils/photos';
 import colors from '../../../shared/theme/colors';
 import {isMediaUrl} from '../../../shared/services/mediaUrl';
+import {useTheme} from '../../../shared/theme/ThemeContext';
 
-function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSelectionChange,disabled=false}) {
+function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSelectionChange,disabled=false,presentation}) {
+ const {theme}=useTheme(),garage=presentation==='garage',styles=makeStyles(garage?theme:colors,garage);
  const focused = useIsFocused();
  const [items,setItems] = useState([]), [version,setVersion] = useState(null), [canManage,setCanManage] = useState(false);
  const [loading,setLoading] = useState(false), [fresh,setFresh] = useState(false), [error,setError] = useState('');
@@ -131,7 +134,7 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
  const photoCard = (item,slot) => {
   const isAttached = item && selectedIds.includes(item.id);
   return (
-    <Card key={slot || item?.id} testID={`photo-${slot || item?.id}`}>
+    <Card key={slot || item?.id} testID={`photo-${slot || item?.id}`} style={garage?styles.garageCard:undefined}>
       <Text style={styles.eyebrow}>{slot ? `PHOTO ${slot}` : 'PHOTO'}</Text>
 
       {item ? (
@@ -157,7 +160,7 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
             />
           )}
 
-          {preview?.photoId === item.id && (
+          {!garage && preview?.photoId === item.id && (
             <>
               {preview.url && (
                 <Image
@@ -182,14 +185,17 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
         <>
           <Button
             title={item ? 'Choose replacement' : 'Choose photo'}
+            outline={garage}
             disabled={!canChange}
             onPress={() => choose(slot)}
           />
 
           {!!files[slot] && (
             <>
+              {garage&&<Image accessibilityLabel={`Selected photo: ${files[slot].name}`} source={{uri:files[slot].uri}} style={styles.selectedPreview} resizeMode="cover"/>}
               <Text style={styles.fileName} numberOfLines={1}>Selected: {files[slot].name}</Text>
               <ConfirmationButton
+                palette={garage?theme:undefined}
                 title={item ? 'Replace photo' : 'Upload photo'}
                 message={item ? 'Replace this vehicle photo? Photos already attached to published requests will stay unchanged.' : 'Upload this photo to your private vehicle library? You can attach it when publishing a service request.'}
                 disabled={!canChange}
@@ -206,6 +212,7 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
 
           {!!item && (
             <ConfirmationButton
+              palette={garage?theme:undefined}
               title="Remove photo"
               danger
               message="Remove this photo from your vehicle? Published requests will keep their attached copy."
@@ -224,7 +231,7 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
  return (
   <View style={styles.container}>
     <View style={styles.intro}>
-      <Text style={styles.heading}>{target === 'vehicle' ? 'Vehicle photos' : 'Request photos'}</Text>
+      <Text style={styles.heading}>{garage?'Private photo library':target === 'vehicle' ? 'Vehicle photos' : 'Request photos'}</Text>
       {editable && (
         <Text style={styles.introText}>
           Up to {PHOTO_LIMIT} photos. JPEG, PNG, WebP or HEIC, up to 5 MB each. Choose from your device, then confirm the upload.
@@ -239,12 +246,23 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
     ) : focused && (
       <>
         <Notice busy={loading || busy} error={error} />
-        {editable && canManage
+        {garage&&<>
+          {!!items.length&&<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbnails}>
+            {items.map(item=><Pressable key={item.id} accessibilityRole="button" accessibilityLabel={`Preview ${item.name||'saved photo'}`} accessibilityState={{selected:preview?.photoId===item.id,disabled:disabled||!connected||!fresh||loading||busy||!!viewing}} disabled={disabled||!connected||!fresh||loading||busy||!!viewing} onPress={()=>view(item.id)} style={[styles.thumbnail,preview?.photoId===item.id&&styles.selectedThumbnail]}>
+              {preview?.photoId===item.id&&preview.url?<Image source={{uri:preview.url,cache:'reload'}} style={styles.thumbnailImage} resizeMode="cover" accessibilityLabel={`Thumbnail of ${item.name||'saved photo'}`}/>:<Ionicons name="image-outline" size={26} color={theme.textSecondary}/>}
+              <Text style={styles.thumbnailLabel}>{item.slot?`Photo ${item.slot}`:'Photo'}</Text>
+            </Pressable>)}
+          </ScrollView>}
+          {preview?.url?<Image accessibilityLabel="Large vehicle photo preview" source={{uri:preview.url,cache:'reload'}} resizeMode="contain" style={styles.largePreview} onError={()=>setPreview(value=>value?.photoId===preview.photoId&&value.url===preview.url?{...value,url:null,error:'Unable to load this preview. View the photo again.'}:value)}/>:<View style={styles.previewPlaceholder}><Ionicons name="images-outline" size={48} color={theme.textSecondary}/><Text style={styles.status}>{loading?'Loading your private library…':items.length?'Choose a thumbnail to open a private preview.':'Add your first vehicle photo below.'}</Text></View>}
+          {!!preview?.error&&<Text accessibilityRole="alert" style={styles.error}>{preview.error}</Text>}
+          <Text style={styles.introText}>Previews open on request and expire automatically. The first saved photo is used as your garage cover.</Text>
+        </>}
+        <View style={garage?styles.photoGrid:styles.container}>{editable && canManage
           ? Array.from({length:PHOTO_LIMIT},(_,i) => {
               const slot = String(i+1);
               return photoCard(items.find(item => String(item.slot) === slot), slot);
             })
-          : items.map(item => photoCard(item))}
+          : items.map(item => photoCard(item))}</View>
         {!loading && fresh && !items.length && !(editable && canManage) && <Text style={styles.status}>No photos attached.</Text>}
         {editable && fresh && !canManage && <Text style={styles.status}>Photo changes are not available for this vehicle.</Text>}
         <Button
@@ -259,12 +277,12 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
  );
 }
 
-export default function PhotoGallery({target,id,editable=false,selectedIds,onSelectionChange,disabled=false}) {
+export default function PhotoGallery({target,id,editable=false,selectedIds,onSelectionChange,disabled=false,presentation}) {
  const {user,offline} = useAuth(), uid = user?.uid;
- return <GalleryForAccount key={`${uid || 'signed-out'}:${target}:${id}`} target={target} id={id} editable={editable} uid={uid} offline={offline} selectedIds={selectedIds} onSelectionChange={onSelectionChange} disabled={disabled}/>;
+ return <GalleryForAccount key={`${uid || 'signed-out'}:${target}:${id}`} target={target} id={id} editable={editable} uid={uid} offline={offline} selectedIds={selectedIds} onSelectionChange={onSelectionChange} disabled={disabled} presentation={presentation}/>;
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (colors,garage=false) => StyleSheet.create({
   container: { gap: 16 },
   intro: { gap: 6 },
   heading: { fontSize: 22, fontWeight: '600', color: colors.textPrimary, letterSpacing: 0.2 },
@@ -272,7 +290,7 @@ const styles = StyleSheet.create({
   eyebrow: {
     fontSize: 11,
     letterSpacing: 1.5,
-    color: colors.textMuted,
+    color: garage?colors.textSecondary:colors.textMuted,
     fontWeight: '600',
     textTransform: 'uppercase',
   },
@@ -283,4 +301,7 @@ const styles = StyleSheet.create({
   message: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
   error: { fontSize: 13, color: colors.error },
   preview: { width: '100%', height: 240, borderRadius: 12, marginTop: 4 },
+  photoGrid:{flexDirection:'row',flexWrap:'wrap',gap:16},garageCard:{flexGrow:1,flexBasis:280,minWidth:0,borderWidth:0,borderRadius:20,padding:18,gap:12},
+  thumbnails:{gap:12,paddingVertical:4},thumbnail:{width:100,minHeight:100,borderRadius:16,backgroundColor:colors.surfaceMuted,alignItems:'center',justifyContent:'center',padding:8,gap:5,borderWidth:2,borderColor:'transparent'},selectedThumbnail:{borderColor:colors.textPrimary},thumbnailImage:{width:80,height:64,borderRadius:10},thumbnailLabel:{fontSize:12,lineHeight:18,color:colors.textSecondary},
+  largePreview:{width:'100%',height:360,borderRadius:20,backgroundColor:colors.surfaceMuted},previewPlaceholder:{height:260,borderRadius:20,backgroundColor:colors.surfaceMuted,alignItems:'center',justifyContent:'center',padding:24,gap:16},selectedPreview:{width:'100%',height:160,borderRadius:12},
 });

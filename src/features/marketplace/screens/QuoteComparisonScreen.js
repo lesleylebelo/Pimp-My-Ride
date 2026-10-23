@@ -1,11 +1,13 @@
 import React, {useEffect, useState} from 'react';
-import {AppState, StyleSheet} from 'react-native';
+import {AppState, useWindowDimensions, View} from 'react-native';
 import {useIsFocused} from '@react-navigation/native';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
 import {useAuth} from '../../auth/context/AuthContext';
 import {useMarketData} from '../hooks/useMarketData';
 import {ConversationAction} from '../components/ConversationAction';
-import {Page, Card, Button, Notice, useInfiniteCursor, formatMoney, QuoteCard} from '../components/MarketplaceUI';
+import {Notice, useInfiniteCursor, formatMoney} from '../components/MarketplaceUI';
+import {useTheme} from '../../../shared/theme/ThemeContext';
+import {QuotationPage, QuotationSection, QuotationAction, QuotationCard, QuotationSteps, QuotationEmpty, quotationStyles} from '../components/QuotationUI';
 
 const available = (quote, now) => quote?.status === 'submitted' && Number(quote.validUntil) > now;
 const matchesRequestVersion = (quote, request) => {
@@ -21,6 +23,7 @@ export function QuoteComparisonScreen(props) {
 }
 
 function QuoteComparison({route, navigation}) {
+  const {theme}=useTheme(),styles=quotationStyles(theme),Card=QuotationSection,Button=QuotationAction,wide=useWindowDimensions().width>=850;
   const {offline} = useAuth(), id = route.params.id, [cursor,setCursor]=useState(null);
   const {data, busy, error, refresh} = useMarketData('request', {id, quotesCursor: cursor});
   const quoteFeed=useInfiniteCursor(data,busy,setCursor,{itemsKey:'quotes',cursorKey:'quotesCursor'});
@@ -67,7 +70,8 @@ function QuoteComparison({route, navigation}) {
     return () => {clearInterval(timer); subscription.remove();};
   }, [focused, offline, cursor, refresh]);
 
-  return <Page title="Compare quotes" navigation={navigation} onScroll={quoteFeed.onScroll} onLayout={quoteFeed.onLayout} onContentSizeChange={quoteFeed.onContentSizeChange}>
+  return <QuotationPage title="Compare quotes" subtitle="Review the work, the terms and the total" navigation={navigation} onScroll={quoteFeed.onScroll} onLayout={quoteFeed.onLayout} onContentSizeChange={quoteFeed.onContentSizeChange}>
+    <QuotationSteps customer step={selection?1:0}/>
     <Notice busy={busy} error={error || (offline ? 'Connect to compare and accept quotations.' : '')}/>
     {request && <>
       <Card>
@@ -90,11 +94,11 @@ function QuoteComparison({route, navigation}) {
         <Text>Advisory only. Coverage is confirmed by the shop; review the scope and choose any available quotation. Rankings include all current quotations and refresh every 30 seconds.</Text>
       </Card>}
       {!!recommendations?.limitation && <Text>{recommendations.limitation}</Text>}
-      {displayQuotes.map(quote => {
+      <View style={styles.grid}>{displayQuotes.map(quote => {
         const assessment = ranking.get(quote.id);
         const currentTerms = matchesRequestVersion(quote,request);
         const eligible = request.status === 'open' && available(quote, Math.max(now, Date.now())) && currentTerms;
-        return <QuoteCard key={quote.id} quote={quote}>
+        return <View key={quote.id} style={[styles.gridCell,wide&&styles.wideCell]}><QuotationCard quote={quote} request={request}>
           {request.status==='open' && !!quote.shopId && <ConversationAction serviceRequestId={id} shopId={quote.shopId} navigation={navigation} disabled={disabled}/>}
           {!!assessment?.rank && <Text weight="semibold">Rank {assessment.rank} of {recommendations.eligibleCount}{recommended?.id === quote.id ? ' · Recommended' : ''}</Text>}
           <Text>{assessment?.distanceKm == null ? 'Distance unavailable' : `${assessment.distanceKm.toFixed(1)} km (straight-line)`}</Text>
@@ -105,9 +109,9 @@ function QuoteComparison({route, navigation}) {
           {!currentTerms&&<Text>This quotation has no verifiable revision for the current request terms. Ask the shop to submit an updated quotation.</Text>}
           {request.status === 'open' && <Button title={`${selected?.id === quote.id ? 'Selected' : 'Select'}: ${quote.shopName || 'Shop quotation'}`} outline={selected?.id !== quote.id} disabled={disabled || !eligible}
             onPress={() => {if (!disabled && eligible && available(quote, Date.now())) setSelection({id: quote.id, quote});}}/>}
-        </QuoteCard>;
-      })}
-      {!busy && !quotes.length && <Text>No quotations yet.</Text>}
+        </QuotationCard></View>;
+      })}</View>
+      {!busy && !error && !quotes.length && <QuotationEmpty>No quotations yet.</QuotationEmpty>}
       {busy && !!quotes.length && <Text style={styles.muted}>Loading more quotations...</Text>}
       {request.status === 'open' && <Card>
         <Text weight="semibold">{selected ? `Selected: ${selected.shopName || 'Shop quotation'} · ${formatMoney(selected.totalCents)}` : 'Select an available quotation from the list.'}</Text>
@@ -118,8 +122,7 @@ function QuoteComparison({route, navigation}) {
       </Card>}
     </>}
     <Button title="Refresh quotations" outline disabled={busy || offline} onPress={() => {if (!busy && !offline) {setSelection(null);quoteFeed.reset();setCursor(null);void refresh().catch(() => {});}}}/>
-  </Page>;
+  </QuotationPage>;
 }
 
-const styles = StyleSheet.create({heading: {fontSize: 18, lineHeight: 26}});
 export default QuoteComparisonScreen;

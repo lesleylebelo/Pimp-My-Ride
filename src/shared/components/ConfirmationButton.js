@@ -4,7 +4,9 @@ import PrimaryButton from './PrimaryButton';
 import OutlineButton from './OutlineButton';
 import colors from '../theme/colors';
 
-export default function ConfirmationButton({title, message, onConfirm, disabled, danger}) {
+export default function ConfirmationButton({title, message, onConfirm, disabled, danger, palette}) {
+  const styles = makeStyles(palette || colors);
+  const normalText = palette ? {color: '#101208'} : undefined;
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -23,7 +25,7 @@ export default function ConfirmationButton({title, message, onConfirm, disabled,
       title={title}
       disabled={disabled || busy}
       style={danger ? styles.dangerButton : undefined}
-      textStyle={danger ? styles.dangerText : undefined}
+      textStyle={danger ? styles.dangerText : normalText}
       onPress={() => { setError(''); setVisible(true); }}
     />
     <Modal visible={visible} transparent animationType="fade" onRequestClose={cancel}>
@@ -38,7 +40,7 @@ export default function ConfirmationButton({title, message, onConfirm, disabled,
             loading={busy}
             disabled={disabled}
             style={danger ? styles.dangerButton : undefined}
-            textStyle={danger ? styles.dangerText : undefined}
+            textStyle={danger ? styles.dangerText : normalText}
           />
           <OutlineButton title="Cancel" onPress={cancel} disabled={busy} />
         </View>
@@ -47,7 +49,7 @@ export default function ConfirmationButton({title, message, onConfirm, disabled,
   </>;
 }
 
-const styles = StyleSheet.create({
+const makeStyles = colors => StyleSheet.create({
   backdrop: {flex:1,justifyContent:'center',alignItems:'center',padding:24,backgroundColor:'rgba(0,0,0,0.7)'},
   card: {width:'100%',maxWidth:440,padding:24,gap:18,borderRadius:20,backgroundColor:colors.surfaceCard},
   title: {fontSize:20,fontWeight:'600',color:colors.textPrimary},

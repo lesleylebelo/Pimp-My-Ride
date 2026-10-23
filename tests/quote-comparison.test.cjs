@@ -8,7 +8,7 @@ const button = (tree, title) => tree.root.findAllByType('Pressable').find(node =
 const says = (tree, text) => tree.root.findAllByType('Text').some(node => String([node.props.children].flat().join('')).includes(text));
 const press = (tree, title) => act(async () => button(tree, title).props.onPress());
 const unmount = tree => act(async () => tree.unmount());
-const scrollToBottom=tree=>act(async()=>{const view=tree.root.findAllByType('View').find(node=>node.props.onScroll);view.props.onScroll({nativeEvent:{contentOffset:{y:900},contentSize:{height:1400},layoutMeasurement:{height:500}}});});
+const scrollToBottom=tree=>act(async()=>{const view=tree.root.findAllByType('ScrollView').find(node=>node.props.onScroll);view.props.onScroll({nativeEvent:{contentOffset:{y:900},contentSize:{height:1400},layoutMeasurement:{height:500}}});});
 function setup({api = async () => ({id: 'booking-one'})} = {}) {
   const calls = [], reads = [], moves = [];
   const request = {id: 'request-one', version: 1, termsVersion: 1, title: 'Paint the doors', status: 'open', budgetMinCents: 50000, budgetMaxCents: 100000};

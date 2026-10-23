@@ -1,12 +1,12 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {Pressable, StyleSheet, View} from 'react-native';
+import {ActivityIndicator, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
 import ConfirmationButton from '../../../shared/components/ConfirmationButton';
 import {useAuth} from '../../auth/context/AuthContext';
 import {marketApi} from '../services/marketApi';
 import {useMarketData} from '../hooks/useMarketData';
-import {Page, Card, Field, Button, Notice, StatusTag, useInfiniteCursor, formatMoney, QuoteCard} from '../components/MarketplaceUI';
+import {Page, Card, Field, Button, Notice, StatusTag, useInfiniteCursor, formatMoney} from '../components/MarketplaceUI';
 import PhotoGallery from '../components/PhotoGallery';
 import RequestPhotoUploads from '../components/RequestPhotoUploads';
 import LocationPicker from '../../../shared/location/LocationPicker';
@@ -15,6 +15,8 @@ import PrivatePhoto from '../components/PrivatePhoto';
 import AIAssistButton from '../components/AIAssistButton';
 import {vehicleErrors, requestErrors, parseMoney} from '../utils/validation';
 import {useTheme} from '../../../shared/theme/ThemeContext';
+import {GaragePage, GarageAction, garageStyles} from '../components/GarageUI';
+import {QuotationPage, QuotationCard, QuotationAction, QuotationSection, quotationStyles} from '../components/QuotationUI';
 
 const hasErrors = errors => Object.values(errors).some(Boolean);
 const vehicleName = vehicle => `${vehicle.make} ${vehicle.model} (${vehicle.year})`;
@@ -45,46 +47,67 @@ function useMutation() {
   return {run, saving, error, offline};
 }
 
-export function GarageScreen({navigation}) {
+export function GarageScreen(props) {const {user}=useAuth();return <GarageContent key={user?.uid||'signed-out'} {...props}/>;}
+function GarageContent({navigation}) {
   const {theme}=useTheme();
-  const styles=makeStyles(theme);
+  const styles=garageStyles(theme),wide=useWindowDimensions().width>=800;
   const [archived, setArchived] = useState(false), [cursor, setCursor] = useState(null);
   const [message, setMessage] = useState('');
+  const [selected,setSelected]=useState(null);
   const {data, busy, error, refresh} = useMarketData('vehicles', {cursor, archived}, setCursor);
   const feed = useInfiniteCursor(data, busy, setCursor, {pageCursor:cursor});
   const mutation = useMutation(), disabled = busy || mutation.saving || mutation.offline;
   async function archive(vehicle) {
     const result = await mutation.run('vehicleArchive', {id: vehicle.id, version: vehicle.version, archived: !vehicle.archived});
     if (result) {
-      setMessage(vehicle.archived ? `${vehicle.make} ${vehicle.model} restored to your active garage.` : `${vehicle.make} ${vehicle.model} removed from your active garage. Its request and booking history was preserved.`);
+      setSelected(null);setMessage(vehicle.archived ? `${vehicle.make} ${vehicle.model} restored to your active garage.` : `${vehicle.make} ${vehicle.model} removed from your active garage. Its request and booking history was preserved.`);
       await refresh().catch(() => {});
     }
   }
-  return <Page title="My Garage" subtitle="Manage your vehicles in one place" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
-    <Text>Add your vehicles, then choose one when requesting a service.</Text>
-    <Button title="Add vehicle" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm');}}/>
-    <View style={styles.row}>{[false, true].map(value => <Button key={String(value)} title={value ? 'Archived vehicles' : 'Active vehicles'} outline={archived !== value} disabled={disabled} onPress={() => {if (!disabled) {feed.reset();setArchived(value);setCursor(null);}}}/>)}</View>
-    <Notice busy={busy || mutation.saving} error={mutation.error || error}/>
+  function open(route,params){if(!disabled){setSelected(null);if(params)navigation.navigate(route,params);else navigation.navigate(route);}}
+  const cover=vehicle=><View style={styles.cover}>
+    <View style={styles.coverPlaceholder}><Ionicons name="car-sport-outline" size={64} color={theme.textSecondary}/><Text style={styles.placeholderText}>{vehicle.photoIds?.length?'Private vehicle photo':'Add photos to make it yours'}</Text></View>
+    {!!vehicle.photoIds?.length&&<PrivatePhoto target="vehicle" id={vehicle.id} imageStyle={styles.coverImage} accessibilityLabel={`Photo of ${vehicle.make} ${vehicle.model}`}/>}
+  </View>;
+  const archiveControl=vehicle=><ConfirmationButton palette={theme} title={vehicle.archived ? `Restore ${vehicle.make} ${vehicle.model}` : `Remove ${vehicle.make} ${vehicle.model}`} message={vehicle.archived ? 'Restore this vehicle to your active garage. Its open requests can become visible to shops again.' : 'Remove this vehicle from your active garage. It will not be deleted permanently; past service requests, quotations, and bookings will be preserved.'} disabled={disabled} danger={!vehicle.archived} onConfirm={() => archive(vehicle)}/>;
+  return <GaragePage title="My Garage" subtitle="Your vehicles. Ready for their next chapter." navigation={navigation} tabs onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}
+    refreshControl={<RefreshControl refreshing={busy&&!!feed.items.length} onRefresh={()=>{if(!disabled)void refresh().catch(()=>{});}} tintColor={theme.textPrimary}/>}>
+    <View style={styles.toolbar}><View style={styles.intro}><Text style={styles.eyebrow}>YOUR COLLECTION</Text><Text weight="semibold" style={styles.sectionTitle}>{archived?'Archived vehicles':'Made for the road'}</Text><Text style={styles.secondary}>Choose a vehicle to view its details or request a service.</Text></View>
+      <GarageAction title="Add vehicle" icon="add-outline" primary disabled={disabled} onPress={()=>open('VehicleForm')}/></View>
+    <View style={styles.filters}>{[false,true].map(value=><Pressable key={String(value)} accessibilityRole="button" accessibilityLabel={value?'Archived vehicles':'Active vehicles'} accessibilityState={{selected:archived===value,disabled}} disabled={disabled} onPress={()=>{if(!disabled&&archived!==value){feed.reset();setArchived(value);setCursor(null);setSelected(null);setMessage('');}}} style={[styles.filter,archived===value&&styles.filterSelected]}><Text weight={archived===value?'semibold':'regular'} style={styles.filterText}>{value?'Archived vehicles':'Active vehicles'}</Text></Pressable>)}</View>
+    <Notice busy={mutation.saving} error={mutation.offline?'Connect to view or update your garage.':mutation.error || error}/>
+    {busy&&!feed.items.length&&<View accessibilityRole="status" style={styles.empty}><ActivityIndicator color={theme.textPrimary}/><Text style={styles.secondary}>Loading your garage...</Text></View>}
     {!!message && <Text accessibilityRole="status">{message}</Text>}
-    {feed.items.map(vehicle => <Card key={vehicle.id}>
-      <Text weight="semibold" style={styles.heading}>{vehicleName(vehicle)}</Text>
-      <Text>{vehicle.colour} · {vehicle.registration}</Text>
-      {!!vehicle.photoIds?.length&&<PrivatePhoto target="vehicle" id={vehicle.id}/>}
-      <Button title={`Photos for ${vehicle.make} ${vehicle.model}`} outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehiclePhotos', {id: vehicle.id});}}/>
-      {!archived && <><Button title={`Edit ${vehicle.make} ${vehicle.model}`} outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm', {vehicle});}}/>
-        <Button title={`Request service for ${vehicle.make} ${vehicle.model}`} disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('RequestForm', {vehicleId: vehicle.id, vehicle});}}/></>}
-      <ConfirmationButton title={archived ? `Restore ${vehicle.make} ${vehicle.model}` : `Remove ${vehicle.make} ${vehicle.model}`} message={archived ? 'Restore this vehicle to your active garage. Its open requests can become visible to shops again.' : 'Remove this vehicle from your active garage. It will not be deleted permanently; past service requests, quotations, and bookings will be preserved.'} disabled={disabled} danger={!archived} onConfirm={() => archive(vehicle)}/>
-    </Card>)}
-    {data && !busy && !feed.items.length && <Text style={styles.muted}>{archived ? 'No archived vehicles.' : 'Your garage is empty. Add your first vehicle to get started.'}</Text>}
-    <Button title="Refresh vehicles" outline disabled={disabled} onPress={() => {if (!disabled) void refresh().catch(() => {});}}/>
-    {busy && !!feed.items.length && <Text style={styles.muted}>Loading more vehicles...</Text>}
-  </Page>;
+    <View style={styles.grid}>{feed.items.map(vehicle=><View key={vehicle.id} testID={`garage-vehicle-${vehicle.id}`} style={[styles.vehicleCard,wide&&styles.desktopCard]}>
+      <Pressable accessibilityRole="button" accessibilityLabel={`View details for ${vehicle.make} ${vehicle.model}`} disabled={disabled} onPress={()=>{if(!disabled)setSelected(vehicle);}}>{cover(vehicle)}</Pressable>
+      <View style={styles.cardBody}><Text style={styles.eyebrow}>{String(vehicle.year)}</Text><Text weight="semibold" style={styles.vehicleTitle}>{vehicle.make} {vehicle.model}</Text><Text style={styles.specLine}>{[vehicle.colour,vehicle.registration].filter(Boolean).join(' · ')}</Text>
+        <GarageAction title={`View ${vehicle.make} ${vehicle.model}`} icon="car-outline" disabled={disabled} onPress={()=>{if(!disabled)setSelected(vehicle);}}/>
+        <View style={styles.cardActions}><View style={styles.actionCell}><GarageAction title={`Photos for ${vehicle.make} ${vehicle.model}`} icon="images-outline" disabled={disabled} onPress={()=>open('VehiclePhotos',{id:vehicle.id})}/></View>
+          {!archived&&<View style={styles.actionCell}><GarageAction title={`Edit ${vehicle.make} ${vehicle.model}`} icon="create-outline" disabled={disabled} onPress={()=>open('VehicleForm',{vehicle})}/></View>}</View>
+        {!archived&&<GarageAction title={`Request service for ${vehicle.make} ${vehicle.model}`} icon="construct-outline" primary disabled={disabled} onPress={()=>open('RequestForm',{vehicleId:vehicle.id,vehicle})}/>}
+        {archiveControl(vehicle)}
+      </View>
+    </View>)}</View>
+    {data&&!busy&&!error&&!feed.items.length&&<View style={styles.empty}><Ionicons name={archived?'archive-outline':'car-sport-outline'} size={56} color={theme.textSecondary}/><Text weight="semibold" style={styles.emptyTitle}>{archived?'No archived vehicles.':'Your garage is empty.'}</Text><Text style={styles.emptyBody}>{archived?'Vehicles you remove from your active garage will stay here with their history.':'Add your first vehicle to keep its details and photos together, ready for your next service request.'}</Text></View>}
+    <GarageAction title="Refresh vehicles" icon="refresh-outline" disabled={disabled} onPress={()=>{if(!disabled)void refresh().catch(()=>{});}}/>
+    {busy&&!!feed.items.length&&<Text style={styles.secondary}>Loading more vehicles...</Text>}
+    <Modal visible={!!selected} transparent animationType="fade" onRequestClose={()=>setSelected(null)}>
+      {selected&&<View style={styles.backdrop}><View accessibilityViewIsModal style={styles.detailPanel}><View style={styles.detailHeader}><Text accessibilityRole="header" weight="semibold" style={styles.detailHeading}>Vehicle details</Text><GarageAction title="Back to Garage" icon="close-outline" onPress={()=>setSelected(null)}/></View>
+        <ScrollView contentContainerStyle={styles.detailContent}>
+          {cover(selected)}<Text weight="semibold" style={styles.vehicleTitle}>{selected.make} {selected.model}</Text>
+          <Text weight="semibold" style={styles.sectionTitle}>Vehicle specifications</Text><View style={styles.specGrid}>{[['Make',selected.make],['Model',selected.model],['Year',selected.year],['Colour',selected.colour],['Registration',selected.registration],['Garage status',selected.archived?'Archived':'Active']].map(([label,value])=><View key={label} style={styles.spec}><Text style={styles.secondary}>{label}</Text><Text style={styles.specValue}>{String(value??'Not specified')}</Text></View>)}</View>
+          <Text style={styles.secondary}>Registration stays private to your account.</Text>
+          <GarageAction title="Manage photos" icon="images-outline" disabled={disabled} onPress={()=>open('VehiclePhotos',{id:selected.id})}/>
+          {!selected.archived&&<><GarageAction title="Edit vehicle" icon="create-outline" disabled={disabled} onPress={()=>open('VehicleForm',{vehicle:selected})}/><GarageAction title="Create service request" icon="construct-outline" primary disabled={disabled} onPress={()=>open('RequestForm',{vehicleId:selected.id,vehicle:selected})}/></>}
+        </ScrollView></View></View>}
+    </Modal>
+  </GaragePage>;
 }
 
 export function VehicleFormScreen(props){const {user}=useAuth();return <VehicleDraft key={`${user?.uid}:${props.route.params?.vehicle?.id||'new'}`} {...props}/>;}
 function VehicleDraft({route, navigation}) {
   const {theme}=useTheme();
-  const styles=makeStyles(theme);
+  const styles=garageStyles(theme),wide=useWindowDimensions().width>=800;
   const vehicle = route.params?.vehicle;
   const [form, setForm] = useState(() => ({make: vehicle?.make || '', model: vehicle?.model || '', year: vehicle?.year ? String(vehicle.year) : '', colour: vehicle?.colour || '', registration: vehicle?.registration || ''}));
   const [touched, setTouched] = useState({}), [submitted, setSubmitted] = useState(false);
@@ -98,12 +121,17 @@ function VehicleDraft({route, navigation}) {
       if (result) navigation.goBack();
     } catch (_) {}
   }
-  return <Page title={vehicle ? 'Edit vehicle' : 'Add vehicle'} subtitle={vehicle ? 'Update your vehicle details' : 'Add a vehicle to your garage'} navigation={navigation} showTabs={false}>
-    <Text>Vehicle registration stays private to your account. Shops receive the make, model, year and colour with a request.</Text>
-    <Card>{[['make', 'Make', 80], ['model', 'Model', 80], ['year', 'Year', 4], ['colour', 'Colour', 80], ['registration', 'Registration number', 20]].map(([key, label, maxLength]) => <Field key={key} label={label} value={form[key]} onChangeText={value => edit(key, value)} onBlur={() => setTouched(previous => ({...previous, [key]: true}))} error={(submitted || touched[key]) ? errors[key] : null} editable={!disabled} maxLength={maxLength} keyboardType={key === 'year' ? 'number-pad' : 'default'} autoCapitalize={key === 'registration' ? 'characters' : 'words'}/>)}</Card>
-    <Notice busy={mutation.saving} error={mutation.error}/>
-    <Button title="Save vehicle" disabled={disabled || hasErrors(errors)} onPress={save}/>
-  </Page>;
+  return <GaragePage title={vehicle?'Edit vehicle':'Add vehicle'} subtitle={vehicle?'Keep your vehicle details up to date.':'A place for your next pride and joy.'} navigation={navigation} keyboard>
+    <View style={styles.form}><View style={styles.privacy}><Ionicons name="lock-closed-outline" size={20} color={theme.textSecondary}/><Text style={styles.privacyText}>Vehicle registration stays private to your account. Shops receive the make, model, year and colour with a request.</Text></View>
+      <Text style={styles.secondary}>All fields marked * are required.</Text>
+      {[['Vehicle identity',[['make','Make',80,'e.g. Toyota'],['model','Model',80,'e.g. Corolla'],['year','Year',4,'e.g. 2024']]],['Appearance & registration',[['colour','Colour',80,'e.g. Pearl white'],['registration','Registration number',20,'Your registration']]]].map(([heading,fields])=><View key={heading} style={styles.formSection}>
+        <Text accessibilityRole="header" weight="semibold" style={styles.sectionTitle}>{heading}</Text><View style={styles.fields}>{fields.map(([key,label,maxLength,placeholder])=><View key={key} style={[styles.fieldCell,wide&&styles.wideField]}><Field label={`${label} *`} accessibilityLabel={label} value={form[key]} placeholder={placeholder} onChangeText={value=>edit(key,value)} onBlur={()=>setTouched(previous=>({...previous,[key]:true}))} error={(submitted||touched[key])?errors[key]:null} editable={!disabled} maxLength={maxLength} keyboardType={key==='year'?'number-pad':'default'} autoCapitalize={key==='registration'?'characters':'words'}/></View>)}</View>
+      </View>)}
+      {hasErrors(errors)&&<View style={styles.validation}><Text style={styles.error}>Complete these details before saving:</Text>{Object.entries(errors).map(([key,error])=><Text key={key} style={styles.error}>{error}</Text>)}</View>}
+      <Notice busy={mutation.saving} error={mutation.offline?'Connect to save your vehicle.':mutation.error}/>
+      <View style={styles.cardActions}><View style={styles.actionCell}><GarageAction title="Cancel" disabled={mutation.saving} onPress={()=>{if(!mutation.saving)navigation.canGoBack?.()===false?navigation.navigate('Garage'):navigation.goBack();}}/></View><View style={styles.actionCell}><GarageAction title="Save vehicle" icon="checkmark-outline" primary disabled={disabled||hasErrors(errors)} onPress={save}/></View></View>
+    </View>
+  </GaragePage>;
 }
 
 export function OwnerRequestsScreen({navigation}) {
@@ -243,9 +271,10 @@ function RequestDraft({route, navigation}) {
   </Page>;
 }
 
-export function OwnerRequestScreen({route, navigation}) {
+export function OwnerRequestScreen(props) {const {user}=useAuth();return <OwnerRequest key={`${user?.uid}:${props.route.params.id}`} {...props}/>;}
+function OwnerRequest({route, navigation}) {
   const {theme}=useTheme();
-  const styles=makeStyles(theme);
+  const styles=quotationStyles(theme),Button=QuotationAction,Card=QuotationSection;
   const [quotesCursor,setQuotesCursor]=useState(null),id = route.params.id;
   const {data, busy, error, refresh} = useMarketData('request', {id, quotesCursor});
   const quotesFeed=useInfiniteCursor(data,busy,setQuotesCursor,{itemsKey:'quotes',cursorKey:'quotesCursor'});
@@ -254,7 +283,7 @@ export function OwnerRequestScreen({route, navigation}) {
     const result = await mutation.run('requestClose', {id});
     if (result) {quotesFeed.reset();setQuotesCursor(null); await refresh().catch(() => {});}
   }
-  return <Page title={request?.title || 'Service request'} subtitle="Request details and quotes" navigation={navigation} onScroll={quotesFeed.onScroll} onLayout={quotesFeed.onLayout} onContentSizeChange={quotesFeed.onContentSizeChange}>
+  return <QuotationPage title={request?.title || 'Service request'} subtitle="Request details and quotes" navigation={navigation} onScroll={quotesFeed.onScroll} onLayout={quotesFeed.onLayout} onContentSizeChange={quotesFeed.onContentSizeChange}>
     <Notice busy={busy || mutation.saving} error={mutation.error || error}/>
     {request && <><Card>
       <StatusTag>{requestStatus(request.status)}</StatusTag>
@@ -274,12 +303,12 @@ export function OwnerRequestScreen({route, navigation}) {
       <Text weight="semibold" style={styles.heading}>Private quotations</Text>
       <Text>Compare quoted work, prices and validity. An accepted offer creates a booking awaiting the shop's confirmation.</Text>
       {request.status === 'open' && <Button title="Compare quotes" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('QuoteComparison', {id});}}/>}
-      {quotesFeed.items.map(quote => <QuoteCard key={quote.id} quote={quote}/>)}
+      {quotesFeed.items.map(quote => <QuotationCard key={quote.id} quote={quote} request={request} compact/>)}
       {!busy && !quotesFeed.items.length && <Text style={styles.muted}>No quotations yet.</Text>}
       {busy && !!quotesFeed.items.length && <Text style={styles.muted}>Loading more quotations...</Text>}
     </>}
     <Button title="Refresh request" outline disabled={disabled} onPress={() => {if (!disabled) void refresh().catch(() => {});}}/>
-  </Page>;
+  </QuotationPage>;
 }
 
 const makeStyles = (colors) => StyleSheet.create({
