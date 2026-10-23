@@ -74,7 +74,8 @@ export async function apiRequest(path,data,{multipart=false,expectedUid,authClie
   const message=response.status===401?'Your session expired. Please sign out and sign in again.':response.status>=500?`The server could not complete this request (HTTP ${response.status}). Please try again shortly.`:payload.error?.message||'The request failed.';
   const error=new Error(message);error.code=`api/${payload.error?.code||'internal'}`;error.status=response.status;error.responseBody=errorBody;error.requestUrl=requestUrl;
   if(payload.error?.retryWithNewRequest===true)error.retryWithNewRequest=true;
-  console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});
+  const expectedAI=path==='ai/assist'&&((response.status===503&&payload.error?.code==='unavailable')||(response.status===429&&payload.error?.code==='resource-exhausted')||(response.status===403&&payload.error?.code==='permission-denied'));
+  if(!expectedAI)console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});
   throw error;
  }
  if(!result||typeof result!=='object'||!Object.prototype.hasOwnProperty.call(result,'data')){

@@ -1,29 +1,17 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {execFileSync}=require('node:child_process');
-// Verified against GitHub main on 2026-10-22; NOT a claim about Render's running SHA.
-const BASE='10e3c0fc089aba7cdf1420c5441220b0b6956b44',root=path.resolve(__dirname,'../..');
-const baseline=file=>execFileSync('git',['show',`${BASE}:${file}`],{cwd:root,encoding:'utf8',windowsHide:true}).replace(/\r\n/g,'\n');
+// Read-only remote main verified 2026-10-23. Render's actual running SHA needs owner confirmation.
+const BASE='2fce64406d8a0d052b9ace7a9415755ce215b0ff',root=path.resolve(__dirname,'../..');
+const baseline=file=>execFileSync('git',['show',BASE+':'+file],{cwd:root,encoding:'utf8',windowsHide:true}).replace(/\r\n/g,'\n');
 const current=file=>fs.readFileSync(path.join(root,file),'utf8').replace(/\r\n/g,'\n');
-test('AI route is the only Express change relative to verified main',()=>{
- assert.equal(current('backend/app.cjs').replace(" app.post('/api/ai/assist',action(services.aiAssist));\n",''),baseline('backend/app.cjs'));
-});
-test('AI service wiring leaves authentication and all existing services identical to main',()=>{
- const stripped=current('backend/services.cjs')
-  .replace("const {createAIAssist}=require('./ai-assist.cjs');\n",'')
-  .replace(',aiProvider,aiReleaseControl','')
-  .replace('const aiAssist=createAIAssist({db,actor,provider:aiProvider,releaseControl:aiReleaseControl});\n','')
-  .replace(',messaging,aiAssist,photosApi',',messaging,photosApi');
- assert.equal(stripped,baseline('backend/services.cjs'));
-});
-test('non-AI backend modules remain identical to main except the tested CORS configuration',()=>{
+test('daily AI changes leave all non-AI backend runtime, authentication, dependencies and rules identical to current main',()=>{
  const files=execFileSync('git',['ls-tree','-r','--name-only',BASE,'backend'],{cwd:root,encoding:'utf8',windowsHide:true}).trim().split('\n');
- const protectedFiles=files.filter(file=>/^backend\/[^/]+\.cjs$/.test(file)&&!['backend/services.cjs','backend/app.cjs'].includes(file));
- for(const file of [...protectedFiles,'backend/package-lock.json','firestore.rules','render.yaml']){
-  // The CORS repair intentionally changes corsOrigins; security.test.cjs covers
-  // its browser allowlist. Keep every other configuration function protected.
-  const unchanged=source=>file==='backend/config.cjs'?source.slice(source.indexOf('function storageConfig(')):source;
-  assert.equal(unchanged(current(file)),unchanged(baseline(file)),file);
- }
- const deployed=JSON.parse(baseline('backend/package.json')),prepared=JSON.parse(current('backend/package.json'));
- delete deployed.scripts.test;delete prepared.scripts.test;assert.deepEqual(prepared,deployed);
+ for(const file of files.filter(file=>/^backend\/[^/]+\.cjs$/.test(file)&&!file.startsWith('backend/ai-')))assert.equal(current(file),baseline(file),file);
+ for(const file of ['backend/package.json','backend/package-lock.json','firestore.rules','firestore.indexes.json','render.yaml'])assert.equal(current(file),baseline(file),file);
+});
+test('shared API client changes only suppress expected AI errors and retain marketplace behavior',()=>{
+ const added="  const expectedAI=path==='ai/assist'&&((response.status===503&&payload.error?.code==='unavailable')||(response.status===429&&payload.error?.code==='resource-exhausted')||(response.status===403&&payload.error?.code==='permission-denied'));\n  if(!expectedAI)console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});";
+ const original="  console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});";
+ assert.ok(current('src/shared/services/api.js').includes(added));
+ assert.equal(current('src/shared/services/api.js').replace(added,original),baseline('src/shared/services/api.js'));
 });

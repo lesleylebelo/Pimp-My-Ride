@@ -185,3 +185,12 @@ test('an isolated account change during token retrieval prevents sending its old
  assert.ok(s.calls[0].url.endsWith('/health'));
  assert.equal(s.auth.currentUser.uid,'u');
 });
+
+test('expected AI failures remain handled errors without severe console errors or retries',async()=>{
+ for(const [status,code] of [[503,'unavailable'],[429,'resource-exhausted'],[403,'permission-denied']]){
+  const s=setup(async url=>url.endsWith('/health')?{ok:true,json:async()=>({ok:true})}:{ok:false,status,json:async()=>({error:{code,message:'AI Assist is optional.'}})});
+  await assert.rejects(()=>s.apiRequest('ai/assist',{}),{status,code:'api/'+code});assert.deepEqual(s.errors,[]);assert.equal(s.calls.length,2);
+ }
+ const s=setup(async url=>url.endsWith('/health')?{ok:true,json:async()=>({ok:true})}:{ok:false,status:500,json:async()=>({error:{code:'internal'}})});
+ await assert.rejects(()=>s.apiRequest('ai/assist',{}));assert.equal(s.errors.length,1);
+});
