@@ -7,15 +7,26 @@ const showcaseCategories=['Tuning','Performance','Exhaust','Lighting','Body Kit'
 const {validateGrounding,editorialWords}=require('./ai-grounding.cjs');
 function validateSuggestion(value,draft){
  try{
-  M.fields(value,['title','description','categoryId','missingDetails']);
-  const title=D.text(value.title,'Suggested title',draft.limits.title),description=D.text(value.description,'Suggested description',draft.limits.description);
-  if(!Object.hasOwn(value,'categoryId')||value.categoryId!==null&&!draft.categories.some(category=>category.id===value.categoryId))throw failure('malformed_output',{rejectedField:'categoryId',validationRule:'category_unsupported'});
-  if(!Array.isArray(value.missingDetails)||value.missingDetails.length>5)throw failure('malformed_output');
-  const missingDetails=value.missingDetails.map(item=>D.text(item,'Missing detail',180));
-  if(missingDetails.some(item=>!item.endsWith('?')))throw failure('malformed_output');
+  const bad=outputRule=>failure('malformed_output',{outputStage:'suggestion',outputRule});
+  const keys=['title','description','categoryId','missingDetails'];
+  if(!value||typeof value!=='object'||Array.isArray(value))throw bad('object_type');
+  if(Object.keys(value).some(key=>!keys.includes(key)))throw bad('unknown_field');
+  if(keys.some(key=>!Object.hasOwn(value,key)))throw bad('required_field');
+  function text(input,field,max){
+   if(typeof input!=='string')throw bad(field+'_type');
+   const trimmed=input.trim();if(!trimmed)throw bad(field+'_empty');
+   if(trimmed.length>max)throw bad(field+'_length');return trimmed;
+  }
+  const title=text(value.title,'title',draft.limits.title),description=text(value.description,'description',draft.limits.description);
+  if(value.categoryId!==null&&typeof value.categoryId!=='string')throw bad('category_type');
+  if(value.categoryId!==null&&!draft.categories.some(category=>category.id===value.categoryId))throw failure('malformed_output',{outputStage:'suggestion',outputRule:'category_unsupported',rejectedField:'categoryId',validationRule:'category_unsupported'});
+  if(!Array.isArray(value.missingDetails))throw bad('questions_type');
+  if(value.missingDetails.length>5)throw bad('questions_count');
+  const missingDetails=value.missingDetails.map(item=>text(item,'question',180));
+  if(missingDetails.some(item=>!item.endsWith('?')))throw bad('question_format');
   validateGrounding({title,description,missingDetails},draft);
   return {title,description,category:value.categoryId===null?null:draft.categories.find(category=>category.id===value.categoryId),missingDetails};
- }catch(error){if(error instanceof AIFailure)throw error;throw failure('malformed_output');}
+ }catch(error){if(error instanceof AIFailure)throw error;throw failure('malformed_output',{outputStage:'suggestion',outputRule:'unexpected_validation'});}
 }
 function createAIAssist({db,actor,provider=createAIProvider(),releaseControl=createAIReleaseControl({db}),now=Date.now,timeoutMs=15000}){
  const usage=new Map();let concurrent=0;

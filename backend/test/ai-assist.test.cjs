@@ -202,7 +202,7 @@ test('both explicit Gemini models retain the same schema and bounds without mode
  delete sent[0].generationConfig.candidateCount;assert.deepEqual(sent[0],sent[1]);
 });
 
-test('Gemini 3.5 discards only string thought signatures and still rejects non-text/unknown metadata',async()=>{
+test('Gemini discards string thought signatures and still rejects non-text/unknown metadata',async()=>{
  const signed=geminiResponse(output,true);
  const provider=result=>createAIProvider({env:geminiEnv,fetcher:async()=>({status:200,ok:true,text:async()=>JSON.stringify(result)})});
  const suggestion=await fixture(provider(signed)).call();assert.equal(suggestion.title,output.title);assert.equal(JSON.stringify(suggestion).includes('synthetic-opaque-signature'),false);
@@ -211,5 +211,76 @@ test('Gemini 3.5 discards only string thought signatures and still rejects non-t
   await assert.rejects(()=>fixture(provider(result)).call(),{reason:'malformed_output'});
  }
  const legacy=createAIProvider({env:{...geminiEnv,PMR_AI_MODEL:'gemini-2.5-flash-lite'},fetcher:async()=>({status:200,ok:true,text:async()=>JSON.stringify(signed)})});
- await assert.rejects(()=>fixture(legacy).call(),{reason:'malformed_output'});
+ assert.equal((await fixture(legacy).call()).title,output.title);
+});
+
+test('documented thought flags and multiple answer parts preserve structured JSON and grounding',async()=>{
+ const json=JSON.stringify({...output,categoryId:null,missingDetails:[]});
+ for(const parts of [
+  [{text:json,thought:false}],
+  [{text:'synthetic reasoning, never part of the answer',thought:true},{text:json,thought:false,thoughtSignature:'opaque'}],
+  [{text:json.slice(0,25)},{text:json.slice(25)}],
+ ]){
+  const result=geminiResponse(output);result.candidates[0].content.parts=parts;
+  const provider=createAIProvider({env:geminiEnv,fetcher:async()=>({status:200,ok:true,text:async()=>JSON.stringify(result)})});
+  const suggestion=await fixture(provider).call();assert.equal(suggestion.title,output.title);assert.equal(suggestion.category,null);assert.deepEqual(suggestion.missingDetails,[]);
+  assert.ok(!JSON.stringify(suggestion).includes('synthetic reasoning'));assert.ok(!JSON.stringify(suggestion).includes('opaque'));
+ }
+});
+
+test('envelope, candidate, parts and JSON failures have exact content-free subcodes',async()=>{
+ const candidate=geminiResponse(output).candidates[0];
+ const cases=[
+  ['not JSON','envelope','envelope_json'],[null,'envelope','envelope_type'],[[],'envelope','envelope_type'],
+  [{},'candidate','candidates_missing'],[{candidates:[]},'candidate','candidates_empty'],
+  [{candidates:[candidate,candidate]},'candidate','candidate_count'],[{candidates:[null]},'candidate','candidate_type'],
+  [{candidates:[{...candidate,finishReason:'MAX_TOKENS'}]},'candidate','finish_max_tokens'],
+  [{candidates:[{...candidate,finishReason:'CONTINUATION'}]},'candidate','finish_continuation'],
+  [{candidates:[{...candidate,finishReason:undefined}]},'candidate','finish_not_stop'],
+  [{candidates:[{...candidate,content:{...candidate.content,role:'user'}}]},'candidate','content_role'],
+  [{candidates:[{...candidate,content:{role:'model',parts:[]}}]},'parts','parts_missing'],
+  [{candidates:[{...candidate,content:{role:'model',parts:[null]}}]},'parts','part_type'],
+  [{candidates:[{...candidate,content:{role:'model',parts:[{text:'synthetic',thought:'false'}]}}]},'parts','part_metadata'],
+  [{candidates:[{...candidate,content:{role:'model',parts:[{text:'synthetic',thought:true}]}}]},'parts','answer_text_missing'],
+  [{candidates:[{...candidate,content:{role:'model',parts:[{text:'not JSON'}]}}]},'json','answer_json'],
+ ];
+ for(const [body,outputStage,outputRule] of cases){
+  const provider=createAIProvider({env:geminiEnv,fetcher:async()=>({status:200,ok:true,text:async()=>body==='not JSON'?body:JSON.stringify(body)})});
+  await assert.rejects(()=>fixture(provider).call(),{reason:'malformed_output',outputStage,outputRule});
+ }
+ const oversized=createAIProvider({env:geminiEnv,fetcher:async()=>({status:200,ok:true,text:async()=>'x'.repeat(65537)})});
+ await assert.rejects(()=>fixture(oversized).call(),{outputStage:'envelope',outputRule:'body_too_large'});
+ for(const [result,outputStage,outputRule] of [[{promptFeedback:{blockReason:'SAFETY'}},'envelope','prompt_blocked'],[{candidates:[{finishReason:'SAFETY'}]},'candidate','candidate_blocked']]){
+  const provider=createAIProvider({env:geminiEnv,fetcher:async()=>({status:200,ok:true,text:async()=>JSON.stringify(result)})});
+  await assert.rejects(()=>fixture(provider).call(),{reason:'provider_blocked',outputStage,outputRule});
+ }
+});
+
+test('required fields, nulls, types, bounds and question format remain strict with subcodes',()=>{
+ const {validateSuggestion}=require('../ai-assist.cjs'),draft={...input,limits:{title:100,description:300},categories:[{id:'paint',name:'Wrap & Paint'}]};
+ for(const field of ['title','description','categoryId','missingDetails']){
+  const value={...output};delete value[field];assert.throws(()=>validateSuggestion(value,draft),{outputStage:'suggestion',outputRule:'required_field'});
+ }
+ for(const [value,outputRule] of [[null,'object_type'],[[],'object_type'],[{...output,extra:true},'unknown_field'],
+  [{...output,title:null},'title_type'],[{...output,title:' '},'title_empty'],[{...output,title:'x'.repeat(101)},'title_length'],
+  [{...output,description:5},'description_type'],[{...output,description:''},'description_empty'],[{...output,description:'x'.repeat(301)},'description_length'],
+  [{...output,categoryId:[]},'category_type'],[{...output,categoryId:'unknown'},'category_unsupported'],
+  [{...output,missingDetails:null},'questions_type'],[{...output,missingDetails:Array(6).fill('What details?')},'questions_count'],
+  [{...output,missingDetails:[null]},'question_type'],[{...output,missingDetails:[' ']},'question_empty'],
+  [{...output,missingDetails:['x'.repeat(181)]},'question_length'],[{...output,missingDetails:['What details.']},'question_format']]){
+  assert.throws(()=>validateSuggestion(value,draft),{reason:'malformed_output',outputStage:'suggestion',outputRule});
+ }
+ assert.deepEqual(validateSuggestion({...output,categoryId:null,missingDetails:[]},draft).missingDetails,[]);
+ assert.throws(()=>validateSuggestion({...output,description:'Invented turbo gains.'},draft),{reason:'grounding_rejected',outputStage:null,outputRule:null});
+});
+
+test('format subcodes are allowlisted and persisted without private response content',async()=>{
+ const {failure}=require('../ai-errors.cjs'),{store}=require('./helpers/ai-store.cjs'),{createAIReleaseControl}=require('../ai-release-control.cjs');
+ const forged=failure('malformed_output',{outputStage:'private content',outputRule:'private content'});assert.equal(forged.outputStage,null);assert.equal(forged.outputRule,null);
+ const db=store(),control=createAIReleaseControl({db,env:{PMR_AI_TEST_UID:'owner'}});
+ const provider=createAIProvider({env:geminiEnv,fetcher:async()=>({status:200,ok:true,text:async()=>JSON.stringify(geminiResponse({...output,title:null}))})});
+ await assert.rejects(()=>fixture(provider,control).call(),{outputStage:'suggestion',outputRule:'title_type'});
+ const row=db.attempts()[0];assert.equal(row.outputStage,'suggestion');assert.equal(row.outputRule,'title_type');assert.equal(row.providerHttpStatus,200);assert.equal(row.state,'failed');assert.equal(row.outputValidated,false);
+ assert.match(row.correlationId,/^[a-f0-9-]{36}$/);assert.ok(!JSON.stringify(row).includes(output.description));assert.ok(!JSON.stringify(row).includes(geminiEnv.GEMINI_API_KEY));
+ assert.equal(db.rows.get('aiAssistDaily/'+row.day).attempts,1);
 });

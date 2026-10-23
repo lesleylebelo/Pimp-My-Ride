@@ -43,7 +43,7 @@ test('Gemini 3.5 mocked dispatch preserves real persistent quota and failure dia
  const control=createAIReleaseControl({db,env,now:()=>Date.parse('2040-01-03T12:00:00Z')});
  const input={kind:'showcase',title:'Black wrap',description:'Wrap doors in black.',categoryId:'Wrap & Paint'};
  const output={title:input.title,description:input.description,categoryId:input.categoryId,missingDetails:[]};
- const response=value=>JSON.stringify({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:JSON.stringify(value),thoughtSignature:'synthetic-opaque-signature'}]}}]});
+ const response=value=>JSON.stringify({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:'synthetic reasoning',thought:true},{text:JSON.stringify(value),thought:false,thoughtSignature:'synthetic-opaque-signature'}]}}]});
  const replies=[{status:200,text:response({...output,description:'I would like my doors wrapped in black.',missingDetails:['What is your budget?']})},{status:404,text:''},{status:200,text:'not JSON'},
   {status:200,text:response({...output,description:'Invented turbo gains.'})},{status:200,text:response(output)}];let calls=0;
  const provider=createAIProvider({env,fetcher:async(url,options)=>{
@@ -67,6 +67,8 @@ test('Gemini 3.5 mocked dispatch preserves real persistent quota and failure dia
  assert.equal(rows.length,5);assert.equal(rows.filter(row=>row.state==='successful'&&row.outputValidated===true).length,2);
  assert.deepEqual(rows.filter(row=>row.state==='failed').map(row=>row.reasonCode).sort(),['grounding_rejected','malformed_output','model_unavailable']);
  const rejected=rows.find(row=>row.reasonCode==='grounding_rejected');assert.equal(rejected.rejectedField,'description');assert.equal(rejected.validationRule,'new_content_term');
+ const malformed=rows.find(row=>row.reasonCode==='malformed_output');assert.equal(malformed.outputStage,'envelope');assert.equal(malformed.outputRule,'envelope_json');
+ assert.ok(rows.every(row=>!JSON.stringify(row).includes('synthetic reasoning')));
  assert.ok(rows.every(row=>!JSON.stringify(row).includes('Invented turbo')&&!JSON.stringify(row).includes('What is your budget')));
  assert.ok(rows.every(row=>row.dispatchInitiatedAt&&row.responseReceivedAt));assert.equal(rows.find(row=>row.reasonCode==='model_unavailable').providerHttpStatus,404);
 });
