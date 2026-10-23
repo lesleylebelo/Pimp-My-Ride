@@ -27,7 +27,7 @@ function createAIReleaseControl({db,env=process.env,now=Date.now}={}){
      if(attempts>=DAILY_LIMIT)throw new ApiError('resource-exhausted','The daily AI test allowance has been used. Your draft is unchanged.');
      tx.set(counter,{version:1,day,attempts:attempts+1});
      tx.create(attempt,{version:1,correlationId,day,reservedAt,dispatchInitiatedAt:null,responseReceivedAt:null,
-      providerHttpStatus:null,outputValidated:false,failureStage:null,reasonCode:null,state:'unknown',finishedAt:null});
+      providerHttpStatus:null,outputValidated:false,failureStage:null,reasonCode:null,rejectedField:null,validationRule:null,state:'unknown',finishedAt:null});
     });
    }catch(error){if(error instanceof ApiError&&error.code==='resource-exhausted')throw error;
     console.warn('AI Assist control unavailable',{correlationId,failureStage:'storage',reasonCode:'quota_storage'});throw failure('quota_storage');}
@@ -48,7 +48,7 @@ function createAIReleaseControl({db,env=process.env,now=Date.now}={}){
      const safe=error instanceof AIFailure?error:error?failure('unknown'):null;
      // A crash leaves unknown. Success means backend completion, not UI delivery.
      await update({state:safe?(safe.stage==='storage'?'unknown':'failed'):'successful',outputValidated:outputValidated===true,
-      failureStage:safe?.stage??null,reasonCode:safe?.reason??null,finishedAt:new Date(now())});
+      failureStage:safe?.stage??null,reasonCode:safe?.reason??null,rejectedField:safe?.rejectedField??null,validationRule:safe?.validationRule??null,finishedAt:new Date(now())});
     },
    };
   },
