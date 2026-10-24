@@ -1,123 +1,80 @@
-# Smart quotation recommendations
+# Smart quotation comparison
 
-Implemented locally on `lesley`. Recommendations are advisory, derived on each authorised
-owner request read, and never persisted. The customer can inspect and select any quotation
-that passes the existing acceptance rules. Recommendation eligibility does not add booking
-or payment permissions. No live data, payment, media upload or deployment is required.
+## Diagnosis and repaired journey
 
-## Data and eligibility
+All work uses the original application on `lesley`, the existing Express `/api/marketplace` endpoint, Firebase Authentication/Firestore project `pimp-my-ride-a26fc`, and the existing Render service. There is no additional backend, collection, project, provider or dependency.
 
-The existing request, quotation, quotation-head and booking collections are reused.
-Requests have optional `mandatoryServices` (up to 20 unique strings, at most 200 characters
-each). The customer can enter these one per line in the existing service-request form.
-Quotations have explicit `coveredServices`, `scopeConfirmed`, and `allChargesIncluded`
-declarations. The shop sees the request description and requirements when preparing a quote
-and can submit partial work without claiming full coverage.
+The reproducible code defects were:
 
-An eligible recommendation must belong to the same open request, have submitted status,
-unexpired validity, and a verifiable current terms version. It must be the quotation-head
-offer (or the existing deterministic legacy ID if no head exists), from an active approved
-shop with verified enabled Auth. The owner's vehicle and service category must remain
-available. Direct requests must match the invited shop. Total must be positive integer ZAR
-cents, at most R1,000,000, equal to the sum of valid positive line items. Required fees and
-taxes must be included in those items, explicitly confirmed by the shop. Deposits are part
-of the total, never added to it.
+1. Ordinary quotations default to unconfirmed full scope/all charges. The old algorithm correctly refused to rank them, but returned no explanatory state; the screen displayed no smart-analysis result. They now remain comparable with their stated terms and an explicit insufficient-information explanation. The coverage gate is preserved.
+2. Equal scores produced a supposed winner using quotation ID. Ties now share a rank and have **no overall recommended winner**; ID ordering is only a stable display order.
+3. Comparison cards used the normal history page, while rankings were computed across current offers. Superseded/withdrawn history could fill the first page and bury ranked offers. The comparison view now pages only verified current offers and places ranked offers first.
+4. Accumulated first-page entries were merged rather than replaced on some refreshed reads. Withdrawn/replaced offers could remain visible; local selection checks did not use authoritative availability assessments. First-page replacement, request association checks and authoritative comparable flags now remove those cards. Refreshing from later pages resets the cursor before issuing a fresh request.
 
-All exact mandatory requirements must be included in `coveredServices`, and the shop must
-confirm that the full request description, vehicle and photo scope are included. The server
-validates the coverage list against the current request. No keyword guessing, city matching
-or broad shop-profile service text substitutes for coverage. These are auditable shop
-declarations bound to the request terms version, not independent proof of workmanship.
+The journey remains: customer request -> **Compare quotes** -> real backend comparison -> full details/explicit selection -> existing **PaymentChoice** -> confirmed mock payment/booking. Comparison never accepts, books or pays automatically.
 
-Withdrawn, rejected, accepted, superseded, expired, stale, malformed and incomplete offers
-never enter scoring. They remain in the existing quotation history. Older quotations
-without coverage declarations remain inspectable and selectable under existing rules;
-they cannot receive a comparative recommendation. Existing renewal/replacement rules apply.
-Changing mandatory requirements or service coordinates advances the material terms version.
-Older clients omitting these fields on request edits preserve them.
+## Authoritative backend contract
 
-## Exact scoring
+The existing owner `request` read accepts optional `comparison:true`. The normal request read still supplies paginated quotation history. Shops cannot request the comparison view; unrelated customers cannot read the request. Comparison uses existing revoked-token-aware authentication, owner checks, quotation heads and live account/vehicle/category availability.
 
-Let `p` be a quote's complete total and `pmin` the lowest eligible total:
+The read considers only the same open request's submitted, unexpired quotations matching the current material terms revision, current head (or verifiable legacy ID), approved active verified shop, valid ZAR integer-cent line-item total, valid stored deposit terms and direct-invitation association. Expired, withdrawn, superseded, stale, unavailable or malformed offers are excluded from comparison pages. No price or deposit is rewritten.
 
-| Factor | Default weight | Normalised value |
+Comparisons return 20 offers per page using existing `quotes`/`quotesCursor` fields, plus a complete `recommendations` assessment. Scored candidates come first, with deterministic ordering; remaining comparable offers use ordinal quotation ID. A cursor that no longer belongs to the current list requires refresh. A bounded read of at most 501 submitted documents suppresses comparison when more than 500 exist; normal quotation history remains available. Nothing is inferred from a truncated result.
+
+Each assessment distinguishes `comparable` (current available terms) from `eligible` (full scope/all-charge declarations sufficient for scoring). Partially confirmed offers remain inspectable/selectable through existing acceptance rules but cannot win on a low price. Owner request reads return explicit empty/single/insufficient/tied/recommended states. Context read failures suppress selection in the comparison view and provide a retry message; ordinary request history remains available.
+
+## Explainable deterministic analysis
+
+The existing model is retained:
+
+| Factor | Weight | Value |
 | --- | --- | --- |
-| Price | 40% | `pmin / p` |
-| Distance | 25% | `(dmax - d) / (dmax - dmin)`; 1 when all distances equal |
-| Compatibility | 35% | 1 for full verified declarations; partial/unconfirmed quotes are excluded before scoring |
+| Verified price | 40% | Lowest eligible total / this total |
+| Straight-line distance | 25% | `(maximum - distance) / (maximum - minimum)`; 1 if all equal |
+| Shop-confirmed full coverage | 35% | 1, after all required coverage gates pass |
 
-Score is `100 * weighted sum / sum of active weights`, rounded to four decimal places.
-Full mandatory coverage is a strict gate, so its score is deliberately constant among
-eligible offers. Price can never compensate for missing mandatory work.
+Scores are normalised over active weights and rounded to four decimal places. If any scored offer lacks valid service-request/shop coordinates, distance is excluded for **every** scored offer. Missing coordinates never mean zero distance. No geocoding, device-location permission or AI request is needed for comparison.
 
-If any eligible quote lacks a valid origin or destination, distance is removed for **all**
-eligible quotes. The remaining weights are renormalised: price 40/75 and compatibility
-35/75. Known distances can still be displayed. Missing coordinates never mean zero km.
-Ties resolve by rounded score descending, total ascending, then quotation ID in ordinal
-ascending order, independent of feed order, arrival time or locale.
+Equal top scores produce no winner. Fewer than two fully confirmed offers also produce no winner. The explanation describes the scoring criteria rather than claiming independently proven quality or universally best value. Customers may choose any valid comparable offer.
 
-Fewer than two eligible offers produces no winner and no ranks. Ranking includes all
-submitted quotations for this request, independently of UI pagination. A bounded read of
-501 submitted documents suppresses recommendations if there are more than 500; customers
-can continue inspecting the normal paginated quotation list.
+Price/deposit/turnaround highlights and scope/warranty trade-offs come from actual quoted fields. Fixed and percentage deposits use the validated stored amount, never an extra charge. Remaining-after-deposit is total minus that amount. Missing legacy deposit information stays unknown; an explicit no-deposit offer has zero upfront deposit. Turnaround and warranty are displayed as stated, without fabricated quality scores. Different scope descriptions prompt review of inclusions; matching coverage claims do not establish identical work. Missing optional information displays **Not specified**.
 
-## Location and freshness
+## Frontend freshness and usability
 
-Only explicit `serviceRequests.serviceLocation = {latitude, longitude}` is an authoritative
-origin. Destination is the shop profile's saved `shop.coordinates` with the same shape.
-Coordinates must be finite numbers within latitude +/-90 and longitude +/-180; numeric
-strings, missing values and out-of-range coordinates are rejected. The Haversine formula
-uses mean Earth radius 6371.0088 km and reports **straight-line** distance, never road distance.
-Comparison itself needs no device-location permission. Location selection is described in
-[SHOP_LOCATIONS.md](SHOP_LOCATIONS.md); no geocoding or map subscriptions are introduced.
+The existing responsive quotation cards, full-details modal, safe areas, themes and accessible actions are retained. Zero, single and insufficient comparisons explain their limits; tied offers are labelled. Customers can inspect scope, itemised total, deposit, remaining amount, turnaround, warranty and actual terms. Mobile/desktop layouts retain automatic scrolling pagination plus an explicit **Load more quotations** fallback.
 
-The shop account's Business Location section saves `shop.coordinates`, and the service-request
-form saves `serviceLocation`. Both support current location, a map pin and manual coordinates,
-with explicit confirmation. Text addresses and cities are preserved and never converted into
-coordinates. Records without coordinates still show **Distance unavailable** and use the
-conservative two-factor comparison. No location backfill or live-data migration was performed.
+The comparison refreshes on focus, foreground, every 30 seconds while active, at offer expiry and manually. Selection and stale page history reset appropriately. Reopening fetches persisted authoritative records and does not restore an old selection. Busy, offline, error, unavailable and expired states suppress stale recommendations/actions. Final acceptance still rechecks ownership, current revision, lifecycle and authoritative amounts transactionally.
 
-Scores recalculate on every owner request fetch, including subsequent quotation pages,
-refresh and screen focus. The comparison additionally refreshes every 30 seconds while
-focused and active, on app foreground, and at offer expiry. Thus remote changes can take
-up to 30 seconds to appear; there is no new Firestore listener. Recommendation badges hide
-while loading, offline, on errors, after the earliest eligible expiry, or on closed/booked
-requests. Refresh clears selection and accumulated pages before loading fresh offers.
-Existing transactional acceptance always rechecks current authoritative data.
-If recommendation context cannot be fetched, the normal private quotation page remains
-available with a generic temporary-unavailability message and no winner.
+No mock-payment accounting, mutation idempotency, booking lifecycle, notifications, messaging, private storage, Firebase rules/indexes, AI configuration or deployment configuration changes are required. Local automated tests use only synthetic mocks and loopback emulators.
 
-## Files and verification
+## Changed files and deployment
 
-- `backend/quote-recommendations.cjs`: pure eligibility, distance and scoring functions.
-- `backend/quote-recommendation-read.cjs`: bounded owner-only authoritative context reads.
-- `backend/marketplace.cjs`, `backend/marketplace-domain.cjs`: existing API integration,
-  field validation, coverage and material request versioning.
-- `src/features/marketplace/screens/QuoteComparisonScreen.js`: recommendation presentation,
-  ranks, explanations, expiry and foreground refresh.
-- `OwnerMarketplaceScreens.js`, `ShopMarketplaceScreens.js` in the same directory:
-  customer requirements and shop coverage/price declarations.
-- `tests/quote-recommendations.test.cjs`, `tests/quote-comparison.test.cjs`,
-  `tests/marketplace-owner.test.cjs`, `tests/marketplace-shop.test.cjs`, `backend/test/marketplace.test.cjs`: focused algorithm,
-  UI, privacy, head validity, account status, versioning and booking safeguards.
+- `backend/quote-recommendations.cjs`: comparable/scorable distinction, tie handling, grounded explanations and deposit/turnaround/scope facts.
+- `backend/quote-recommendation-read.cjs`: current comparison candidates from existing context reads, with ranked-first stable ordering.
+- `backend/marketplace.cjs`: optional owner comparison view and filtered pagination on the existing request read.
+- `src/features/marketplace/screens/QuoteComparisonScreen.js`: fresh pages, comparison states, trade-offs, eligibility and pagination controls.
+- `tests/quote-recommendations.test.cjs`, `tests/quote-comparison.test.cjs`, `backend/test/marketplace.test.cjs`, `backend/test/marketplace-integration.test.cjs`: focused regressions and existing payment handoff.
+- `backend/test/ai-production-compatibility.test.cjs`: permits only these authorised comparison modules in the pre-existing AI boundary check; AI runtime/dependency checks remain unchanged.
+- This guide.
 
-Run with Node 22 using the existing `npm test`, `npm run test:backend` and
-`npm run test:security` commands. Security tests require the existing local demo Auth and
-Firestore emulators and refuse non-loopback emulator hosts. No Firestore score fields,
-indexes, access-rule changes, maps dependencies or separate test infrastructure are added.
+Deployment requires review and approval, then the matching backend revision on the **existing** Render service and the matching original Expo client release. Existing Firebase/Supabase/environment settings remain in place. No new feature flag, provider, credential, rule/index deployment or data migration is required. No commits, pushes, deployments, live configuration changes or production test writes were performed.
 
-Verified locally with Node **22.23.3**:
+Hosted functionality remains unverified until those matching revisions are deployed and smoke-tested. Remaining device checks: two authorised workshops quoting a customer's request; default/partial/full confirmations; ties and scope trade-offs; refresh/foreground/expiry; long scope and accessibility font sizes; scrolling/details on iOS/Android/Web; and explicit selection through the existing simulated payment/booking journey.
 
-| Check | Result |
-| --- | --- |
-| Application suite (`node --test tests/*.test.cjs`) | 340 passed, 0 failed |
-| Existing backend suite (`npm test --prefix backend`) | 226 passed, 0 failed |
-| Existing Auth/Firestore emulator security runner | 70 passed, 0 failed across five suites |
-| Expo web export (offline, dotenv loading disabled) | Passed |
-| `git diff --check` | Passed |
+## Verification record
 
-Logs and the generated web export are under the existing ignored `.local-checks/`
-directory with `recommendations-*` filenames and `quotation-recommendations-web/`.
-The emulator run used only `demo-pmr-security` and loopback services. Native device
-rendering was not manually exercised. Changes remain uncommitted; no push or deployment
-was performed.
+Node **22.23.3** was used for all checks:
+
+| Check | Final result | Local log |
+| --- | --- | --- |
+| Focused algorithm, request integration and comparison UI | 142 passed, 0 failed | `.local-checks/smart-comparison-focused-final.log` |
+| Full offline backend suite | 298 passed, 0 failed | `.local-checks/smart-comparison-backend-final.log` |
+| Complete application suite | 467 passed, 0 failed | `.local-checks/smart-comparison-app.log` |
+| Full existing emulator verification | 81 passed, 0 failed: gateway 2, rules 13, backend integration 17, marketplace 36, photos 9, showcases 4 | `.local-checks/smart-comparison-emulators-verified.log` |
+| Targeted authenticated comparison-to-checkout emulator case, before the full rerun | 1 passed, 0 failed | Same emulator log; counted separately from the full 81 |
+| Expo export: iOS, Android and Web | All passed, including native Hermes bundles | `.local-checks/smart-comparison-export.log` |
+| `git diff --check` | Passed | `.local-checks/smart-comparison-diff-warnings.log` contains only line-ending notices |
+
+The final emulator runner first exercised the new case by name, then ran `scripts/verify-local-demo.cjs` in the same loopback Auth/Firestore session. Its quotation fixtures follow existing request-revision rules; withdrawn quotations remain final and accepted terms stay immutable. The emulator command exited successfully and shut down all emulators. Export artifacts are in `.local-checks/smart-comparison-export`.
+
+The acceptance/payment/booking-handler section of `backend/marketplace.cjs` was compared with the starting revision and is unchanged. Payment UI, simulation gate/provider, server/configuration, storage transport, Firebase client, rules/indexes and original `render.yaml` have no changes in this task. These checks do not verify hosted deployment or physical-device behavior.

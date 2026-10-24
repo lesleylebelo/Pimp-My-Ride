@@ -32,7 +32,31 @@ test('missing or malformed locations remove distance for every candidate without
   assert.equal(compare([quote('a'),quote('b')],{serviceLocation:null}).distanceUsed,false);
 });
 test('stable score and price ties resolve by quotation ID independently of input order',()=>{
-  for(const quotes of [[quote('b'),quote('a')],[quote('a'),quote('b')]])assert.deepEqual(compare(quotes).rankedIds,['a','b']);
+  for(const quotes of [[quote('b'),quote('a')],[quote('a'),quote('b')]]){const result=compare(quotes);assert.deepEqual(result.rankedIds,['a','b']);assert.equal(result.recommendedId,null);assert.equal(result.status,'tie');assert.ok(result.entries.every(entry=>entry.rank===1));}
+});
+
+test('default confirmation fields give a transparent comparison rather than silently disappearing',()=>{
+ const result=compare([quote('a',10000,{scopeConfirmed:false,allChargesIncluded:false}),quote('b',20000,{scopeConfirmed:false,allChargesIncluded:false})]);
+ assert.equal(result.comparisonCount,2);assert.equal(result.eligibleCount,0);assert.equal(result.status,'insufficient');assert.equal(result.recommendedId,null);assert.match(result.limitation,/Insufficient confirmed scope/);assert.ok(result.entries.every(entry=>entry.comparable&&!entry.eligible));assert.ok(result.entries[0].highlights.includes('Lowest quoted price among current offers'));
+});
+
+test('fixed, percentage, none and missing deposit terms preserve exact stored cents and explicit unknowns',()=>{
+ const quotes=[quote('fixed',10101,{depositType:'fixed',depositValue:2500,depositAmountCents:2500}),quote('percentage',10101,{depositType:'percentage',depositValue:25,depositAmountCents:2525}),quote('none',10101,{depositType:'none',depositValue:null,depositAmountCents:null}),quote('missing',10101)];
+ const before=JSON.stringify(quotes),result=compare(quotes);
+ assert.deepEqual(result.entries.map(entry=>[entry.depositCents,entry.remainingAfterDepositCents]),[[2500,7601],[2525,7576],[0,10101],[null,null]]);assert.equal(JSON.stringify(quotes),before);
+ assert.ok(result.entries[3].tradeoffs.includes('Deposit: Not specified'));
+ for(const patch of [{depositType:'fixed',depositValue:2000,depositAmountCents:2001},{depositType:'percentage',depositValue:25,depositAmountCents:2500},{depositType:'other'}])assert.equal(compare([quote('a',10101,patch)]).comparisonCount,0);
+});
+
+test('scope, turnaround and missing warranty trade-offs are factual and never fabricate quality',()=>{
+ const result=compare([quote('a',10000,{scope:'Paint the doors',completionDays:5,warranty:''}),quote('b',11000,{scope:'Paint doors and blend adjacent panels',completionDays:2,warranty:'Six months'})]);
+ assert.equal(result.scopeDiffers,true);assert.ok(result.entries[0].tradeoffs.some(note=>note.includes('Service scopes differ')));assert.ok(result.entries[0].tradeoffs.includes('Warranty: Not specified'));assert.ok(result.entries[1].highlights.includes('Shortest stated turnaround'));
+ assert.ok(result.entries[0].explanations.every(note=>!note.includes('Best overall value')));assert.match(result.scoringNote,/not quality scores/);
+});
+
+test('zero and single offers return explicit reasons, with consistent results on reopening',()=>{
+ assert.equal(compare([]).status,'empty');assert.match(compare([]).limitation,/No current eligible/);
+ const single=compare([quote('a')]);assert.equal(single.status,'single');assert.equal(single.recommendedId,null);assert.deepEqual(single.rankedIds,[]);assert.match(single.limitation,/Only one/);assert.deepEqual(compare([quote('a')]),single);
 });
 test('eligibility excludes expiry, withdrawn, superseded, rejected, accepted and obsolete terms',()=>{
   const invalid=[quote('expired',1,{validUntil:now}),...['withdrawn','superseded','rejected','accepted'].map(status=>quote(status,1,{status})),quote('old',1,{termsVersion:0}),quote('other',1,{serviceRequestId:'other'}),quote('legacy',1,{termsVersion:undefined})];
