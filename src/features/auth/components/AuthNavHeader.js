@@ -1,24 +1,26 @@
 import React from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import colors from "../../../shared/theme/colors";
+import {useTheme} from '../../../shared/theme/ThemeContext';
+import LogoMark from '../../../shared/components/LogoMark';
 import { spacing } from "../../../shared/theme/typography";
 
 export default function AuthNavHeader({ title, onBack }) {
+  const {theme:colors}=useTheme(),styles=makeStyles(colors);
   return (
     <View style={styles.row}>
-      <Pressable onPress={onBack} hitSlop={12} style={styles.side}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Go back" onPress={onBack} hitSlop={12} style={styles.side}>
         <Ionicons name="arrow-back-outline" size={22} color={colors.primary} />
       </Pressable>
-      <Text style={styles.title} numberOfLines={1}>
+      <Text style={styles.title} >
         {title}
       </Text>
-      <View style={styles.side} />
+      <LogoMark size={40}/>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = colors => StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -27,8 +29,8 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
   side: {
-    width: 32,
-    height: 32,
+    width: 44,
+    height: 44,
     alignItems: "flex-start",
     justifyContent: "center",
   },

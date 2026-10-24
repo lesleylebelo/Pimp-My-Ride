@@ -32,7 +32,7 @@ function encodeCursor(doc){
  return Number.isSafeInteger(createdAt)?Buffer.from(JSON.stringify({createdAt,id:doc.id})).toString('base64url'):null;
 }
 function shopSnapshot(id,profile,post){
- return {id,name:profile?.shop?.shopName||post.authorName||'Workshop',avatar:profile?.shop?.avatarUrl||profile?.avatarUrl||profile?.photoURL||post.authorAvatar||null,
+ return {id,profilePhotoRevision:profile?.profilePhotoRevision||0,name:profile?.shop?.shopName||post.authorName||'Workshop',avatar:profile?.shop?.avatarUrl||profile?.avatarUrl||profile?.photoURL||post.authorAvatar||null,
   city:profile?.shop?.city||post.city||'',province:profile?.shop?.province||post.province||''};
 }
 function postVehicle(value){

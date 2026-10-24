@@ -100,7 +100,7 @@ export function MyPostsScreen({navigation,route}){
  const onScroll=event=>{const {contentOffset,contentSize,layoutMeasurement}=event.nativeEvent;if(contentSize.height-contentOffset.y-layoutMeasurement.height<240)feed.loadNext();};
  const onContentSizeChange=(_,height)=>{if(height<650)feed.loadNext();};
  return <ShowcasePage showTabs title={shop?'My Shop':'My builds'} navigation={navigation} onScroll={onScroll} onContentSizeChange={onContentSizeChange} refreshControl={<RefreshControl refreshing={feed.refreshing} onRefresh={()=>void feed.refresh()}/>}>
-  {shop&&<WorkshopIdentity own shop={{name:profile?.shop?.shopName,avatar:profile?.shop?.avatarUrl||profile?.avatarUrl||profile?.photoURL,city:profile?.shop?.city,province:profile?.shop?.province,verificationStatus:profile?.verificationStatus}}/>}
+  {shop&&<WorkshopIdentity own shop={{profilePhotoRevision:profile?.profilePhotoRevision,name:profile?.shop?.shopName,avatar:profile?.shop?.avatarUrl||profile?.avatarUrl||profile?.photoURL,city:profile?.shop?.city,province:profile?.shop?.province,verificationStatus:profile?.verificationStatus}}/>}
   {shop&&<Button title="Shop account settings" outline onPress={()=>navigation.navigate('ShopAccount')}/>}
   <Button title={shop?'New showcase':'Share a build'} disabled={feed.busy||!shop} onPress={()=>navigation.navigate('PostForm',{type})}/>
   <Notice busy={feed.busy} error={feed.error}/>

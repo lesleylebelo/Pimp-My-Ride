@@ -20,7 +20,7 @@ import AuthHeader from "../components/AuthHeader";
 import RoleToggle from "../components/RoleToggle";
 import AppTextInput from "../../../shared/components/AppTextInput";
 import PrimaryButton from "../../../shared/components/PrimaryButton";
-import colors from "../../../shared/theme/colors";
+import {useTheme} from '../../../shared/theme/ThemeContext';
 import { spacing } from "../../../shared/theme/typography";
 
 const initialForm = {
@@ -39,6 +39,7 @@ const initialForm = {
 };
 
 export default function SignUpScreen({ navigation, route }) {
+  const {theme:colors}=useTheme(),styles=makeStyles(colors);
   const initialRole = route?.params?.role === "shop" ? "shop" : "owner";
   const [role, setRole] = useState(initialRole);
   const [step, setStep] = useState(1);
@@ -117,13 +118,13 @@ export default function SignUpScreen({ navigation, route }) {
       : null;
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["bottom"]}>
+    <SafeAreaView style={styles.safeArea} edges={["top", "bottom", "left", "right"]}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent,{width:'100%',maxWidth:600,alignSelf:'center'}]}
           keyboardShouldPersistTaps="handled"
         >
           <AuthHeader title={headerTitle} subtitle={headerSubtitle} />
@@ -338,7 +339,7 @@ function ShopDetailsFields({ form, setField, errors }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = colors => StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -373,7 +374,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   footerRow: {
-    flexDirection: "row",
+    flexDirection: "row", flexWrap: "wrap",
     justifyContent: "center",
     marginTop: spacing.lg,
   },

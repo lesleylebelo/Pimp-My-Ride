@@ -17,11 +17,12 @@ import LogoMark from "../../../shared/components/LogoMark";
 import AppTextInput from "../../../shared/components/AppTextInput";
 import PrimaryButton from "../../../shared/components/PrimaryButton";
 import OutlineButton from "../../../shared/components/OutlineButton";
-import colors from "../../../shared/theme/colors";
+import {useTheme} from '../../../shared/theme/ThemeContext';
 import { spacing } from "../../../shared/theme/typography";
 import { validateEmailField } from "../utils/validators";
 
 export default function SignInScreen({ navigation, route }) {
+  const {theme:colors}=useTheme(),styles=makeStyles(colors);
   const { run, offline } = useAuth();
   const cooldown = useLoginCooldown();
   const [submitError, setSubmitError] = useState('');
@@ -63,7 +64,7 @@ export default function SignInScreen({ navigation, route }) {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent,{width:'100%',maxWidth:600,alignSelf:'center'}]}
           keyboardShouldPersistTaps="handled"
         >
           {/* Hero with glow */}
@@ -71,10 +72,11 @@ export default function SignInScreen({ navigation, route }) {
             <View style={styles.glowOuter} />
             <View style={styles.glowMid} />
             <View style={styles.logoWrap}>
-              <LogoMark size={72} variant="onDark" />
+              <LogoMark size={104} variant="onDark" />
             </View>
-            <Text style={styles.title}>Welcome back</Text>
-            <Text style={styles.subtitle}>One account. Your own workspace.</Text>
+            <Text style={styles.title}>PimpMyRide</Text>
+            <Text style={styles.subtitle}>Connect. Customize. Drive your style.</Text>
+            <Text style={styles.hint}>Sign in to your space</Text>
           </View>
 
           {/* Form card */}
@@ -155,7 +157,7 @@ export default function SignInScreen({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = colors => StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
@@ -207,7 +209,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 14,
-    color: colors.accent,
+    color: colors.textPrimary,
     marginTop: 8,
     fontWeight: '500',
   },
@@ -241,7 +243,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   forgotText: {
-    color: colors.accent,
+    color: colors.textPrimary,
     fontWeight: "500",
     fontSize: 14,
   },
@@ -269,7 +271,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   footerLink: {
-    color: colors.accent,
+    color: colors.textPrimary,
     fontWeight: "600",
     fontSize: 14,
   },

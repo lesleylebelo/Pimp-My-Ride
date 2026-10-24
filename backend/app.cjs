@@ -45,6 +45,7 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
  app.post('/api/ai/assist',action(services.aiAssist));
  app.post('/api/posts',(req,res,next)=>req.body?.op?action(services.postsApi)(req,res,next):postAction(services.createShowcase,201)(req,res,next));
  app.post('/api/photos',action(services.photosApi));
+ app.post('/api/profile/photos',action(services.profilePhotos));
  app.post('/api/session',action(services.sessionEvent));
  app.post('/api/profile',action(services.completeProfile));
  app.post('/api/documents/list',action(services.listDocuments));
@@ -91,6 +92,13 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
    await services.checkPhotoUpload(req.photoRequest);next();
   }catch(e){next(e);}
  },uploadSlot,upload,uploadAction(req=>services.uploadPhoto({...req.photoRequest,file:req.file})));
+ app.post('/api/profile/photos/upload',uploadLimit,async(req,res,next)=>{
+  try{
+   if(Object.keys(req.query).some(key=>!['version','requestId'].includes(key))||typeof req.query.version!=='string'||!/^(0|[1-9]\d{0,15})$/.test(req.query.version)||typeof req.query.requestId!=='string')throw new ApiError('invalid-argument','Include a valid photo version and retry identifier.');
+   req.profilePhotoRequest={auth:req.identity,version:Number(req.query.version),requestId:req.query.requestId};
+   await services.checkProfilePhotoUpload(req.profilePhotoRequest);next();
+  }catch(e){next(e);}
+ },uploadSlot,upload,uploadAction(req=>services.uploadProfilePhoto({...req.profilePhotoRequest,file:req.file})));
  app.post('/api/posts/images',uploadLimit,uploadSlot,upload,uploadAction(req=>services.uploadPostImage({auth:req.identity,file:req.file})));
  app.use((req,res)=>res.status(404).json({error:{code:'not-found',message:'Endpoint not found.'}}));
  app.use((e,req,res,next)=>{

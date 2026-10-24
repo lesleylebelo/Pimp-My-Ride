@@ -1,0 +1,47 @@
+{
+  "recreated": true,
+  "pixelIdenticalToReference": false,
+  "palette": {
+    "lime": "#C4E052",
+    "charcoal": "#1C1C1F"
+  },
+  "source": "pimpmyride-logo.svg",
+  "files": [
+    {
+      "file": "pimpmyride-logo.png",
+      "width": 1024,
+      "height": 1024,
+      "sha256": "fdd00696eef57bbf21eccab74fd9b6e955f185eff3ef51b03338d38b5b7c0834"
+    },
+    {
+      "file": "app-icon.png",
+      "width": 1024,
+      "height": 1024,
+      "sha256": "f759fef5e13cfe106c4507530b784c6147f3a91b4dba97f5fcaee238e71005f8"
+    },
+    {
+      "file": "adaptive-foreground.png",
+      "width": 1024,
+      "height": 1024,
+      "sha256": "de4fd0955d48273981ae3625265229c4b016f1b67329066efb9c0c65fa9b047b"
+    },
+    {
+      "file": "adaptive-monochrome.png",
+      "width": 1024,
+      "height": 1024,
+      "sha256": "eb79da3f43c9db3bb9cccdfa8544c5fbff7d6f14d0581aed91f765a7847e863c"
+    },
+    {
+      "file": "splash-logo.png",
+      "width": 1024,
+      "height": 1024,
+      "sha256": "b4eaa1ed0c7a7485d6537e65962e8bd6c9032105b63cd46ba4de15ec83444eb9"
+    },
+    {
+      "file": "favicon.png",
+      "width": 64,
+      "height": 64,
+      "sha256": "cf0c23ab8d31ca4d9e4c0ede312de8acdbd3d19938d54ed59d050c3c77e9980a"
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {AppState, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, TextInput, View} from 'react-native';
+import ProfileAvatar from '../../../shared/components/ProfileAvatar';
 import {Ionicons} from '@expo/vector-icons';
 import {useIsFocused} from '@react-navigation/native';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
@@ -30,7 +31,7 @@ function Inbox({navigation}) {
         return <Pressable accessibilityRole="button" accessibilityLabel={`Open conversation: ${name}`}
           accessibilityHint={[item.requestTitle, status].filter(Boolean).join('. ')} accessibilityValue={{text: `${item.unreadCount || 0} unread messages`}} disabled={offline}
           onPress={() => open(item)} style={({pressed}) => [styles.inboxRow, pressed && styles.pressed]}>
-          <View style={styles.avatar} accessible={false}><Ionicons name={profile?.role === 'shop' ? 'person-outline' : 'storefront-outline'} size={22} color={theme.textPrimary}/></View>
+          <ProfileAvatar context="conversation" id={item.id} revision={item.avatar?.revision} enabled={!!item.avatar} shop={profile?.role!=='shop'} size={46}/>
           <View style={styles.inboxCopy}>
             <View style={styles.inboxTop}><Text weight={unread ? 'semibold' : 'medium'} style={styles.name}>{name}</Text><Text style={styles.timestamp}>{activityTime(item.updatedAt)}</Text></View>
             {profile?.role !== 'shop' && !!item.requestTitle && <Text numberOfLines={2} style={styles.secondary}>{item.requestTitle}</Text>}
@@ -110,7 +111,7 @@ function Chat({navigation, route}) {
     <MessageFeedback busy={(feed.busy || working) && !offline} loading={working || feed.items.length ? 'Updating conversation...' : 'Loading conversation...'}/>
     <MessageAction title="Refresh conversation" disabled={offline || feed.busy || sending || working} onPress={() => {if (!offline && !feed.busy && !sending && !working) void feed.refresh();}}/>
   </View>;
-  return <MessagingFrame navigation={navigation} role={profile?.role} title={conversation ? conversationLabel(conversation, profile?.role) : 'Private conversation'} subtitle={conversation ? status : undefined} icon="chatbubble-ellipses-outline">
+  return <MessagingFrame navigation={navigation} role={profile?.role} title={conversation ? conversationLabel(conversation, profile?.role) : 'Private conversation'} subtitle={conversation ? status : undefined} icon="chatbubble-ellipses-outline" avatar={conversation?.avatar} avatarShop={profile?.role!=='shop'}>
     <KeyboardAvoidingView testID="chat-keyboard-layout" style={styles.keyboard} behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}>
       {conversation && <View style={styles.context}>
         <Pressable accessibilityRole="button" accessibilityLabel="View related request" accessibilityHint={conversation.requestTitle}

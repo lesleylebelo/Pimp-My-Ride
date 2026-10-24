@@ -1,9 +1,10 @@
 import React from "react";
 import { View, Pressable, Text, StyleSheet } from "react-native";
-import colors from "../../../shared/theme/colors";
+import {useTheme} from '../../../shared/theme/ThemeContext';
 import { radius, typography } from "../../../shared/theme/typography";
 
 export default function RoleToggle({ role, onChange }) {
+  const {theme:colors}=useTheme(),styles=makeStyles(colors);
   return (
     <View style={styles.container}>
       <Segment
@@ -12,7 +13,7 @@ export default function RoleToggle({ role, onChange }) {
         onPress={() => onChange("owner")}
       />
       <Segment
-        label="Custom shop"
+        label="Workshop"
         active={role === "shop"}
         onPress={() => onChange("shop")}
       />
@@ -21,6 +22,7 @@ export default function RoleToggle({ role, onChange }) {
 }
 
 function Segment({ label, active, onPress }) {
+  const {theme:colors}=useTheme(),styles=makeStyles(colors);
   return (
     <Pressable
       onPress={onPress}
@@ -31,7 +33,7 @@ function Segment({ label, active, onPress }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = colors => StyleSheet.create({
   container: {
     flexDirection: "row",
     backgroundColor: colors.surfaceCard,
@@ -42,7 +44,7 @@ const styles = StyleSheet.create({
   },
   segment: {
     flex: 1,
-    paddingVertical: 16,
+    paddingVertical: 16, minHeight:48, paddingHorizontal:8,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -51,7 +53,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.button,
   },
   label: {
-    fontSize: typography.label.fontSize,
+    fontSize: typography.label.fontSize, textAlign:"center",
     fontWeight: "500",
     color: colors.textPrimary,
   },
