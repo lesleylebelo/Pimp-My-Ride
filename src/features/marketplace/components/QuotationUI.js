@@ -1,3 +1,4 @@
+import ProfileAvatar from '../../../shared/components/ProfileAvatar';
 import React, {useState} from 'react';
 import {KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
@@ -48,7 +49,7 @@ export function QuotationCard({quote,request,children,compact=false,draft=false}
   {full&&<><Text style={s.muted}>Scope coverage: {quote.scopeConfirmed===true?'Full scope confirmed by shop':'Full scope not confirmed'}</Text><Text style={s.muted}>Fees and taxes: {quote.allChargesIncluded===true?'All required charges confirmed':'Not confirmed'}</Text>{(quote.coveredServices||[]).map(service=><Text key={service} style={s.body}>Included: {service}</Text>)}</>}
  </>;
  return <View testID={`quotation-${quote.id||'review'}`} style={s.offer}>
-  <View style={s.offerHeader}><View style={s.avatar}><Ionicons name="storefront-outline" size={22} color={theme.textPrimary}/></View><View style={s.copy}><Text weight="semibold" style={s.heading}>{quote.shopName||'Your quotation'}</Text>{!draft&&<Text style={s.status}>{quoteStatus(quote)}</Text>}</View></View>
+  <View style={s.offerHeader}><ProfileAvatar context="shop" id={quote.shopId} enabled={!!quote.shopId&&!!quote.shopName} shop size={44}/><View style={s.copy}><Text weight="semibold" style={s.heading}>{quote.shopName||'Your quotation'}</Text>{!draft&&<Text style={s.status}>{quoteStatus(quote)}</Text>}</View></View>
   <View style={s.priceHeader}><Text style={s.muted}>Total quotation · ZAR</Text><Text weight="semibold" style={s.total}>{formatMoney(quote.totalCents)}</Text></View>
   {quotationDate(quote.updatedAt)&&<Text style={s.small}>Updated: {quotationDate(quote.updatedAt)}</Text>}
   {!quote.updatedAt&&quotationDate(quote.createdAt)&&<Text style={s.small}>Submitted: {quotationDate(quote.createdAt)}</Text>}

@@ -7,6 +7,7 @@ import {useAuth} from '../../auth/context/AuthContext';
 import {ConversationAction} from '../components/ConversationAction';
 import ConfirmationButton from '../../../shared/components/ConfirmationButton';
 import colors from '../../../shared/theme/colors';
+import ProfileAvatar from '../../../shared/components/ProfileAvatar';
 import {marketApi} from '../services/marketApi';
 import {useMarketData} from '../hooks/useMarketData';
 import {Page, Card, Field, Button, Notice, useInfiniteCursor, formatMoney} from '../components/MarketplaceUI';
@@ -178,7 +179,7 @@ function RequestsFeed({navigation, feed}) {
     <Card style={styles.jobCard}>
       {(()=>{const request=item.value;return <>
       <View style={styles.jobAuthor}>
-        <View style={styles.avatar}><Text style={styles.avatarText}>{initials(request.customerName)}</Text></View>
+        <ProfileAvatar context="request" id={request.id} revision={request.customerAvatar?.revision} enabled={!!request.customerAvatar?.hasPhoto&&!!request.customerName&&request.customerName!=='Customer'} size={38} label="Customer profile photo"/>
         <View style={styles.jobAuthorCopy}>
           <Text style={styles.jobCustomer}>{request.customerName || 'Customer'}</Text>
           <Text style={styles.muted}>{[request.city || 'Location not provided', request.createdAt ? postedLabel(request.createdAt) : null].filter(Boolean).join(' · ')}</Text>
@@ -265,6 +266,7 @@ export function ShopRequestScreen({navigation, route}) {
   return <QuotationPage title="Service request" subtitle="Review the request before preparing your offer" navigation={navigation} maxWidth={820}>
     <Notice busy={busy} error={offline ? offlineMessage : error}/>
     {request && <>
+      {!!data.customerName&&<Card><View style={{flexDirection:'row',alignItems:'center',gap:12}}><ProfileAvatar context="request" id={request.id} revision={data.customerAvatar?.revision} enabled={!!data.customerAvatar?.hasPhoto} size={44} label="Customer profile photo"/><Text style={[styles.heading,{flex:1,flexShrink:1}]}>{data.customerName}</Text></View></Card>}
       <Card><RequestSummary request={request} detailed/></Card>
       {request.status==='open' && <Card><ConversationAction serviceRequestId={request.id} navigation={navigation} disabled={busy || offline || !!error} askApproval={request.visibility==='open' && !hasCurrentQuote}/></Card>}
       {!!request.photoIds?.length && (request.status === 'open' || quotes.some(quote => quote.status === 'accepted')) && <PhotoGallery target="request" id={request.id}/>}

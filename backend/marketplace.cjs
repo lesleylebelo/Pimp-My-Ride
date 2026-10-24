@@ -113,9 +113,12 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
   ]);
   const owner=ownerDoc.data(),vehicle=vehicleDoc.data();
   if(!eligible(owner,'owner')||!vehicle||vehicle.ownerId!==value.ownerId||vehicle.archived||!categoryDoc.exists||categoryDoc.data().archived!==false||!await authEligible(value.ownerId))D.fail('Service request is unavailable.','not-found');
-  return {value,customerName:customerDisplayName(owner)};
+  const customerName=customerDisplayName(owner);
+  // A generic identity label must not gain an identifying photo.
+  const customerAvatar=customerName==='Customer'?null:{context:'request',id:snapshot.id,revision:owner.profilePhotoRevision||0,hasPhoto:!!owner.profilePhoto?.id};
+  return {value,customerName,customerAvatar};
  }
- return async function marketplace(request){
+ const marketplace=async function(request){
   const a=await actor(request),input=request.data||{},op=input.op;
   if(!Object.prototype.hasOwnProperty.call(allowed,op))D.fail('Unknown marketplace operation.');
   M.fields(input,['op',...allowed[op],...(mutations.has(op)?['requestId']:[])]);
@@ -168,8 +171,8 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
     const quoted=await db.collection('quotations').where('shopId','==',a.uid).where('serviceRequestId','in',rows.map(item=>item.doc.id)).get();
     quotedRequestIds=new Set(quoted.docs.map(doc=>doc.data().serviceRequestId));
    }
-   const items=rows.map(({doc,value,customerName})=>({
-    ...requestFor({...row(doc),...(role==='shop'?{customerName}: {})},role),
+   const items=rows.map(({doc,value,customerName,customerAvatar})=>({
+    ...requestFor({...row(doc),...(role==='shop'?{customerName,customerAvatar}: {})},role),
     ...(role==='shop'&&input.feed==='open'?{quotedByMe:quotedRequestIds.has(doc.id)}:{})
    }));
    return {items,cursor:result.cursor};
@@ -194,7 +197,7 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
    if(input.quotesCursor)D.fail('Shop quotation paging is unavailable.');
    const [head,legacy]=await Promise.all([db.doc(`quotationHeads/${quoteId(id,a.uid)}`).get(),db.doc(`quotations/${quoteId(id,a.uid)}`).get()]);
    const selected=await quotationHead({get:ref=>ref.get()},id,a.uid,head,legacy);
-   return {request:requestFor({id,...serialize(value)},role),customerName:visible.customerName,quotes:selected.doc?[row(selected.doc)]:[],quotesCursor:null};
+   return {request:requestFor({id,...serialize(value)},role),customerName:visible.customerName,customerAvatar:visible.customerAvatar,quotes:selected.doc?[row(selected.doc)]:[],quotesCursor:null};
   }
   if(op==='quotes'){
    const result=await page(db.collection('quotations').where('shopId','==',a.uid),input.cursor);
@@ -535,5 +538,13 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
   }
   D.fail('Unknown marketplace operation.');
  };
+ // Reuse request audience/account checks without granting communication access.
+ marketplace.authorizeRequestAvatar=async(request,id)=>{
+  const a=await actor(request);requireRole(a.profile,'shop');
+  const visible=await visibleRequest(await db.doc(`serviceRequests/${D.id(id)}`).get(),a);
+  if(!visible.customerAvatar)D.fail('Customer identity is unavailable.','not-found');
+  return visible.value.ownerId;
+ };
+ return marketplace;
 }
 module.exports={createMarketplace,quoteId};

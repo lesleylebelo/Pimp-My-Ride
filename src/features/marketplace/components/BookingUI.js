@@ -1,4 +1,5 @@
 import React from 'react';
+import ProfileAvatar from '../../../shared/components/ProfileAvatar';
 import {StyleSheet, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
@@ -41,7 +42,7 @@ export function BookingOverview({booking,detail=false}){
   </View>
   <Text accessibilityRole={detail?'header':undefined} weight="semibold" style={detail?s.hero:s.heading}>{booking.requestTitle||'Service booking'}</Text>
   {!!vehicle&&<View style={s.infoRow}><Ionicons name="car-sport-outline" size={22} color={theme.textSecondary}/><Text style={[s.value,s.copy]}>{vehicle}{detail&&booking.vehicle?.colour?` · ${booking.vehicle.colour}`:''}</Text></View>}
-  <View style={s.infoRow}><Ionicons name={profile?.role==='shop'?'person-outline':'storefront-outline'} size={20} color={theme.textSecondary}/><View style={s.copy}>
+  <View style={s.infoRow}><ProfileAvatar context={profile?.role==='shop'?'request':'shop'} id={profile?.role==='shop'?booking.serviceRequestId:booking.shopId} enabled={profile?.role==='shop'?!!booking.customerName&&booking.customerName!=='Customer'&&!!booking.serviceRequestId:!!booking.shopName&&!!booking.shopId} shop={profile?.role!=='shop'} size={40}/><View style={s.copy}>
    <Text style={s.eyebrow}>{profile?.role==='shop'?'CUSTOMER':'WORKSHOP'}</Text><Text style={s.value}>{profile?.role==='shop'?booking.customerName||'Customer name not provided':booking.shopName||'Workshop name not provided'}</Text>
    {profile?.role==='shop'&&!!booking.shopName&&<Text style={s.muted}>Workshop: {booking.shopName}</Text>}
   </View></View>
