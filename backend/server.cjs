@@ -8,7 +8,10 @@ const {createApp}=require('./app.cjs');
 const {corsOrigins,storageConfig,validateEmulatorHost,listenHost}=require('./config.cjs');
 const fs=require('node:fs');
 const path=require('node:path');
-try{
+let startupDb;
+async function start(){try{
+ const {validateMockPaymentConfiguration}=require('./mock-payment-gate.cjs');
+ validateMockPaymentConfiguration(process.env);
  const projectId=process.env.FIREBASE_PROJECT_ID?.trim();
  if(!projectId)throw Error('Set FIREBASE_PROJECT_ID.');
  if(process.env.NODE_ENV&&!['development','test','production'].includes(process.env.NODE_ENV))throw Error('NODE_ENV must be development, test or production.');
@@ -24,6 +27,7 @@ try{
   if(!fs.existsSync(credentialsPath)||!fs.statSync(credentialsPath).isFile())throw Error('GOOGLE_APPLICATION_CREDENTIALS must point to a readable credentials file.');
   const credentials=JSON.parse(fs.readFileSync(credentialsPath,'utf8'));
   if(!credentials||typeof credentials!=='object'||Array.isArray(credentials))throw Error('GOOGLE_APPLICATION_CREDENTIALS must contain a JSON object.');
+  if(process.env.PMR_MOCK_PAYMENTS_ENABLED==='true'&&credentials.project_id!==projectId)throw Error('Credential project does not match FIREBASE_PROJECT_ID.');
   credential=applicationDefault();
  }
  else if(!process.env.FIREBASE_AUTH_EMULATOR_HOST)throw Error('Configure a server-only Firebase service account credential.');
@@ -31,6 +35,8 @@ try{
  const host=listenHost();
  initializeApp({projectId,...(credential?{credential}:{})});
  const auth=getAuth(),db=getFirestore(),storageClient=createStorage({url:storage.url,key:storage.key,bucket:storage.bucket});
+ startupDb=db;
+ validateMockPaymentConfiguration(process.env,db);
  const photoStorage=createMediaStorage({url:storage.url,key:storage.key,bucket:storage.photoBucket,legacyBucket:storage.legacyPhotoBucket,scope:'photos'});
  const requestStorage=createMediaStorage({url:storage.url,key:storage.key,bucket:storage.requestBucket,scope:'requests'});
  const postStorage=createMediaStorage({url:storage.url,key:storage.key,bucket:storage.postsBucket,legacyBucket:storage.legacyPostsBucket,scope:'showcase'});
@@ -39,4 +45,5 @@ try{
  const server=app.listen(portValue,host,()=>console.log('PimpMyRide API ready.'));
  server.requestTimeout=90000;
  process.on('SIGTERM',()=>server.close(()=>process.exit(0)));
-}catch(e){console.error('Startup failed:',e.message,e.stack);process.exitCode=1;}
+}catch(e){console.error('Startup failed:',e.message);if(startupDb)try{await startupDb.terminate();}catch{}process.exitCode=1;}}
+void start();

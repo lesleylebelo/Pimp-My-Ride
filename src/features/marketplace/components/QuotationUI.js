@@ -7,13 +7,13 @@ import {useAuth} from '../../auth/context/AuthContext';
 import {useTheme} from '../../../shared/theme/ThemeContext';
 import {formatMoney, ownerRoutes, shopRoutes} from './MarketplaceUI';
 
-export function QuotationPage({title, subtitle, navigation, children, keyboard=false, maxWidth, onScroll, onLayout, onContentSizeChange}) {
+export function QuotationPage({title, subtitle, navigation, children, keyboard=false, maxWidth, onScroll, onLayout, onContentSizeChange, activeTab, refreshControl}) {
  const {profile}=useAuth(),{theme}=useTheme(),s=quotationStyles(theme),shop=profile?.role==='shop',routes=shop?shopRoutes:ownerRoutes;
  const state=navigation.getState?.(),route=state?.routes?.[state.index]?.name;
- const active=Object.keys(routes).find(label=>routes[label]===route)||(shop?'Quotes':'My Requests');
+ const active=activeTab||Object.keys(routes).find(label=>routes[label]===route)||(shop?'Quotes':'My Requests');
  return <SafeAreaView style={s.safe} edges={['top','bottom','left','right']}><KeyboardAvoidingView style={s.flex} enabled={keyboard} behavior={Platform.OS==='ios'?'padding':Platform.OS==='android'?'height':undefined}><View style={[s.page,maxWidth&&{maxWidth}]}>
   <View style={s.header}><Pressable accessibilityRole="button" accessibilityLabel="Go back" style={s.back} onPress={()=>navigation.canGoBack?.()===false?navigation.navigate(shop?'ShopQuotes':'OwnerRequests'):navigation.goBack?.()}><Ionicons name="arrow-back" size={22} color={theme.textPrimary}/></Pressable><View style={s.copy}><Text accessibilityRole="header" weight="displaySemi" style={s.title}>{title}</Text>{!!subtitle&&<Text style={s.muted}>{subtitle}</Text>}</View></View>
-  <ScrollView style={s.flex} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS==='ios'?'interactive':'on-drag'} onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} scrollEventThrottle={16}>{children}</ScrollView>
+  <ScrollView style={s.flex} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS==='ios'?'interactive':'on-drag'} onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} scrollEventThrottle={16} refreshControl={refreshControl}>{children}</ScrollView>
   <View accessibilityRole="tablist" style={s.tabs}>{(shop?shopTabs:ownerTabs).map(tab=><Pressable key={tab.label} accessibilityRole="tab" accessibilityLabel={tab.label} accessibilityState={{selected:active===tab.label}} style={s.tab} onPress={()=>navigation.navigate(routes[tab.label])}><Ionicons name={({Discover:'compass-outline',Garage:'car-outline','My Requests':'document-text-outline',Bookings:'calendar-outline',Profile:'person-outline','Find Jobs':'compass-outline',Requests:'document-text-outline',Quotes:'receipt-outline','My Shop':'storefront-outline'})[tab.label]} size={22} color={active===tab.label?theme.accent:theme.textSecondary}/><Text style={s.tabText}>{tab.label}</Text></Pressable>)}</View>
  </View></KeyboardAvoidingView></SafeAreaView>;
 }

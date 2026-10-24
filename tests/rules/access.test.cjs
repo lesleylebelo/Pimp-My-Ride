@@ -4,6 +4,10 @@ const {initializeTestEnvironment,assertSucceeds,assertFails}=require('@firebase/
 const {doc,setDoc,getDoc,updateDoc,deleteDoc,collection,getDocs}=require('firebase/firestore');
 let env;before(async()=>{env=await initializeTestEnvironment({projectId:'demo-pmr-security',firestore:{rules:fs.readFileSync('firestore.rules','utf8')}});});after(async()=>env?.cleanup());beforeEach(async()=>env.clearFirestore());
 const ctx=(uid,verified=true,admin=false)=>env.authenticatedContext(uid,{email_verified:verified,admin});
+test('simulation metadata cannot be read, forged or removed by any direct client role',async()=>{
+ await env.withSecurityRulesDisabled(c=>setDoc(doc(c.firestore(),'bookings','simulation-protected'),{simulated:true,testTransaction:true,paymentProvider:'mock',paymentAccountingMode:'simulated',paidCents:0,balanceDueCents:100}));
+ for(const role of ['owner','shop','admin']){await seed(role,role);const ref=doc(ctx(role,true,role==='admin').firestore(),'bookings','simulation-protected');await assertFails(getDoc(ref));await assertFails(setDoc(ref,{enabled:true}));await assertFails(deleteDoc(ref));}
+});
 async function seed(uid,role='owner',status='active'){await env.withSecurityRulesDisabled(c=>setDoc(doc(c.firestore(),'users',uid),{role,accountStatus:status}));}
 test('a user can read their own onboarding profile but not another account',async()=>{await seed('u');await assertSucceeds(getDoc(doc(ctx('u',false).firestore(),'users','u')));await assertFails(getDoc(doc(ctx('other').firestore(),'users','u')));await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(),'users','u')));});
 test('profile creation, updates and deletion require the backend for every role',async()=>{for(const role of ['owner','shop','admin']){await seed(role,role);const db=ctx(role,true,role==='admin').firestore();await assertFails(setDoc(doc(db,'users',role+'new'),{role}));await assertFails(updateDoc(doc(db,'users',role),{role:'admin'}));await assertFails(deleteDoc(doc(db,'users',role)));await assertFails(getDocs(collection(db,'users')));}});

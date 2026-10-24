@@ -44,6 +44,54 @@ async function offers(){
  return {vehicleId:v.id,requestId:r.id,first:first.id,second:second.id};
 }
 const futureAppointment={appointmentDate:'2099-10-15',appointmentTime:'10:00'};
+
+test('original-project mock transactions persist across service recreation and serialize concurrent balance confirmations in the emulator',async()=>{
+ const {PROJECT,HOSTED_MOCK_ENV}=require('./helpers/mock-payments.cjs');const config={...HOSTED_MOCK_ENV};
+ // Only the project identity/configuration is a test double. All data/Auth traffic stays in
+ // demo-pmr-security on loopback; no hosted credential or cloud SDK is started.
+ const hostedDb={projectId:PROJECT,doc:db.doc.bind(db),collection:db.collection.bind(db),runTransaction:db.runTransaction.bind(db)};
+ const makeApp=()=>createApp({auth,services:createServices({db:hostedDb,auth,storage:{},mockPaymentEnv:config})});
+ let hostedApp=makeApp();const token=await signIn('alice');
+ const api=async(op,data={})=>(await http(hostedApp).post('/api/marketplace').set('Authorization','Bearer '+token).send(body(op,data)).expect(200)).body.data;
+ assert.equal((await api('paymentSimulation')).mode,'mock');
+ const v=await call('alice','vehicleSave',vehicle),r=await call('alice','requestCreate',{...details,vehicleId:v.id}),q=await call('shop-one','quoteSubmit',{...quote,serviceRequestId:r.id,depositType:'percentage',depositValue:25});
+ const b=await api('quoteAccept',{id:q.id,paymentMethod:'pay_deposit'});
+ await api('paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,expectedBookingId:b.id,expectedAmountCents:43750,expectedCurrency:'ZAR',outcome:'successful'});
+ hostedApp=makeApp();let saved=(await api('booking',{id:b.id})).booking;assert.equal(saved.paidCents,43750);assert.equal(saved.balanceDueCents,131250);
+ assert.equal(saved.paymentAccountingMode,'simulated');assert.ok(saved.simulatedPaymentVerifiedAt);assert.equal(saved.paymentVerifiedAt,undefined);
+ const shopToken=await signIn('shop-one');
+ const shopView=(await http(hostedApp).post('/api/marketplace').set('Authorization','Bearer '+shopToken).send(body('booking',{id:b.id})).expect(200)).body.data.booking;
+ assert.equal(shopView.paidCents,43750);assert.equal(shopView.balanceDueCents,131250);assert.equal(shopView.simulated,true);
+ const next=await api('paymentStart',{id:b.id});
+ const confirm=()=>http(hostedApp).post('/api/marketplace').set('Authorization','Bearer '+token).send(body('paymentMockResult',{id:b.id,paymentAttemptId:next.paymentAttemptId,expectedBookingId:b.id,expectedAmountCents:131250,expectedCurrency:'ZAR',outcome:'successful'}));
+ const results=await Promise.all([confirm(),confirm()]);assert.deepEqual(results.map(value=>value.status).sort(),[200,409]);
+ saved=(await api('booking',{id:b.id})).booking;assert.equal(saved.paidCents,175000);assert.equal(saved.balanceDueCents,0);
+ config.PMR_MOCK_PAYMENTS_ENABLED='false';assert.equal((await api('paymentSimulation')).enabled,false);
+});
+
+test('Firestore simulation preserves unmarked booking settlement evidence without mutation receipts',async()=>{
+ const offered=await offers(),b=await call('alice','quoteAccept',{id:offered.first,paymentMethod:'pay_now'}),ref=db.doc('bookings/'+b.id);
+ await ref.update({simulated:false,paymentVerifiedAt:Timestamp.fromMillis(1234)});
+ const before=(await ref.get()).data(),attemptRef=db.doc('bookings/'+b.id+'/paymentAttempts/'+b.paymentAttemptId),attemptBefore=(await attemptRef.get()).data();
+ const receiptsBefore=(await db.collection('mutationReceipts').get()).size;
+ await assert.rejects(()=>call('alice','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful'}),{code:'failed-precondition'});
+ await assert.rejects(()=>call('alice','paymentStart',{id:b.id}),{code:'failed-precondition'});
+ await assert.rejects(()=>call('shop-one','paymentRecordInStore',{id:b.id,method:'simulated_cash'}),{code:'failed-precondition'});
+ assert.deepEqual((await ref.get()).data(),before);assert.deepEqual((await attemptRef.get()).data(),attemptBefore);assert.equal((await db.collection('mutationReceipts').get()).size,receiptsBefore);
+});
+
+test('authenticated HTTP simulation capability is read-only, local-only and available to eligible participants',async()=>{
+ const closed=createApp({auth,services:createServices({db,auth,storage:{},mockPaymentEnv:{}})});
+ await http(app).post('/api/marketplace').send(body('paymentSimulation')).expect(401);
+ for(const uid of ['alice','shop-one']){
+  const token=await signIn(uid);
+  const enabled=await http(app).post('/api/marketplace').set('Authorization','Bearer '+token).send(body('paymentSimulation')).expect(200);
+  assert.deepEqual(enabled.body.data,{enabled:true,simulated:true,mode:'local-emulator'});
+  const disabled=await http(closed).post('/api/marketplace').set('Authorization','Bearer '+token).send(body('paymentSimulation')).expect(200);
+  assert.deepEqual(disabled.body.data,{enabled:false,simulated:true,mode:'disabled'});
+ }
+ for(const name of ['bookings','paymentReceipts','auditLogs'])assert.equal((await db.collection(name).get()).size,0);
+});
 async function acceptanceAudits(id){return (await db.collection('auditLogs').where('target','==',id).get()).docs.filter(d=>d.data().action==='marketplace.quoteAccept');}
 
 test('authenticated HTTP acceptance creates a booking that the selected shop confirms and customer cancels',async()=>{
@@ -351,7 +399,7 @@ test('Firestore cancellation racing a payment result retains only payments commi
   const results=await Promise.allSettled([call('alice','bookingCancel',{id:b.id,reason:'Synthetic cancellation race'}),call('alice','paymentMockResult',{id:b.id,paymentAttemptId:started.paymentAttemptId,outcome:'successful'})]);
   assert.equal(results[0].status,'fulfilled');
   const saved=(await db.doc('bookings/'+b.id).get()).data(),receipt=await db.doc('paymentReceipts/'+started.paymentAttemptId).get();
-  assert.equal(saved.status,'cancelled');assert.equal(saved.paymentReconciliationStatus,'refund_review_required');assert.equal(saved.paidCents+saved.balanceDueCents,175000);
+  assert.equal(saved.status,'cancelled');assert.equal(saved.paymentReconciliationStatus,'simulated_reconciliation_required');assert.equal(saved.paidCents+saved.balanceDueCents,175000);
   if(results[1].status==='fulfilled'){assert.equal(saved.paidCents,175000);assert.equal(receipt.exists,true);}else{assert.equal(results[1].reason.code,'failed-precondition');assert.equal(saved.paidCents,43750);assert.equal(receipt.exists,false);assert.equal(saved.balanceDueCents,131250);}
   const before=JSON.stringify((await call('alice','booking',{id:b.id})));
   await assert.rejects(()=>call('alice','paymentMockResult',{id:b.id,paymentAttemptId:started.paymentAttemptId,outcome:'successful'}),{code:'failed-precondition'});

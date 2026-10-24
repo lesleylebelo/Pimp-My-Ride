@@ -1,5 +1,5 @@
 import React,{useCallback,useRef,useState} from 'react';
-import {Pressable,ScrollView,Text,View} from 'react-native';
+import {KeyboardAvoidingView,Platform,Pressable,ScrollView,Text,View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {sendEmailVerification} from 'firebase/auth';
@@ -27,7 +27,7 @@ export default function AccountScreen({ navigation }) {
 
  return (
   <SafeAreaView style={styles.safeArea}>
-   <ScrollView contentContainerStyle={styles.scroll}>
+   <KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':Platform.OS==='android'?'height':undefined}><ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS==='ios'?'interactive':'on-drag'} contentContainerStyle={styles.scroll}>
     {!!navigation?.canGoBack?.() && (
       <Pressable
         accessibilityRole="button"
@@ -40,14 +40,23 @@ export default function AccountScreen({ navigation }) {
       </Pressable>
     )}
 
-    <Text style={styles.heading}>{offline ? 'You are offline' : error ? 'Account access needs attention' : titles[stage]}</Text>
+    <Text style={styles.heading}>{offline ? 'You are offline' : error ? 'Account access needs attention' : profile?.role==='shop'&&stage==='ready'?'Workshop settings':titles[stage]}</Text>
 
     <View style={styles.identityBlock}>
-      <Text style={styles.identity}>{profile?.fullName || user?.email}</Text>
+      <Text style={styles.identity}>{profile?.role==='shop'?profile?.shop?.shopName||profile?.fullName||user?.email:profile?.fullName || user?.email}</Text>
       <Text style={styles.role}>
         {profile?.role === 'owner' ? 'Vehicle owner' : profile?.role === 'shop' ? 'Custom shop' : profile?.role === 'admin' ? 'Administrator' : ''}
       </Text>
     </View>
+    {profile?.role==='shop'&&<View style={styles.businessCard}>
+      <Text accessibilityRole="header" style={styles.identity}>Business profile</Text>
+      {profile.verificationStatus==='approved'&&<View style={{flexDirection:'row',alignItems:'center',gap:8}}><Ionicons name="checkmark-circle" size={20} color={theme.accent}/><Text style={styles.body}>Verified workshop</Text></View>}
+      {profile.verificationStatus&&profile.verificationStatus!=='approved'&&<Text style={styles.body}>Verification: {profile.verificationStatus}</Text>}
+      {!!profile.shop?.address&&<Text style={styles.body}>Address: {profile.shop.address}</Text>}
+      {!!(profile.shop?.city||profile.shop?.province)&&<Text style={styles.body}>{[profile.shop.city,profile.shop.province].filter(Boolean).join(' · ')}</Text>}
+      {!!profile.shop?.services&&<><Text accessibilityRole="header" style={styles.identity}>Services offered</Text><Text style={styles.body}>{Array.isArray(profile.shop.services)?profile.shop.services.join(' · '):profile.shop.services}</Text></>}
+      {stage==='ready'&&<PrimaryButton title="Manage showcases" onPress={()=>navigation.navigate('ShopPosts')}/>}
+    </View>}
 
     {stage==='verify' && <>
       <Text style={styles.body}>Check your inbox for a verification link sent to {user.email}. Open the link to verify your email. Once verified, sign in with your email and password to continue to your workspace. If you do not receive the email, check spam or resend it below.</Text>
@@ -59,7 +68,7 @@ export default function AccountScreen({ navigation }) {
     {stage==='pending' && <Text style={styles.body}>{profile?.verificationStatus==='reviewing' ? 'An administrator is reviewing your application. Document replacement is paused until this review finishes.' : 'Your shop needs administrator approval before it can use the marketplace. Upload each document below and check that all three show as saved.'}</Text>}
     {stage==='rejected' && <Text style={styles.body}>Contact the project administrator to discuss the review. Marketplace access is restricted.</Text>}
     {(stage==='incomplete'||stage==='invalid') && <Text style={styles.body}>Your sign-in account exists, but its profile is missing or invalid. Profile setup is not part of sign-in. For an incomplete signup, return to Create account and submit the original details to retry saving the profile; otherwise contact support.</Text>}
-    {stage==='ready' && <Text style={styles.body}>Your authentication is working. This is a temporary welcome screen; marketplace features will be built next.</Text>}
+    {stage==='ready' && <Text style={styles.body}>{profile?.role==='shop'?'Manage your business location, verification documents and account preferences here.':'Your account is ready.'}</Text>}
 
     {stage!=='restricted' && user?.emailVerified && profile?.role==='shop' && <BusinessLocation disabled={busy || uploadBusy || !!error || !!profile.reviewOperation || !!profile.statusOperation} onBusyChange={setLocationBusy}/>}
     {stage!=='restricted' && user?.emailVerified && profile?.role==='shop' && <VerificationDocuments uid={user.uid} offline={offline} canUpload={profile.verificationStatus==='pending'} disabled={busy || locationBusy} onBusyChange={onUploadBusy} refreshKey={documentRefresh}/>}
@@ -80,14 +89,15 @@ export default function AccountScreen({ navigation }) {
       style={{ backgroundColor: theme.errorSurface, borderColor: theme.errorSurface }}
       textStyle={{ color: theme.error }}
     />
-   </ScrollView>
+   </ScrollView></KeyboardAvoidingView>
   </SafeAreaView>
  );
 }
 
 const makeStyles = (colors) => ({
   safeArea: {flex:1, backgroundColor: colors.background},
-  scroll: {padding:24, gap:18},
+  scroll: {padding:24, gap:22, width:'100%',maxWidth:860,alignSelf:'center'},
+  businessCard:{padding:20,borderRadius:22,backgroundColor:colors.surfaceCard,gap:14},
 
   backArrow: {
     alignSelf: 'flex-start',

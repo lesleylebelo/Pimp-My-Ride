@@ -12,6 +12,7 @@ const quoteId=(requestId,shopId)=>createHash('sha256').update(`${requestId}\n${s
 const serialize=value=>value instanceof Timestamp?value.toMillis():Array.isArray(value)?value.map(serialize):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([key,v])=>[key,serialize(v)])):value;
 const row=doc=>({id:doc.id,...serialize(doc.data())});
 const allowed={
+ paymentSimulation:[],
  vehicles:['cursor','archived'],vehicleSave:['id','version','make','model','year','colour','registration'],vehicleArchive:['id','version','archived'],
  categories:['cursor'],shops:['cursor'],requestCreate:['vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','photoIds','mandatoryServices','serviceLocation'],requestUpdate:['id','version','vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','photoIds','mandatoryServices','serviceLocation'],
  requests:['feed','cursor'],request:['id','quotesCursor'],requestClose:['id'],quoteSubmit:['serviceRequestId','termsVersion','scope','items','completionDays','warranty','validForDays','depositType','depositValue','scopeConfirmed','allChargesIncluded','coveredServices'],quotes:['cursor'],quoteWithdraw:['id'],
@@ -53,6 +54,15 @@ function paymentAccounting(booking){
  return {totalCents:total,paidCents:paid,balanceDueCents:balance};
 }
 const paymentStatus=(paid,balance,attemptStatus='due')=>balance===0?'paid':paid>0?'partially_paid':attemptStatus==='pending'?'pending':attemptStatus==='failed'||attemptStatus==='cancelled'?attemptStatus:'due';
+// Balance fields describe simulated amounts only on explicitly tagged bookings.
+// Never reinterpret unlabelled or real historical settlement as a test.
+function assertSimulatedBooking(booking){
+ if(booking.simulated!==true||booking.testTransaction!==true||booking.paymentProvider!=='mock'
+  ||booking.paymentAccountingMode!==undefined&&booking.paymentAccountingMode!=='simulated')D.fail('This booking is not explicitly marked for simulated payments. Existing payment evidence has not been changed.','failed-precondition');
+}
+function assertSimulatedAttempt(attempt,booking,id){
+ if(!attempt||attempt.provider!=='mock'||attempt.simulated!==true||attempt.testTransaction!==true||attempt.bookingId!==id||attempt.currency!==booking.currency)D.fail('The saved attempt is not a matching simulated payment. Existing payment evidence has not been changed.','failed-precondition');
+}
 function customerDisplayName(profile){
  const name=typeof profile?.fullName==='string'?profile.fullName.trim(): '';
  const safe=name.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,'').replace(/(?:\+?\d[\d\s().-]{7,}\d)/g,'').replace(/\s+/g,' ').trim();
@@ -113,7 +123,14 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
   const role=a.profile.role;
   if(['vehicles','vehicleSave','vehicleArchive','requestCreate','requestUpdate','requestClose','shops','categories','quoteAccept'].includes(op))requireRole(a.profile,'owner');
   if(['quoteSubmit','quotes','quoteWithdraw','bookingConfirm'].includes(op))requireRole(a.profile,'shop');
-  if(['quoteAccept','paymentMockResult','paymentRetry','paymentStart','paymentRecordInStore'].includes(op))assertMockPaymentsEnabled(mockPaymentEnv,db);
+  const paymentOperation=['quoteAccept','paymentMockResult','paymentRetry','paymentStart','paymentRecordInStore'].includes(op);
+  if(paymentOperation||op==='paymentSimulation'){
+   let enabled=false,mode='disabled';
+   try{mode=assertMockPaymentsEnabled(mockPaymentEnv,db);enabled=paymentProvider.name==='mock'&&paymentProvider.simulated===true;}
+   catch(error){if(error.code!=='failed-precondition')throw error;}
+   if(op==='paymentSimulation')return {enabled,simulated:true,mode:enabled?mode:'disabled'};
+   if(!enabled)D.fail('Mock payments are disabled. Explicitly enable simulation on this backend with a mock provider.','failed-precondition');
+  }
   if(op==='vehicles'){
    const archived=input.archived===undefined?false:M.bool(input.archived,'Archived');
    const result=await page(db.collection('vehicles').where('ownerId','==',a.uid).where('archived','==',archived),input.cursor);
@@ -204,7 +221,8 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
   }
   // Unlike the legacy admin endpoint, every marketplace mutation must carry a
   // stable retry key. Missing keys never create a receipt or perform a write.
-  D.id(input.requestId);const receipt=mutation(db,a.uid,`marketplace:${op}`,input);
+  D.id(input.requestId);const baseReceipt=mutation(db,a.uid,`marketplace:${op}`,input);
+  const receipt=paymentOperation?{atomic:(handler,options)=>baseReceipt.atomic(tx=>{assertMockPaymentsEnabled(mockPaymentEnv,db);return handler(tx);},options)}:baseReceipt;
   if(op==='notificationRead'){
    const ref=db.doc('notifications/'+D.id(input.id));
    return receipt.atomic(async tx=>{
@@ -360,7 +378,7 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
     const initialAmount=input.paymentMethod==='pay_deposit'?quote.depositAmountCents:quote.totalCents;
     const initialPaymentStatus=input.paymentMethod==='pay_in_store'?'due':'pending';
     const checkout=input.paymentMethod==='pay_in_store'?null:await paymentProvider.createCheckout({paymentId:attemptRef.id,amountCents:initialAmount,currency:quote.currency});
-    tx.create(bookingRef,{...terms,...depositSnapshot,customerName:customerDisplayName(customer),ownerId:a.uid,shopId:quote.shopId,serviceRequestId:requestRef.id,quoteId:quoteRef.id,vehicleId:value.vehicleId,vehicle:M.vehicleSnapshot(value.vehicle),photoIds:P.photoIds(value.photoIds),shopName:quote.shopName,requestTitle:value.title,categoryName:value.categoryName,city:value.city,status:input.paymentMethod==='pay_in_store'?'pending_confirmation':'pending_payment',paymentMethod:input.paymentMethod,paymentStatus:initialPaymentStatus,paidCents:0,balanceDueCents:quote.totalCents,currentPaymentAttemptId:attemptRef.id,serviceStatus:'not_started',createdAt:stamp(),updatedAt:stamp()});
+    tx.create(bookingRef,{simulated:true,testTransaction:true,paymentProvider:'mock',paymentAccountingMode:'simulated',...terms,...depositSnapshot,customerName:customerDisplayName(customer),ownerId:a.uid,shopId:quote.shopId,serviceRequestId:requestRef.id,quoteId:quoteRef.id,vehicleId:value.vehicleId,vehicle:M.vehicleSnapshot(value.vehicle),photoIds:P.photoIds(value.photoIds),shopName:quote.shopName,requestTitle:value.title,categoryName:value.categoryName,city:value.city,status:input.paymentMethod==='pay_in_store'?'pending_confirmation':'pending_payment',paymentMethod:input.paymentMethod,paymentStatus:initialPaymentStatus,paidCents:0,balanceDueCents:quote.totalCents,currentPaymentAttemptId:attemptRef.id,serviceStatus:'not_started',createdAt:stamp(),updatedAt:stamp()});
     tx.create(attemptRef,{bookingId:bookingRef.id,provider:'mock',providerReference:checkout?.providerReference||null,method:input.paymentMethod==='pay_in_store'?'pay_in_store':'simulated_online',kind:'initial',amountCents:initialAmount,currency:quote.currency,status:initialPaymentStatus,simulated:true,testTransaction:true,createdAt:stamp(),updatedAt:stamp()});
     notify(tx,a.uid,'quotation_accepted',bookingRef.id);
     notify(tx,quote.shopId,'quotation_accepted',bookingRef.id);
@@ -374,12 +392,13 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
   if(op==='paymentMockResult'){
    const ref=db.doc(`bookings/${D.id(input.id)}`);
    return receipt.atomic(async tx=>{
-    await current(tx,a.uid,'owner');const booking=ownBooking(await tx.get(ref),a);
+    await current(tx,a.uid,'owner');const booking=ownBooking(await tx.get(ref),a);assertSimulatedBooking(booking);
     const paymentAttemptId=D.id(input.paymentAttemptId);
     if(paymentAttemptId!==booking.currentPaymentAttemptId)D.fail('This payment attempt changed. Refresh the booking and confirm the current amount.','failed-precondition');
     if(!['pending_payment','pending_confirmation','confirmed'].includes(booking.status))D.fail('This booking cannot receive a payment result.','failed-precondition');
     const attemptRef=db.doc(`bookings/${ref.id}/paymentAttempts/${paymentAttemptId}`),attemptDoc=await tx.get(attemptRef),attempt=attemptDoc.data();
     if(!attemptDoc.exists||attempt.simulated!==true||attempt.testTransaction!==true||attempt.method!=='simulated_online')D.fail('Simulated online payment attempt not found.','not-found');
+    assertSimulatedAttempt(attempt,booking,ref.id);
     if(attempt.status!=='pending')D.fail('This payment attempt has already been resolved. Start a new attempt to retry.','failed-precondition');
     const accounting=paymentAccounting(booking);
     if(input.expectedBookingId!==ref.id||!Number.isSafeInteger(input.expectedAmountCents)||input.expectedAmountCents!==attempt.amountCents||input.expectedCurrency!==attempt.currency||attempt.currency!==booking.currency||attempt.bookingId!==ref.id)D.fail('Payment details changed or are missing. Refresh the booking and confirm the current amount and currency.','failed-precondition');
@@ -389,7 +408,7 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
     const paidCents=accounting.paidCents+(successful?attempt.amountCents:0),balanceDueCents=accounting.totalCents-paidCents;
     const overallStatus=paymentStatus(paidCents,balanceDueCents,result.status);
     tx.update(attemptRef,{status:result.status,updatedAt:stamp(),resolvedAt:result.status==='pending'?null:stamp()});
-    tx.update(ref,{paidCents,balanceDueCents,paymentStatus:overallStatus,updatedAt:stamp(),...(successful?{paymentVerifiedAt:stamp(),...(booking.status==='pending_payment'?{status:'pending_confirmation'}:{})}:{})});
+    tx.update(ref,{paidCents,balanceDueCents,paymentStatus:overallStatus,updatedAt:stamp(),...(successful?{simulatedPaymentVerifiedAt:stamp(),...(booking.status==='pending_payment'?{status:'pending_confirmation'}:{})}:{})});
     if(successful)tx.create(db.doc(`paymentReceipts/${attemptRef.id}`),{...C.receiptSnapshot({booking,bookingId:ref.id,attemptId:attemptRef.id,method:attempt.method,amountCents:attempt.amountCents,paidCents,balanceDueCents}),issuedAt:stamp()});
     event(tx,a.uid,`simulated_payment_${result.status}`,ref.id,{paymentAttemptId:attemptRef.id,amountCents:attempt.amountCents,currency:booking.currency});
     event(tx,booking.shopId,`simulated_payment_${result.status}`,ref.id,{paymentAttemptId:attemptRef.id,amountCents:attempt.amountCents,currency:booking.currency});
@@ -399,10 +418,11 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
   if(op==='paymentRetry'){
    const ref=db.doc(`bookings/${D.id(input.id)}`);
    return receipt.atomic(async tx=>{
-    await current(tx,a.uid,'owner');const booking=ownBooking(await tx.get(ref),a);
+    await current(tx,a.uid,'owner');const booking=ownBooking(await tx.get(ref),a);assertSimulatedBooking(booking);
     if(!['pending_payment','pending_confirmation','confirmed'].includes(booking.status))D.fail('This booking cannot start another payment attempt.','failed-precondition');
     const accounting=paymentAccounting(booking),previousId=D.id(booking.currentPaymentAttemptId),previousRef=db.doc(`bookings/${ref.id}/paymentAttempts/${previousId}`),previousDoc=await tx.get(previousRef),previous=previousDoc.data();
     if(!previousDoc.exists||previous.status!=='failed'&&previous.status!=='cancelled'||previous.method!=='simulated_online')D.fail('Only a failed or cancelled simulated payment can be retried.','failed-precondition');
+    assertSimulatedAttempt(previous,booking,ref.id);
     if(!Number.isSafeInteger(previous.amountCents)||previous.amountCents<=0||previous.amountCents>accounting.balanceDueCents)D.fail('The saved payment attempt exceeds the outstanding booking balance. Contact support.','failed-precondition');
     const attemptRef=db.collection(`bookings/${ref.id}/paymentAttempts`).doc();
     const checkout=await paymentProvider.createCheckout({paymentId:attemptRef.id,amountCents:previous.amountCents,currency:booking.currency});
@@ -414,12 +434,13 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
   if(op==='paymentStart'){
    const ref=db.doc(`bookings/${D.id(input.id)}`);
    return receipt.atomic(async tx=>{
-    await current(tx,a.uid,'owner');const booking=ownBooking(await tx.get(ref),a);
+    await current(tx,a.uid,'owner');const booking=ownBooking(await tx.get(ref),a);assertSimulatedBooking(booking);
     if(!['pending_payment','pending_confirmation','confirmed'].includes(booking.status))D.fail('This booking cannot start another payment attempt.','failed-precondition');
     const accounting=paymentAccounting(booking);
     if(accounting.balanceDueCents<=0)D.fail('This booking has no outstanding balance.','failed-precondition');
     if(booking.currentPaymentAttemptId){
      const currentRef=db.doc(`bookings/${ref.id}/paymentAttempts/${D.id(booking.currentPaymentAttemptId)}`),currentDoc=await tx.get(currentRef),currentAttempt=currentDoc.data();
+     if(currentDoc.exists)assertSimulatedAttempt(currentAttempt,booking,ref.id);
      if(currentDoc.exists&&currentAttempt.status==='pending')D.fail('A simulated payment attempt is already pending. Resolve it before starting another.','failed-precondition');
      if(currentDoc.exists&&currentAttempt.status==='due')tx.update(currentRef,{status:'superseded',resolvedAt:stamp(),updatedAt:stamp()});
     }
@@ -433,7 +454,7 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
   if(op==='paymentRecordInStore'){
    const ref=db.doc(`bookings/${D.id(input.id)}`);
    return receipt.atomic(async tx=>{
-    await current(tx,a.uid,'shop');const booking=ownBooking(await tx.get(ref),a);
+    await current(tx,a.uid,'shop');const booking=ownBooking(await tx.get(ref),a);assertSimulatedBooking(booking);
     if(!['pending_payment','pending_confirmation','confirmed'].includes(booking.status))D.fail('A cancelled booking cannot receive an in-store payment.','failed-precondition');
     const accounting=paymentAccounting(booking);
     if(accounting.balanceDueCents<=0)D.fail('This booking has no outstanding balance.','failed-precondition');
@@ -441,6 +462,7 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
     let attemptRef;
     if(booking.currentPaymentAttemptId){
      const currentRef=db.doc(`bookings/${ref.id}/paymentAttempts/${D.id(booking.currentPaymentAttemptId)}`),currentDoc=await tx.get(currentRef),currentAttempt=currentDoc.data();
+     if(currentDoc.exists)assertSimulatedAttempt(currentAttempt,booking,ref.id);
      if(currentDoc.exists&&currentAttempt.status==='pending')D.fail('A simulated online payment is pending. Resolve it before recording an in-store payment.','failed-precondition');
      if(currentDoc.exists&&currentAttempt.status==='due'){
       if(currentAttempt.amountCents!==accounting.balanceDueCents)D.fail('The saved in-store payment attempt does not match the current balance. Contact support.','failed-precondition');
@@ -453,7 +475,7 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
      tx.create(attemptRef,{bookingId:ref.id,provider:'mock',method:input.method,kind:'in_store',amountCents:accounting.balanceDueCents,currency:booking.currency,status:'paid',simulated:true,testTransaction:true,recordedBy:a.uid,createdAt:stamp(),updatedAt:stamp(),resolvedAt:stamp()});
     }
     const paidCents=accounting.totalCents,balanceDueCents=0;
-    tx.update(ref,{paidCents,balanceDueCents,paymentStatus:'paid',currentPaymentAttemptId:attemptRef.id,paymentVerifiedAt:stamp(),updatedAt:stamp(),...(booking.status==='pending_payment'?{status:'pending_confirmation'}:{})});
+    tx.update(ref,{paidCents,balanceDueCents,paymentStatus:'paid',currentPaymentAttemptId:attemptRef.id,simulatedPaymentVerifiedAt:stamp(),updatedAt:stamp(),...(booking.status==='pending_payment'?{status:'pending_confirmation'}:{})});
     tx.create(db.doc(`paymentReceipts/${attemptRef.id}`),{...C.receiptSnapshot({booking,bookingId:ref.id,attemptId:attemptRef.id,method:input.method,amountCents:accounting.balanceDueCents,paidCents,balanceDueCents}),issuedAt:stamp()});
     event(tx,booking.ownerId,'simulated_in_store_payment_received',ref.id,{paymentAttemptId:attemptRef.id,amountCents:accounting.balanceDueCents,currency:booking.currency});
     event(tx,a.uid,'simulated_in_store_payment_recorded',ref.id,{paymentAttemptId:attemptRef.id,amountCents:accounting.balanceDueCents,currency:booking.currency});
@@ -497,7 +519,7 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
     await assertAuth(a.uid);
     // The current participant may cancel even if the other account is blocked.
     const accounting=paymentAccounting(value);
-    tx.update(ref,{status:'cancelled',cancellationReason:reason,cancelledByRole:role,cancelledAt:stamp(),updatedAt:stamp(),...(accounting.paidCents>0?{paymentReconciliationStatus:'refund_review_required'}:{})});
+    tx.update(ref,{status:'cancelled',cancellationReason:reason,cancelledByRole:role,cancelledAt:stamp(),updatedAt:stamp(),...(accounting.paidCents>0?{paymentReconciliationStatus:value.simulated===true&&value.testTransaction===true?'simulated_reconciliation_required':'refund_review_required'}:{})});
     event(tx,value.ownerId,'booking_cancelled',ref.id);
     event(tx,value.shopId,'booking_cancelled',ref.id);
     audit(tx,a.uid,op,ref.id,{cancelledByRole:role});return {id:ref.id};

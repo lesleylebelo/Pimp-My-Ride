@@ -4,7 +4,7 @@ const React = require('react'), Renderer = require('react-test-renderer');
 const {loadUI} = require('./helpers/load-ui.cjs');
 global.IS_REACT_ACT_ENVIRONMENT = true;
 const act = Renderer.act;
-const booking = {id: 'booking-1', ownerId: 'owner-1', shopId: 'shop-1', serviceRequestId: 'request-1', quoteId: 'quote-1', shopName: 'Approved shop', requestTitle: 'Restore bonnet', vehicle: {make: 'Ford', model: 'Fiesta', year: 2015, colour: 'Blue'}, categoryName: 'Paint', city: 'Pretoria', scope: 'Prepare and repaint bonnet', items: [{description: 'Materials and labour', amountCents: 12345}], totalCents: 12345, currency: 'ZAR', completionDays: 7, warranty: 'Six months on paint', status: 'pending_confirmation'};
+const booking = {simulated:true,testTransaction:true,paymentProvider:'mock',paymentAccountingMode:'simulated',id: 'booking-1', ownerId: 'owner-1', shopId: 'shop-1', serviceRequestId: 'request-1', quoteId: 'quote-1', shopName: 'Approved shop', requestTitle: 'Restore bonnet', vehicle: {make: 'Ford', model: 'Fiesta', year: 2015, colour: 'Blue'}, categoryName: 'Paint', city: 'Pretoria', scope: 'Prepare and repaint bonnet', items: [{description: 'Materials and labour', amountCents: 12345}], totalCents: 12345, currency: 'ZAR', completionDays: 7, warranty: 'Six months on paint', status: 'pending_confirmation'};
 function setup(overrides = {}) {
   const state = {auth: {user: {uid: 'shop-1'}, profile: {role: 'shop'}, offline: false}, data: {booking}, busy: false, error: '', calls: [], reads: [], navigations: [], api: async op => ({id: booking.id,...(['paymentRetry','paymentStart'].includes(op)?{paymentAttemptId:'attempt-2'}:{})}), refresh: async () => ({}), ...overrides};
   const PrimaryButton = loadUI('src/shared/components/PrimaryButton.js').default;
@@ -14,7 +14,8 @@ function setup(overrides = {}) {
     '../components/PhotoGallery': props => React.createElement('PhotoGallery', props),
     '../../../shared/components/landing/LandingUI': landing,
     '../hooks/useMarketData': {useMarketData: (op, input) => {state.reads.push({op, input}); return {data: state.data, busy: state.busy, error: state.error, refresh: (...args) => state.refresh(...args)};}},
-    '../services/marketApi': {marketApi: async (op, input) => {state.calls.push({op, input}); return state.api(op, input);}},
+    '../hooks/useMockPayments':{useMockPayments:()=>({enabled:state.simulationEnabled!==false,busy:false,error:'',refresh:async()=>{}})},
+  '../services/marketApi': {marketApi: async (op, input) => {state.calls.push({op, input}); return state.api(op, input);}},
   });
   const navigation = {navigate: (...args) => state.navigations.push(args)};
   return {state, screens, navigation};
@@ -23,6 +24,35 @@ const button = (tree, title) => tree.root.findAllByType('Pressable').find(node =
 const input = (tree, label) => tree.root.findAllByType('TextInput').find(node => node.props.accessibilityLabel === label);
 const text = tree => tree.root.findAllByType('Text').map(node => Array.isArray(node.props.children) ? node.props.children.join('') : node.props.children).join('\n');
 const lastRead = (state, op) => state.reads.filter(read => read.op === op).at(-1);
+async function confirmPayment(tree,title){await act(async()=>button(tree,title).props.onPress());await act(async()=>button(tree,'Confirm').props.onPress());}
+
+test('booking simulation confirmation can be cancelled and disabled mode leaves appointment controls available',async()=>{
+ const due={...booking,paymentMethod:'pay_in_store',paymentStatus:'due',paidCents:0,balanceDueCents:12345};
+ const {state,screens,navigation}=setup({data:{booking:due,paymentAttempts:[]}}),props=detailProps(navigation),tree=await mount(screens.BookingDetailScreen,props);
+ try{
+  await act(async()=>button(tree,'Record test cash').props.onPress());assert.equal(state.calls.length,0);assert.match(text(tree),/not proof of money received/);
+  await act(async()=>button(tree,'Cancel').props.onPress());assert.equal(state.calls.length,0);
+  state.simulationEnabled=false;await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));
+  assert.equal(button(tree,'Record test cash').props.disabled,true);assert.equal(button(tree,'Confirm booking').props.disabled,false);
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test('a changed current attempt closes the old confirmation without applying a simulated result',async()=>{
+ const pending={...booking,paymentMethod:'pay_now',paymentStatus:'pending',currentPaymentAttemptId:'first'},attempt={id:'first',status:'pending',amountCents:12345,currency:'ZAR'};
+ const {state,screens,navigation}=setup({auth:{user:{uid:'owner-1'},profile:{role:'owner'},offline:false},data:{booking:pending,currentPaymentAttempt:attempt,paymentAttempts:[]}}),props=detailProps(navigation),tree=await mount(screens.BookingDetailScreen,props);
+ try{
+  await act(async()=>button(tree,'Simulate successful payment').props.onPress());assert.ok(button(tree,'Confirm'));assert.equal(state.calls.length,0);
+  state.data={booking:{...pending,currentPaymentAttemptId:'replacement'},currentPaymentAttempt:{...attempt,id:'replacement'},paymentAttempts:[]};
+  await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));
+  assert.equal(button(tree,'Confirm'),undefined);assert.equal(state.calls.length,0);
+ }finally{await act(async()=>tree.unmount());}
+});
+
+test('an acknowledged simulated result survives a failed subsequent refresh without claiming the payment failed',async()=>{
+ const pending={...booking,paymentMethod:'pay_now',paymentStatus:'pending',currentPaymentAttemptId:'attempt'};
+ const {state,screens,navigation}=setup({auth:{user:{uid:'owner-1'},profile:{role:'owner'},offline:false},data:{booking:pending,currentPaymentAttempt:{id:'attempt',status:'pending',amountCents:12345,currency:'ZAR'},paymentAttempts:[]},refresh:async()=>{throw Error('Offline refresh');}}),tree=await mount(screens.BookingDetailScreen,detailProps(navigation));
+ try{await confirmPayment(tree,'Simulate successful payment');assert.equal(state.calls.length,1);assert.match(text(tree),/simulated result was confirmed, but the booking could not refresh/);assert.doesNotMatch(text(tree),/Payment failed/);}finally{await act(async()=>tree.unmount());}
+});
 async function change(tree, label, value) {await act(async () => input(tree, label).props.onChangeText(value));}
 async function mount(Screen, props) {let tree; await act(async () => {tree = Renderer.create(React.createElement(Screen, props));}); return tree;}
 const detailProps = navigation => ({navigation, route: {params: {id: booking.id}}});
@@ -40,7 +70,7 @@ test('bookings list loads on scroll, navigates by identifier, resets across acco
   assert.match(text(tree), /Accepted total: R123.45/);
   await act(async () => button(tree, 'View booking').props.onPress());
   assert.deepEqual(state.navigations, [['BookingDetail', {id: booking.id}]]);
-  const scroller=tree.root.findAllByType('View').find(node=>node.props.onScroll);
+  const scroller=tree.root.findAllByType('ScrollView').find(node=>node.props.onScroll);
   await act(async()=>scroller.props.onScroll({nativeEvent:{contentOffset:{y:900},contentSize:{height:1200},layoutMeasurement:{height:500}}}));
   assert.equal(lastRead(state, 'bookings').input.cursor,'page-2');
   assert.equal(button(tree,'Next'),undefined);
@@ -98,14 +128,14 @@ test('failed online simulations retry through the test API with an explicit atte
     data: {booking: failedBooking, paymentAttempts: [{id:'attempt-1',status:'failed',amountCents:12345}], testEmailEvents: []},
   });
   const tree = await mount(screens.BookingDetailScreen, detailProps(navigation));
-  await act(async () => button(tree, 'Retry simulated payment').props.onPress());
+  await confirmPayment(tree,'Retry simulated payment');
   assert.deepEqual(state.calls, [
     {op: 'paymentRetry', input: {id: booking.id}},
   ]);
   assert.match(text(tree), /Test payment attempt opened/);
   state.data={booking:{...failedBooking,currentPaymentAttemptId:'attempt-2'},currentPaymentAttempt:{id:'attempt-2',status:'pending',amountCents:12345,currency:'ZAR'},paymentAttempts:[]};
   await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,detailProps(navigation))));
-  await act(async()=>button(tree,'Simulate successful payment').props.onPress());
+  await confirmPayment(tree,'Simulate successful payment');
   assert.deepEqual(state.calls.at(-1),{op:'paymentMockResult',input:{id:booking.id,paymentAttemptId:'attempt-2',expectedBookingId:booking.id,expectedAmountCents:12345,expectedCurrency:'ZAR',outcome:'successful'}});
   assert.match(text(tree), /no real payment was processed/i);
   await act(async () => tree.unmount());
@@ -119,8 +149,8 @@ test('booking detail displays the accepted deposit and lets an owner settle only
   });
   const tree=await mount(screens.BookingDetailScreen,detailProps(navigation));
   assert.match(text(tree),/Accepted required deposit/);assert.match(text(tree),/Simulated amount paid: R25.00/);
-  assert.match(text(tree),/Outstanding balance: R98.45/);assert.match(text(tree),/Payment status: Partially paid/);
-  await act(async()=>button(tree,'Simulate successful payment').props.onPress());
+  assert.match(text(tree),/Outstanding balance: R98.45/);assert.match(text(tree),/Simulated payment status: Partially paid/);
+  await confirmPayment(tree,'Simulate successful payment');
   assert.deepEqual(state.calls,[{op:'paymentMockResult',input:{id:booking.id,paymentAttemptId:'balance-attempt',expectedBookingId:booking.id,expectedAmountCents:9845,expectedCurrency:'ZAR',outcome:'successful'}}]);
   assert.doesNotMatch(JSON.stringify(state.calls),/amountCents/);
   await act(async()=>tree.unmount());
@@ -133,15 +163,16 @@ test('shop payment recording and service completion remain separate simulated ac
     data: {booking: dueBooking, paymentAttempts: [], testEmailEvents: []},
   });
   const props = detailProps(navigation), tree = await mount(screens.BookingDetailScreen, props);
-  await act(async () => button(tree, 'Record test cash').props.onPress());
+  await confirmPayment(tree,'Record test cash');
   assert.deepEqual(state.calls.at(-1), {op: 'paymentRecordInStore', input: {id: booking.id, method: 'simulated_cash'}});
   assert.match(text(tree), /no real payment was processed/i);
 
   state.data = {booking: {...dueBooking, status: 'confirmed', serviceStatus: 'not_started'}, paymentAttempts: [], testEmailEvents: []};
   await act(async () => tree.update(React.createElement(screens.BookingDetailScreen, props)));
   await act(async () => button(tree, 'Mark service completed').props.onPress());
+  await act(async () => button(tree, 'Confirm').props.onPress());
   assert.deepEqual(state.calls.at(-1), {op: 'bookingComplete', input: {id: booking.id}});
-  assert.match(text(tree), /no real payment was processed/i);
+  assert.match(text(tree), /Service marked completed/);
   await act(async () => tree.unmount());
 });
 
@@ -165,8 +196,9 @@ test('appointment confirmation validates calendar, time and future SAST instant,
   await act(async () => button(tree, 'Confirm booking').props.onPress());
   assert.equal(state.calls.length, 0);
   await appointment(tree);
+  await act(async () => button(tree, 'Confirm booking').props.onPress());
   let pending;
-  await act(async () => {const confirm = button(tree, 'Confirm booking').props.onPress; pending = confirm(); void confirm();});
+  await act(async () => {const confirm = button(tree, 'Confirm').props.onPress; pending = confirm(); void confirm();});
   assert.equal(state.calls.length, 1);
   assert.deepEqual(state.calls[0], {op: 'bookingConfirm', input: {id: booking.id, appointmentDate: '2099-01-02', appointmentTime: '14:30'}});
   assert.equal(input(tree, 'Cancellation reason').props.editable, false);
@@ -177,6 +209,7 @@ test('appointment confirmation validates calendar, time and future SAST instant,
   state.api = async () => ({id: booking.id});
   state.refresh = async () => {state.data = null; throw Error('Reload failed');};
   await act(async () => button(tree, 'Confirm booking').props.onPress());
+  await act(async () => button(tree, 'Confirm').props.onPress());
   assert.equal(state.calls.length, 2);
   assert.match(text(tree), /Booking confirmed. Refresh to load the latest details/);
   assert.match(text(tree), /2099-01-02 at 14:30 SAST/);
@@ -264,8 +297,9 @@ test('account and booking changes reset drafts and suppress a delayed mutation r
   const props = detailProps(navigation), tree = await mount(screens.BookingDetailScreen, props);
   await appointment(tree);
   await change(tree, 'Cancellation reason', 'Old account draft');
+  await act(async () => button(tree, 'Confirm booking').props.onPress());
   let pending;
-  await act(async () => {pending = button(tree, 'Confirm booking').props.onPress();});
+  await act(async () => {pending = button(tree, 'Confirm').props.onPress();});
   state.auth = {...state.auth, user: {uid: 'another-shop'}};
   await act(async () => tree.update(React.createElement(screens.BookingDetailScreen, props)));
   await act(async () => {release({id: booking.id}); await pending;});
@@ -321,7 +355,7 @@ test('current payment outside history remains actionable while history pages acc
  await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));
  assert.match(text(tree),/Attempt reference: a00/);assert.match(text(tree),/Attempt reference: a20/);
  assert.equal((text(tree).match(/Attempt reference: z-current/g)||[]).length,1);assert.equal(button(tree,'Load more payment history'),undefined);
- await act(async()=>button(tree,'Simulate successful payment').props.onPress());
+ await confirmPayment(tree,'Simulate successful payment');
  assert.deepEqual(state.calls,[{op:'paymentMockResult',input:{id:booking.id,paymentAttemptId:'z-current',expectedBookingId:booking.id,expectedAmountCents:9845,expectedCurrency:'ZAR',outcome:'successful'}}]);
  await act(async()=>button(tree,'Refresh booking').props.onPress());assert.deepEqual(lastRead(state,'booking').input,{id:booking.id});
  state.auth={...state.auth,user:{uid:'owner-2'}};state.data={booking:{...partial,currentPaymentAttemptId:'new-account'},currentPaymentAttempt:null,paymentAttempts:[],paymentCursor:null};
@@ -341,9 +375,9 @@ test('shop cannot offer in-store settlement when independently returned current 
 test('new balance attempt requires a fresh result action and mixed settlement labels describe initial choice',async()=>{
  const partial={...booking,status:'confirmed',paymentMethod:'pay_deposit',paymentStatus:'partially_paid',paidCents:2500,balanceDueCents:9845,currentPaymentAttemptId:'deposit'};
  const {state,screens,navigation}=setup({auth:{user:{uid:'owner-1'},profile:{role:'owner'},offline:false},data:{booking:partial,currentPaymentAttempt:{id:'deposit',status:'paid',amountCents:2500,currency:'ZAR'},paymentAttempts:[]}}),props=detailProps(navigation),tree=await mount(screens.BookingDetailScreen,props);
- await act(async()=>button(tree,'Start simulated balance payment').props.onPress());assert.deepEqual(state.calls,[{op:'paymentStart',input:{id:booking.id}}]);
+ await confirmPayment(tree,'Start simulated balance payment');assert.deepEqual(state.calls,[{op:'paymentStart',input:{id:booking.id}}]);
  state.data={booking:{...partial,currentPaymentAttemptId:'balance'},currentPaymentAttempt:{id:'balance',status:'pending',amountCents:9845,currency:'ZAR'},paymentAttempts:[]};await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));
- assert.match(text(tree),/Confirm this attempt: R98.45 ZAR/);await act(async()=>button(tree,'Simulate failed payment').props.onPress());assert.deepEqual(state.calls.at(-1),{op:'paymentMockResult',input:{id:booking.id,paymentAttemptId:'balance',expectedBookingId:booking.id,expectedAmountCents:9845,expectedCurrency:'ZAR',outcome:'failed'}});
+ assert.match(text(tree),/Confirm this attempt: R98.45 ZAR/);await confirmPayment(tree,'Simulate failed payment');assert.deepEqual(state.calls.at(-1),{op:'paymentMockResult',input:{id:booking.id,paymentAttemptId:'balance',expectedBookingId:booking.id,expectedAmountCents:9845,expectedCurrency:'ZAR',outcome:'failed'}});
  state.auth={...state.auth,profile:{role:'shop'}};await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));assert.match(text(tree),/customer must resolve that attempt/);assert.equal(button(tree,'Record test cash'),undefined);
  state.data={booking:{...partial,paymentStatus:'paid',paidCents:12345,balanceDueCents:0},paymentAttempts:[{id:'cash',status:'paid',method:'simulated_cash',amountCents:9845,currency:'ZAR'}]};await act(async()=>tree.update(React.createElement(screens.BookingDetailScreen,props)));assert.match(text(tree),/Initial choice: Deposit online/);assert.match(text(tree),/Method: cash/);await act(async()=>tree.unmount());
 });
