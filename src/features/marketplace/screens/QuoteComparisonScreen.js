@@ -25,21 +25,23 @@ export function QuoteComparisonScreen(props) {
 function QuoteComparison({route, navigation}) {
   const {theme}=useTheme(),styles=quotationStyles(theme),Card=QuotationSection,Button=QuotationAction,wide=useWindowDimensions().width>=850;
   const {offline} = useAuth(), id = route.params.id, [cursor,setCursor]=useState(null);
-  const {data, busy, error, refresh} = useMarketData('request', {id, quotesCursor: cursor});
-  const quoteFeed=useInfiniteCursor(data,busy,setCursor,{itemsKey:'quotes',cursorKey:'quotesCursor'});
+  const {data, busy, error, refresh} = useMarketData('request', {id, quotesCursor: cursor, comparison:true});
+  const quoteFeed=useInfiniteCursor(data,busy,setCursor,{itemsKey:'quotes',cursorKey:'quotesCursor',pageCursor:cursor});
   const [selection, setSelection] = useState(null);
   const [now, setNow] = useState(Date.now);
   const focused = useIsFocused();
   // Keep the selected offer while its accumulated feed pages continue loading.
-  const request = data?.request, quotes = quoteFeed.items;
+  const request = data?.request;
   const recommendations = !busy && !offline && !error && request?.status === 'open' &&
     (!data?.recommendations?.nextExpiry || data.recommendations.nextExpiry > Math.max(now, Date.now())) ? data?.recommendations : null;
   const recommended = recommendations?.entries?.find(entry => entry.id === recommendations.recommendedId);
   const ranking = new Map((recommendations?.entries || []).map(entry => [entry.id, entry]));
-  const displayQuotes = recommended ? [...quotes].sort((a, b) => (ranking.get(a.id)?.rank || Infinity) - (ranking.get(b.id)?.rank || Infinity)) : quotes;
+  const quotes=quoteFeed.items.filter(quote=>quote.serviceRequestId===id&&(!data?.recommendations?.entries||data.recommendations.entries.some(entry=>entry.id===quote.id&&entry.comparable!==false)));
+  const displayQuotes=[...quotes].sort((a,b)=>((ranking.get(a.id)?.rank||Infinity)-(ranking.get(b.id)?.rank||Infinity))||(a.id<b.id?-1:a.id>b.id?1:0));
   const selected = !busy && !offline && !error ? quotes.find(quote => quote.id === selection?.id) : null;
   const disabled = busy || offline || !!error;
-  const canAccept = !disabled && request?.status === 'open' && available(selected, Math.max(now, Date.now())) && matchesRequestVersion(selected,request);
+  const analysisUnavailable=['unavailable','limited'].includes(data?.recommendations?.status);
+  const canAccept = !disabled && !analysisUnavailable && request?.id===id && request?.status === 'open' && available(selected, Math.max(now, Date.now())) && matchesRequestVersion(selected,request);
   useEffect(() => {
     const currentSelection = selection && quotes.find(quote => quote.id === selection.id);
     if (offline || error || !busy && selection && currentSelection !== selection.quote) setSelection(null);
@@ -70,7 +72,7 @@ function QuoteComparison({route, navigation}) {
     return () => {clearInterval(timer); subscription.remove();};
   }, [focused, offline, cursor, refresh]);
 
-  return <QuotationPage title="Compare quotes" subtitle="Review the work, the terms and the total" navigation={navigation} onScroll={quoteFeed.onScroll} onLayout={quoteFeed.onLayout} onContentSizeChange={quoteFeed.onContentSizeChange}>
+  return <QuotationPage title="Compare quotes" subtitle="Smart quotation comparison · review the work, terms and total" navigation={navigation} onScroll={quoteFeed.onScroll} onLayout={quoteFeed.onLayout} onContentSizeChange={quoteFeed.onContentSizeChange}>
     <QuotationSteps customer step={selection?1:0}/>
     <Notice busy={busy} error={error || (offline ? 'Connect to compare and accept quotations.' : '')}/>
     {request && <>
@@ -88,19 +90,28 @@ function QuoteComparison({route, navigation}) {
       {recommended && <Card>
         <Text weight="semibold" style={styles.heading}>Recommended quotation: {recommended.shopName}</Text>
         <Text>Rank 1 of {recommendations.eligibleCount} eligible quotations · {formatMoney(recommended.totalCents)}</Text>
-        <Text>{recommended.explanations.join('. ')}.</Text>
+        <Text>{(recommended.explanations||[]).join('. ')}.</Text>
         <Text>{recommended.distanceKm == null ? 'Distance unavailable' : `${recommended.distanceKm.toFixed(1)} km (straight-line)`}</Text>
         <Text>{recommendations.distanceNote}</Text>
         <Text>Advisory only. Coverage is confirmed by the shop; review the scope and choose any available quotation. Rankings include all current quotations and refresh every 30 seconds.</Text>
       </Card>}
-      {!!recommendations?.limitation && <Text>{recommendations.limitation}</Text>}
+      {!busy&&!offline&&!error&&!recommended&&request.status==='open'&&<Card>
+        <Text weight="semibold" style={styles.heading}>Smart comparison</Text>
+        <Text>{recommendations?.limitation||(quotes.length===0?'No current eligible quotations are available for comparison.':quotes.length===1?'Only one current quotation is available. Review its terms; no overall winner can be recommended.':'Insufficient confirmed information to recommend an overall winner. Compare the stated terms below.')}</Text>
+      </Card>}
+      {!!recommendations?.scoringNote&&<Text style={styles.muted}>{recommendations.scoringNote}</Text>}
+      <Text style={styles.muted}>Inclusions, exclusions and additional terms are those stated in each offer's scope. No workshop quality, performance or warranty rating is inferred.</Text>
       <View style={styles.grid}>{displayQuotes.map(quote => {
         const assessment = ranking.get(quote.id);
         const currentTerms = matchesRequestVersion(quote,request);
-        const eligible = request.status === 'open' && available(quote, Math.max(now, Date.now())) && currentTerms;
+        const eligible = !analysisUnavailable&&request.id===id&&request.status === 'open' && available(quote, Math.max(now, Date.now())) && currentTerms&&assessment?.comparable!==false;
         return <View key={quote.id} style={[styles.gridCell,wide&&styles.wideCell]}><QuotationCard quote={quote} request={request}>
           {request.status==='open' && !!quote.shopId && <ConversationAction serviceRequestId={id} shopId={quote.shopId} navigation={navigation} disabled={disabled}/>}
-          {!!assessment?.rank && <Text weight="semibold">Rank {assessment.rank} of {recommendations.eligibleCount}{recommended?.id === quote.id ? ' · Recommended' : ''}</Text>}
+          {!!assessment?.rank && <Text weight="semibold">Rank {assessment.rank} of {recommendations.eligibleCount}{recommendations.status==='tie'&&assessment.rank===1?' · Tied':recommended?.id === quote.id ? ' · Recommended' : ''}</Text>}
+          <Text>Remaining after stated deposit: {formatMoney(assessment?.remainingAfterDepositCents??((quote.depositType==='fixed'||quote.depositType==='percentage')&&Number.isSafeInteger(quote.depositAmountCents)?quote.totalCents-quote.depositAmountCents:quote.depositType==='none'?quote.totalCents:null))}</Text>
+          {!quote.scope&&<Text>Service scope: Not specified</Text>}
+          {(assessment?.highlights||[]).map(note=><Text key={note}>{note}</Text>)}
+          {(assessment?.tradeoffs||[]).map(note=><Text key={note} style={styles.muted}>{note}</Text>)}
           <Text>{assessment?.distanceKm == null ? 'Distance unavailable' : `${assessment.distanceKm.toFixed(1)} km (straight-line)`}</Text>
           <Text>Service coverage: {quote.scopeConfirmed === true ? 'Full scope confirmed by shop' : 'Full scope not confirmed'}{assessment?.coverage.required ? `; ${assessment.coverage.matched}/${assessment.coverage.required} mandatory services` : ''}</Text>
           {!!assessment?.reason && <Text>Not ranked: {assessment.reason}</Text>}
@@ -113,6 +124,7 @@ function QuoteComparison({route, navigation}) {
       })}</View>
       {!busy && !error && !quotes.length && <QuotationEmpty>No quotations yet.</QuotationEmpty>}
       {busy && !!quotes.length && <Text style={styles.muted}>Loading more quotations...</Text>}
+      {!!data?.quotesCursor&&<Button title="Load more quotations" outline disabled={disabled} onPress={()=>{if(!disabled)quoteFeed.loadNext();}}/>}
       {request.status === 'open' && <Card>
         <Text weight="semibold">{selected ? `Selected: ${selected.shopName || 'Shop quotation'} · ${formatMoney(selected.totalCents)}` : 'Select an available quotation from the list.'}</Text>
         {selected && !available(selected, Math.max(now, Date.now())) && <Text>This quotation has expired. Choose another offer or refresh the list.</Text>}
@@ -121,7 +133,7 @@ function QuoteComparison({route, navigation}) {
           onPress={()=>{if(canAccept&&available(selected,Date.now())&&matchesRequestVersion(selected,request))navigation.navigate('PaymentChoice',{quote:selected});}}/>
       </Card>}
     </>}
-    <Button title="Refresh quotations" outline disabled={busy || offline} onPress={() => {if (!busy && !offline) {setSelection(null);quoteFeed.reset();setCursor(null);void refresh().catch(() => {});}}}/>
+    <Button title="Refresh quotations" outline disabled={busy || offline} onPress={() => {if (!busy && !offline) {setSelection(null);quoteFeed.reset();if(cursor)setCursor(null);else void refresh().catch(() => {});}}}/>
   </QuotationPage>;
 }
 

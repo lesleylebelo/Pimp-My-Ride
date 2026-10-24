@@ -1182,7 +1182,7 @@ test('owner receives authoritative rankings across pages without exposing compet
 test('recommendation reads exclude non-current heads, blocked shops and disabled Auth users',async()=>{
  const f=fixture(),id=await created(f);
  const full={...quoteData,serviceRequestId:id,scopeConfirmed:true,allChargesIncluded:true};
- const a=await f.write('shop','quoteSubmit',full),b=await f.write('competitor','quoteSubmit',full);
+ const a=await f.write('shop','quoteSubmit',full),b=await f.write('competitor','quoteSubmit',{...full,items:[{description:'Full work',amountCents:110000}]});
  assert.ok((await f.read('owner','request',{id})).recommendations.recommendedId);
  const head=f.db.rows.get('quotationHeads/'+quoteId(id,'shop'));head.quoteId='missing';
  assert.equal((await f.read('owner','request',{id})).recommendations.recommendedId,null);
@@ -1218,6 +1218,34 @@ test('recommendation failures preserve the normal quotation list and suppress a 
  assert.equal(JSON.stringify(result).includes('Private upstream details'),false);
 });
 
+test('comparison pagination includes current offers instead of history and rejects other participants',async()=>{
+ const f=fixture(),id=await created(f),terms=M.quotation(quoteData);
+ for(let index=0;index<25;index++){
+  const shopId='comparison-shop-'+index,quote='current-'+String(index).padStart(2,'0');
+  f.db.rows.set('users/'+shopId,{role:'shop',verificationStatus:'approved'});
+  f.db.rows.set('quotations/'+quote,{...terms,serviceRequestId:id,shopId,shopName:shopId,termsVersion:1,status:'submitted',validUntil:Timestamp.fromMillis(Date.now()+86400000)});
+  f.db.rows.set('quotationHeads/'+quoteId(id,shopId),{quoteId:quote,serviceRequestId:id,shopId});
+ }
+ for(let index=0;index<25;index++)f.db.rows.set('quotations/000-history-'+index,{...terms,serviceRequestId:id,shopId:'shop',termsVersion:0,status:'superseded'});
+ const before=JSON.stringify([...f.db.rows]),first=await f.read('owner','request',{id,comparison:true}),next=await f.read('owner','request',{id,comparison:true,quotesCursor:first.quotesCursor});
+ assert.equal(first.quotes.length,20);assert.equal(next.quotes.length,5);assert.equal(next.quotesCursor,null);assert.equal(first.recommendations.comparisonCount,25);assert.equal(first.recommendations.status,'insufficient');assert.ok([...first.quotes,...next.quotes].every(quote=>quote.id.startsWith('current-')));
+ assert.equal((await f.read('owner','request',{id})).quotes[0].status,'superseded');
+ assert.deepEqual((await f.read('owner','request',{id,comparison:true})).quotes,first.quotes);
+ await assert.rejects(()=>f.read('other','request',{id,comparison:true}),{code:'not-found'});await assert.rejects(()=>f.read('shop','request',{id,comparison:true}),{code:'permission-denied'});assert.equal(JSON.stringify([...f.db.rows]),before);
+ f.db.rows.get('quotations/'+first.quotesCursor).status='withdrawn';await assert.rejects(()=>f.read('owner','request',{id,comparison:true,quotesCursor:first.quotesCursor}),{code:'failed-precondition'});
+});
+
+test('comparison excludes withdrawn, stale, non-current and unavailable shops and preserves payment handoff',async()=>{
+ const f=fixture(),id=await created(f),full={...quoteData,serviceRequestId:id,scopeConfirmed:true,allChargesIncluded:true,depositType:'percentage',depositValue:25};
+ const a=await f.write('shop','quoteSubmit',full),b=await f.write('competitor','quoteSubmit',{...full,items:[{description:'Full work',amountCents:120000}]});
+ const before=JSON.stringify([...f.db.rows]),result=await f.read('owner','request',{id,comparison:true});assert.equal(JSON.stringify([...f.db.rows]),before);assert.equal(result.recommendations.recommendedId,a.id);assert.equal(result.recommendations.entries.find(entry=>entry.id===a.id).depositCents,25000);
+ f.users.set('competitor',{emailVerified:true,disabled:true});assert.deepEqual((await f.read('owner','request',{id,comparison:true})).quotes.map(quote=>quote.id),[a.id]);f.users.clear();
+ await f.write('competitor','quoteWithdraw',{id:b.id});assert.deepEqual((await f.read('owner','request',{id,comparison:true})).quotes.map(quote=>quote.id),[a.id]);
+ const booking=await f.write('owner','quoteAccept',{id:a.id,paymentMethod:'pay_deposit'});await f.write('owner','paymentMockResult',{id:booking.id,paymentAttemptId:booking.paymentAttemptId,outcome:'successful'});
+ const saved=(await f.read('owner','booking',{id:booking.id})).booking;assert.equal(saved.paidCents,25000);assert.equal(saved.balanceDueCents,75000);assert.equal(saved.paymentAccountingMode,'simulated');assert.equal(saved.paymentVerifiedAt,undefined);
+ assert.equal((await f.read('owner','request',{id,comparison:true})).quotes.length,0);
+});
+
 test('the recommendation read is bounded and never names a winner from a truncated comparison',async()=>{
  const f=fixture(),id=await created(f);
  for(let index=0;index<501;index++)f.db.rows.set('quotations/bounded-'+index,{...quoteData,serviceRequestId:id,status:'submitted'});
@@ -1238,6 +1266,7 @@ test('rankings include offers outside the visible page and derive live service/s
  const result=await f.read('owner','request',{id});
  assert.ok(result.quotes.every(quote=>quote.status==='superseded'));
  assert.equal(result.recommendations.recommendedId,b.id);assert.equal(result.recommendations.distanceUsed,true);
+ const comparison=await f.read('owner','request',{id,comparison:true});assert.equal(comparison.quotes[0].id,b.id);assert.equal(comparison.quotes.length,2);
  f.db.rows.get('users/shop').shop.coordinates=saved.serviceLocation;
  delete f.db.rows.get('users/competitor').shop.coordinates;
  const missing=await f.read('owner','request',{id});assert.equal(missing.recommendations.distanceUsed,false);

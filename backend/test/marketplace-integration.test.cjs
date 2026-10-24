@@ -521,6 +521,26 @@ test('Find Jobs lists newest requests first across tied timestamps and keeps dir
  assert.equal((await call('shop-one','requests',{feed:'direct'})).items[0].id,'private-newest');
 });
 
+test('authenticated smart comparison filters history, explains missing confirmations and ties, refreshes revisions and preserves mock checkout',async()=>{
+ const offered=await offers(),requestRef=db.doc('serviceRequests/'+offered.requestId),owner=await signIn('alice');
+ const comparison=async()=> (await http(app).post('/api/marketplace').set('Authorization','Bearer '+owner).send(body('request',{id:offered.requestId,comparison:true})).expect(200)).body.data;
+ const old=(await db.doc('quotations/'+offered.first).get()).data();
+ await Promise.all(Array.from({length:22},(_,index)=>db.doc('quotations/000-smart-history-'+index).set({...old,status:'superseded'})));
+ assert.ok((await call('alice','request',{id:offered.requestId})).quotes.every(q=>q.status==='superseded'));
+ let result=await comparison();assert.equal(result.quotes.length,2);assert.equal(result.recommendations.status,'insufficient');assert.equal(result.recommendations.recommendedId,null);assert.equal((await db.collection('bookings').get()).size,0);
+ await http(app).post('/api/marketplace').send(body('request',{id:offered.requestId,comparison:true})).expect(401);
+ for(const [uid,status] of [['bob',404],['shop-one',403]])await http(app).post('/api/marketplace').set('Authorization','Bearer '+await signIn(uid)).send(body('request',{id:offered.requestId,comparison:true})).expect(status);
+ const firstTerms=(await requestRef.get()).data();await call('alice','requestUpdate',{...details,id:offered.requestId,version:firstTerms.version,vehicleId:offered.vehicleId,title:'Updated scope for smart comparison'});assert.equal((await comparison()).quotes.length,0);
+ const full={...quote,serviceRequestId:offered.requestId,scopeConfirmed:true,allChargesIncluded:true};
+ const fixed=await call('shop-one','quoteSubmit',{...full,depositType:'fixed',depositValue:25000}),percentage=await call('shop-two','quoteSubmit',{...full,depositType:'percentage',depositValue:25});
+ result=await comparison();assert.equal(result.recommendations.status,'tie');assert.equal(result.recommendations.recommendedId,null);assert.deepEqual(result.quotes.map(q=>q.id).sort(),[fixed.id,percentage.id].sort());assert.deepEqual(result.recommendations.entries.filter(e=>e.comparable).map(e=>e.depositCents).sort((a,b)=>a-b),[25000,43750]);
+ await call('shop-two','quoteWithdraw',{id:percentage.id});assert.equal((await comparison()).recommendations.status,'single');
+ const saved=(await requestRef.get()).data();await call('alice','requestUpdate',{...details,id:offered.requestId,version:saved.version,vehicleId:offered.vehicleId,title:'Revised smart comparison request'});assert.equal((await comparison()).quotes.length,0);
+ const current=await call('shop-one','quoteSubmit',{...full,depositType:'fixed',depositValue:25000});result=await comparison();assert.deepEqual(result.quotes.map(q=>q.id),[current.id]);assert.equal((await db.collection('bookings').get()).size,0);
+ const b=await call('alice','quoteAccept',{id:current.id,paymentMethod:'pay_deposit'});await call('alice','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful'});
+ const booking=(await call('alice','booking',{id:b.id})).booking;assert.equal(booking.paidCents,25000);assert.equal(booking.balanceDueCents,150000);assert.equal(booking.paymentAccountingMode,'simulated');assert.equal(booking.paymentVerifiedAt,undefined);
+});
+
 test('shop location ownership and request coordinate versioning work with real emulator Auth and Firestore',async()=>{
  const v=await call('alice','vehicleSave',vehicle),r=await call('alice','requestCreate',{...details,vehicleId:v.id,serviceLocation:{latitude:0,longitude:0}});
  const full={...quote,serviceRequestId:r.id,scopeConfirmed:true,allChargesIncluded:true};

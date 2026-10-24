@@ -3,7 +3,7 @@ const {recommendQuotations} = require('./quote-recommendations.cjs');
 // Called only after visibleRequest has verified ownership. Never returned to shops.
 async function readRecommendations({db, request, quoteId, eligible, authEligible}) {
   const snapshot = await db.collection('quotations').where('serviceRequestId', '==', request.id).where('status', '==', 'submitted').limit(501).get();
-  if (snapshot.docs.length > 500) return {entries: [], rankedIds: [], recommendedId: null, limitation: 'Too many quotations to compare safely. Inspect individual quotations.'};
+  if (snapshot.docs.length > 500) return {entries: [], rankedIds: [], recommendedId: null, comparisonCount:0, status:'limited', comparisonQuotes:[], limitation: 'Too many quotations to compare safely. Inspect individual quotations.'};
   const quotes = snapshot.docs.map(doc => ({...doc.data(), id: doc.id}));
   const [vehicleDoc, categoryDoc] = await Promise.all([
     db.doc(`vehicles/${request.vehicleId}`).get(), db.doc(`serviceCategories/${request.categoryId}`).get(),
@@ -27,6 +27,9 @@ async function readRecommendations({db, request, quoteId, eligible, authEligible
     const shop = await shops.get(quote.shopId);
     contexts[quote.id] = {...shop, current: shop?.currentId === quote.id};
   }
-  return recommendQuotations({request, quotes, contexts, now: Date.now()});
+  const analysis=recommendQuotations({request, quotes, contexts, now: Date.now()});
+  const comparable=new Set(analysis.entries.filter(entry=>entry.comparable).map(entry=>entry.id));
+  const order=new Map(analysis.rankedIds.map((id,index)=>[id,index]));
+  return {...analysis,comparisonQuotes:quotes.filter(quote=>comparable.has(quote.id)).sort((a,b)=>((order.get(a.id)??Infinity)-(order.get(b.id)??Infinity))||(a.id<b.id?-1:a.id>b.id?1:0))};
 }
 module.exports = {readRecommendations};

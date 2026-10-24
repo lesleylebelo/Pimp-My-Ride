@@ -15,7 +15,7 @@ const allowed={
  paymentSimulation:[],
  vehicles:['cursor','archived'],vehicleSave:['id','version','make','model','year','colour','registration'],vehicleArchive:['id','version','archived'],
  categories:['cursor'],shops:['cursor'],requestCreate:['vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','photoIds','mandatoryServices','serviceLocation'],requestUpdate:['id','version','vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','photoIds','mandatoryServices','serviceLocation'],
- requests:['feed','cursor'],request:['id','quotesCursor'],requestClose:['id'],quoteSubmit:['serviceRequestId','termsVersion','scope','items','completionDays','warranty','validForDays','depositType','depositValue','scopeConfirmed','allChargesIncluded','coveredServices'],quotes:['cursor'],quoteWithdraw:['id'],
+ requests:['feed','cursor'],request:['id','quotesCursor','comparison'],requestClose:['id'],quoteSubmit:['serviceRequestId','termsVersion','scope','items','completionDays','warranty','validForDays','depositType','depositValue','scopeConfirmed','allChargesIncluded','coveredServices'],quotes:['cursor'],quoteWithdraw:['id'],
  quoteAccept:['id','paymentMethod'],paymentMockResult:['id','paymentAttemptId','expectedBookingId','expectedAmountCents','expectedCurrency','outcome'],paymentRetry:['id'],paymentStart:['id'],paymentRecordInStore:['id','method'],bookingComplete:['id'], bookings:['cursor'],booking:['id','paymentCursor'],notifications:['cursor'],notificationRead:['id'],receipt:['id'],bookingConfirm:['id','appointmentDate','appointmentTime'],bookingCancel:['id','reason'],
 };
 const mutations=new Set(['vehicleSave','vehicleArchive','requestCreate','requestUpdate','requestClose','quoteSubmit','quoteWithdraw','quoteAccept','paymentMockResult','paymentRetry','paymentStart','paymentRecordInStore','bookingComplete','bookingConfirm','bookingCancel','notificationRead']);
@@ -176,13 +176,21 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
   }
   if(op==='request'){
    const id=D.id(input.id),snapshot=await db.doc(`serviceRequests/${id}`).get(),visible=await visibleRequest(snapshot,a),value=visible.value;
+   const comparison=input.comparison===undefined?false:M.bool(input.comparison,'Comparison');
    if(role==='owner'){
+    let recommendations,comparisonQuotes=[];
+    try{const {comparisonQuotes:currentQuotes,...analysis}=await readRecommendations({db,request:{...value,id},quoteId,eligible,authEligible});recommendations=analysis;comparisonQuotes=currentQuotes;}
+    catch(error){recommendations={entries:[],rankedIds:[],recommendedId:null,status:'unavailable',comparisonCount:0,limitation:'Recommendations are temporarily unavailable. Review individual quotations or refresh.'};}
+    if(comparison){
+     let start=0;
+     if(input.quotesCursor){const index=comparisonQuotes.findIndex(quote=>quote.id===D.id(input.quotesCursor));if(index<0)D.fail('The current quotation list changed. Refresh quotations before continuing.','failed-precondition');start=index+1;}
+     const quotes=comparisonQuotes.slice(start,start+PAGE_SIZE),quotesCursor=start+PAGE_SIZE<comparisonQuotes.length?quotes.at(-1).id:null;
+     return {request:requestFor({id,...serialize(value)},role),quotes:serialize(quotes),quotesCursor,recommendations};
+    }
     const result=await page(db.collection('quotations').where('serviceRequestId','==',id),input.quotesCursor);
-    let recommendations;
-    try{recommendations=await readRecommendations({db,request:{...value,id},quoteId,eligible,authEligible});}
-    catch(error){recommendations={entries:[],rankedIds:[],recommendedId:null,limitation:'Recommendations are temporarily unavailable. Review individual quotations or refresh.'};}
     return {request:requestFor({id,...serialize(value)},role),quotes:result.docs.map(row),quotesCursor:result.cursor,recommendations};
    }
+   if(comparison)D.fail('Only the customer can compare quotations.','permission-denied');
    if(input.quotesCursor)D.fail('Shop quotation paging is unavailable.');
    const [head,legacy]=await Promise.all([db.doc(`quotationHeads/${quoteId(id,a.uid)}`).get(),db.doc(`quotations/${quoteId(id,a.uid)}`).get()]);
    const selected=await quotationHead({get:ref=>ref.get()},id,a.uid,head,legacy);
