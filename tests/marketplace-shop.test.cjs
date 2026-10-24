@@ -7,7 +7,7 @@ const act = Renderer.act;
 const request = {id: 'request-1', version: 1, termsVersion: 1, title: 'Restore paint', description: 'Repaint the bonnet', categoryName: 'Paint', city: 'Pretoria', vehicle: {make: 'Ford', model: 'Fiesta', year: 2015, colour: 'Blue'}, status: 'open', visibility: 'open', budgetMinCents: 10000, budgetMaxCents: 50000};
 const quote = {id: 'quote-1', serviceRequestId: request.id, requestVersion: 1, termsVersion: 1, requestTitle: request.title, shopName: 'Test shop', scope: 'Prepare and repaint', items: [{description: 'Labour', amountCents: 10000}], totalCents: 10000, completionDays: 7, validUntil: Date.now() + 86400000, status: 'submitted'};
 function setup(overrides = {}) {
-  const state = {auth: {user: {uid: 'shop-1'}, profile: {role: 'shop'}, offline: false}, data: {request, quotes: []}, posts: [], busy: false, error: '', calls: [], photoCalls: [], reads: [], navigations: [], api: async () => ({id: 'quote-1'}), refresh: async () => ({}), ...overrides};
+  const state = {auth: {user: {uid: 'shop-1'}, profile: {role: 'shop'}, offline: false}, data: {request, quotes: []}, posts: [], busy: false, error: '', calls: [], photoCalls: [], avatarCalls: [], reads: [], navigations: [], api: async () => ({id: 'quote-1'}), refresh: async () => ({}), ...overrides};
   const PrimaryButton = loadUI('src/shared/components/PrimaryButton.js').default;
   const landing = {LandingText: 'Text', LandingShell: ({children, onScroll, onLayout, onContentSizeChange}) => React.createElement('View', {onScroll, onLayout, onContentSizeChange}, children), LandingButton: PrimaryButton, ownerTabs: [], shopTabs: [], ui: {}, useLandingFeedback: () => ({showFeature() {}})};
   const marketplace = loadUI('src/features/marketplace/components/MarketplaceUI.js', {
@@ -15,7 +15,9 @@ function setup(overrides = {}) {
     '../../auth/context/AuthContext': {useAuth: () => state.auth},
   });
   const screens = loadUI('src/features/marketplace/screens/ShopMarketplaceScreens.js', {
+    'react-native':{Platform:{OS:state.platform||'ios'}},
     '../../auth/context/AuthContext': {useAuth: () => state.auth},
+    '../../auth/services/profilePhotos': {onProfilePhotoChange:()=>()=>{},viewProfilePhoto:async(...args)=>{state.avatarCalls.push(args);return {url:'https://private.example.invalid/avatar-'+args[3],expiresAt:Date.now()+60000};}},
     '../components/PhotoGallery': props => React.createElement('PhotoGallery', props),
     '../services/photoApi': {viewPhoto: async (...args) => {state.photoCalls.push(args);return {url:`https://private.example.invalid/${args[2]}`,expiresAt:Date.now()+60000};}},
     '../components/PostCard': {PostCard: props => React.createElement('PostCard', props, React.createElement('Text', null, props.post.title))},
@@ -200,7 +202,7 @@ test('Find Jobs provides customer-style search, one selected category, More filt
   assert.equal(button(tree, 'All').props.accessibilityState.selected, true);
   assert.equal(button(tree, 'Tuning').props.accessibilityState.selected, false);
   assert.match(text(tree), /Lesley Lebelo\./);
-  assert.match(text(tree), /LL/);
+  assert.equal(tree.root.findAllByProps({accessibilityLabel:'Customer profile photo'}).length,2);
   assert.match(text(tree), /3 quotes/);
   assert.match(text(tree), /No quotes yet/);
   assert.match(text(tree), /View your quote/);
@@ -453,4 +455,23 @@ test('a material request refresh clears prior scope and fee confirmations before
  await act(async()=>button(tree,'Send quotation').props.onPress());
  assert.equal(state.calls[0].input.termsVersion,2);assert.equal(state.calls[0].input.scopeConfirmed,false);assert.equal(state.calls[0].input.allChargesIncluded,false);assert.deepEqual(state.calls[0].input.coveredServices,[]);
  await act(async()=>tree.unmount());
+});
+
+for(const platform of ['ios','android','web'])test('Find Jobs renders and refreshes request-author avatars without revealing generic identities on '+platform,async()=>{
+ const base={...request,customerName:'Visible Customer',createdAt:Date.now(),customerAvatar:{context:'request',id:request.id,revision:1,hasPhoto:true}};
+ const c=setup({platform,data:{items:[base],cursor:null}}),props={navigation:c.navigation},tree=await mount(c.screens.ShopJobsScreen,props);
+ try{
+  assert.equal(c.state.avatarCalls.length,1);assert.deepEqual(c.state.avatarCalls[0].slice(0,4),['request',request.id,'shop-1',1]);
+  const avatar=()=>tree.root.findAllByType('Image').filter(n=>String(n.props.source?.uri).includes('/avatar-'));
+  assert.equal(avatar().length,1);const image=avatar()[0];
+  c.state.data={items:[{...base}],cursor:null};await act(async()=>tree.update(React.createElement(c.screens.ShopJobsScreen,props)));assert.equal(c.state.avatarCalls.length,1);assert.equal(avatar()[0],image);
+  c.state.data={items:[{...base,customerAvatar:{...base.customerAvatar,revision:2}}],cursor:null};await act(async()=>tree.update(React.createElement(c.screens.ShopJobsScreen,props)));assert.equal(c.state.avatarCalls.length,2);assert.match(avatar()[0].props.source.uri,/avatar-2/);
+  c.state.data={items:[{...base,customerAvatar:{...base.customerAvatar,revision:3,hasPhoto:false}}],cursor:null};await act(async()=>tree.update(React.createElement(c.screens.ShopJobsScreen,props)));assert.equal(avatar().length,0);assert.equal(c.state.avatarCalls.length,2);
+  c.state.data={items:[{...base,customerName:'Customer'}],cursor:null};await act(async()=>tree.update(React.createElement(c.screens.ShopJobsScreen,props)));assert.equal(c.state.avatarCalls.length,2);assert.equal(avatar().length,0);
+ }finally{await act(async()=>tree.unmount());}
+});
+test('shop request details show the already-disclosed customer identity using request-scoped photo metadata',async()=>{
+ const c=setup({data:{request,quotes:[],customerName:'Visible Customer',customerAvatar:{context:'request',id:request.id,revision:4,hasPhoto:true}}});
+ const tree=await mount(c.screens.ShopRequestScreen,{navigation:c.navigation,route:{params:{id:request.id}}});
+ try{assert.match(text(tree),/Visible Customer/);assert.deepEqual(c.state.avatarCalls[0].slice(0,4),['request',request.id,'shop-1',4]);}finally{await act(async()=>tree.unmount());}
 });

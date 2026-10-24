@@ -38,7 +38,7 @@ export function PostCard({post,onOpen,onEdit,onRemoved,editable=false,onSaved}){
  const author=post.shop?.name||post.authorName||(post.type==='showcase'?'Workshop':'Customer');
  return <Card style={styles.card}>
   <View style={styles.authorRow}>
-   <ProfileAvatar context={post.authorRole==='shop'&&post.shop?.id?'shop':'post'} id={post.authorRole==='shop'&&post.shop?.id?post.shop.id:post.id} revision={post.shop?.profilePhotoRevision} shop={post.authorRole==='shop'} size={38}/>
+   <ProfileAvatar context={post.authorRole==='shop'&&post.shop?.id?'shop':'post'} id={post.authorRole==='shop'&&post.shop?.id?post.shop.id:post.id} revision={post.authorPhotoRevision??post.shop?.profilePhotoRevision} shop={post.authorRole==='shop'} size={38}/>
    <View style={styles.authorCopy}><Text weight="medium" style={styles.authorName}>{author}</Text><Text style={styles.location}>{[place,postTime(post.createdAt)].filter(Boolean).join(' · ')||postTime(post.createdAt)}</Text></View>
    {(post.verificationStatus==='approved'||post.shop?.verificationStatus==='approved')&&post.authorRole==='shop'&&<View style={styles.verified}><Ionicons name="checkmark-circle-outline" size={15} color={colors.primary}/><Text style={styles.verifiedText}>Verified workshop</Text></View>}
    {editable&&<Pressable accessibilityRole="button" accessibilityLabel="Post options" onPress={()=>setMenu(value=>!value)} hitSlop={8} style={styles.more}><Ionicons name="ellipsis-horizontal" size={22} color={colors.textSecondary}/></Pressable>}

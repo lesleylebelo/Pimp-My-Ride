@@ -109,3 +109,41 @@ test('profile storage shares the existing private bucket with isolated immutable
  for(const bad of ['profiles/other/../x','photos/owner/car/12345678-1234-4123-8123-123456789abc','profiles/owner/not-an-id'])await assert.rejects(()=>store.signedUrl(bad));
  await assert.rejects(()=>createStorage({client,scope:'profiles',bucket:'public'}).signedUrl(path),{code:'unavailable'});
 });
+
+test('request-scoped previews return only the accessible request author and fresh revision metadata',async()=>{
+ const f=fixture();f.db.rows.set('users/owner',{role:'owner',fullName:'Visible Customer'});
+ f.db.rows.set('vehicles/car',{ownerId:'owner',archived:false});f.db.rows.set('serviceCategories/paint',{archived:false});
+ f.db.rows.set('serviceRequests/job',{ownerId:'owner',vehicleId:'car',categoryId:'paint',visibility:'open',status:'open'});
+ const first=await f.upload(),other=await f.upload('other');
+ const visible=()=>f.api.marketplace({auth:f.identity('shop'),data:{op:'request',id:'job'}});
+ let details=await visible();assert.equal(details.customerName,'Visible Customer');assert.deepEqual(details.customerAvatar,{context:'request',id:'job',revision:1,hasPhoto:true});assert.equal(details.request.ownerId,undefined);
+ const photo=await f.call('shop','view',{context:'request',id:'job'});assert.equal(photo.photoId,first.photoId);assert.notEqual(photo.photoId,other.photoId);assert.ok(!JSON.stringify(photo).includes('profiles/'));
+ await assert.rejects(()=>f.call('other','view',{context:'request',id:'job'}),{code:'permission-denied'});
+ await assert.rejects(()=>f.call('shop','view',{context:'request',id:'owner'}),{code:'not-found'});
+ await assert.rejects(()=>f.call('shop','view',{context:'request',id:'job',uid:'other'}));
+ await f.upload();details=await visible();assert.equal(details.customerAvatar.revision,2);
+ await f.call('owner','remove',{version:2,requestId:'remove-request-photo'});details=await visible();assert.equal(details.customerAvatar.revision,3);assert.equal(details.customerAvatar.hasPhoto,false);assert.equal((await f.call('shop','view',{context:'request',id:'job'})).url,null);
+});
+test('request avatar scope denies other direct invitees, missing/hidden identity and current access restrictions',async()=>{
+ const f=fixture();f.db.rows.set('users/owner',{role:'owner',fullName:'Visible Customer'});await f.upload();
+ f.db.rows.set('vehicles/car',{ownerId:'owner',archived:false});f.db.rows.set('serviceCategories/paint',{archived:false});
+ const request={ownerId:'owner',vehicleId:'car',categoryId:'paint',visibility:'direct',shopId:'pending',status:'open'};f.db.rows.set('serviceRequests/job',request);
+ const preview=()=>f.call('shop','view',{context:'request',id:'job'});
+ await assert.rejects(preview,{code:'not-found'});
+ f.db.rows.set('serviceRequests/job',{...request,visibility:'open'});
+ for(const fullName of ['', 'private@example.invalid','0821234567']){
+  f.db.rows.set('users/owner',{...f.db.rows.get('users/owner'),fullName});
+  const details=await f.api.marketplace({auth:f.identity('shop'),data:{op:'request',id:'job'}});assert.equal(details.customerName,'Customer');assert.equal(details.customerAvatar,null);await assert.rejects(preview,{code:'not-found'});
+ }
+ f.db.rows.set('users/owner',{role:'owner',fullName:'Visible Customer',accountStatus:'suspended'});await assert.rejects(preview,{code:'not-found'});
+ f.db.rows.set('users/owner',{role:'owner',fullName:'Visible Customer'});f.db.rows.set('vehicles/car',{ownerId:'owner',archived:true});await assert.rejects(preview,{code:'not-found'});
+ await assert.rejects(()=>f.call('pending','view',{context:'request',id:'job'}),{code:'permission-denied'});
+});
+test('request visibility is rechecked immediately before minting a private preview',async()=>{
+ const f=fixture();f.db.rows.set('users/owner',{role:'owner',fullName:'Visible Customer'});await f.upload();
+ f.db.rows.set('vehicles/car',{ownerId:'owner'});f.db.rows.set('serviceCategories/paint',{archived:false});
+ const request={ownerId:'owner',vehicleId:'car',categoryId:'paint',visibility:'open'};f.db.rows.set('serviceRequests/job',request);
+ const authorize=f.api.marketplace.authorizeRequestAvatar;let calls=0;
+ f.api.marketplace.authorizeRequestAvatar=async(...args)=>{const result=await authorize(...args);if(++calls===1)f.db.rows.set('serviceRequests/job',{...request,visibility:'direct',shopId:'other'});return result;};
+ f.storage.signedUrl=async()=>assert.fail('No URL after access changes');await assert.rejects(()=>f.call('shop','view',{context:'request',id:'job'}),{code:'not-found'});
+});

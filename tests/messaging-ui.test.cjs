@@ -12,13 +12,14 @@ const conversation = {id: 'thread', shopName: 'Fixture Workshop', requestTitle: 
 const message = (id, senderId = 'shop', createdAt = timestamp, extra = {}) => ({id, text: `Fixture message ${id}`, senderId, sequence: Number(id), createdAt, recipientOrdinal: Number(id), ...extra});
 function setup(role = 'owner', platform = 'ios', mode = 'dark') {
   const {palettes} = loadUI('src/shared/theme/colors.js');
-  const state = {auth: {user: {uid: role}, profile: {role}, offline: false}, appState: {currentState: 'active'}, focused: true, calls: [], moves: [], refreshes: 0, pages: 0,
+  const state = {auth: {user: {uid: role}, profile: {role}, offline: false}, appState: {currentState: 'active'}, focused: true, calls: [], avatarCalls: [], moves: [], refreshes: 0, pages: 0,
     feed: {data: conversation, items: [message('1'), message('2', 'owner')], busy: false, cursor: 'older', error: ''}};
   const mocks = {
     'react-native': {Platform: {OS: platform}, AppState: state.appState},
     '../../../shared/components/landing/LandingUI': {LandingText: 'Text'},
     '../../../shared/theme/ThemeContext': {useTheme: () => ({theme: palettes[mode], isDark: mode === 'dark'})},
     '../../auth/context/AuthContext': {useAuth: () => state.auth},
+    '../../auth/services/profilePhotos':{onProfilePhotoChange:()=>()=>{},viewProfilePhoto:async(...args)=>{state.avatarCalls.push(args);return {url:'https://private.example.invalid/customer-avatar',expiresAt:Date.now()+60000};}},
     '@react-navigation/native': {useIsFocused: () => state.focused},
     '../hooks/useMessages': {useMessages: () => ({...state.feed, refresh: async () => {state.refreshes++;}, loadMore: async () => {state.pages++;}})},
     '../services/messageApi': {messageApi: async (op, data) => {state.calls.push({op, data}); return state.reply?.(op, data);}},
@@ -221,4 +222,12 @@ test('the existing polling hook orders inbox activity newest first while keeping
   let tree; await act(async () => {tree = create(React.createElement(Harness));});
   try {assert.deepEqual(feed.items.map(i => i.id), ['newer', 'middle', 'older']); assert.equal(feed.items[0].serviceRequestId, 'request-2'); assert.equal(feed.items[1].serviceRequestId, 'request-1');}
   finally {await act(async () => tree.unmount());}
+});
+
+test('workshop inbox and chat use the authorized customer avatar and discard it when conversation permission is revoked',async()=>{
+ const s=setup('shop'),author={...conversation,avatar:{context:'conversation',id:'thread',revision:2}};
+ s.state.feed={...s.state.feed,data:author,items:[author]};
+ await mounted(s,'MessagesScreen',async tree=>{assert.equal(tree.root.findAllByType('Image').length,1);assert.deepEqual(s.state.avatarCalls[0].slice(0,4),['conversation','thread','shop',2]);});
+ s.state.feed={...s.state.feed,items:[message('1')]};
+ await mounted(s,'ChatScreen',async(tree,update)=>{assert.equal(tree.root.findAllByType('Image').length,1);s.state.feed={...s.state.feed,data:{...author,canSend:false,consent:'revoked',avatar:null}};await update();assert.equal(tree.root.findAllByType('Image').length,0);});
 });

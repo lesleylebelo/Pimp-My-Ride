@@ -8,7 +8,7 @@ const revision=p=>p.profilePhotoRevision||0;
 function eligible(p){return ['owner','shop'].includes(p?.role)&&D.active(p)&&!p.statusOperation&&!p.reviewOperation&&!p.provisioningOperation;}
 function closed(){const e=new ApiError('failed-precondition','The photo attempt is closed. Refresh and select the photo again.');e.retryWithNewRequest=true;return e;}
 
-function createProfilePhotos({db,auth,actor,storage,messaging}){
+function createProfilePhotos({db,auth,actor,storage,messaging,marketplace}){
  const refFor=id=>db.doc(`profilePhotoUploads/${id}`);
  const check=(record,uid,id)=>{
   if(!record||record.uid!==uid||record.assetId!==id||record.path!==`profiles/${uid}/${id}`||record.provider!=='supabase'||record.bucket!==storage.bucket)D.fail('Profile photo is unavailable.','not-found');
@@ -27,6 +27,7 @@ function createProfilePhotos({db,auth,actor,storage,messaging}){
   if(!P.eligible(a.profile,a.profile.role))D.fail('Marketplace photo access is unavailable.','permission-denied');
   let uid;
   if(input.context==='conversation')uid=await messaging.authorizeAvatar(request,D.id(input.id));
+  else if(input.context==='request')uid=await marketplace.authorizeRequestAvatar(request,D.id(input.id));
   else if(input.context==='shop')uid=D.id(input.id);
   else if(input.context==='post'){
    const post=(await db.doc(`posts/${D.id(input.id)}`).get()).data();

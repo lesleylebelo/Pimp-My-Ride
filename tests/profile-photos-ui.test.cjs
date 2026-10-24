@@ -40,10 +40,31 @@ test('profile avatars use authorised context and discard images on errors, offli
  const Avatar=loadUI('src/shared/components/ProfileAvatar.js',{'../../features/auth/context/AuthContext':{useAuth:()=>state},'../theme/ThemeContext':{useTheme:()=>({theme:palettes.light})},'../../features/auth/services/profilePhotos':{onProfilePhotoChange:()=>()=>{},viewProfilePhoto:async(...args)=>{calls.push(args);return {url:'https://private.example.invalid/avatar',expiresAt:Date.now()+60000};}},'@react-navigation/native':{useIsFocused:()=>state.focused}}).default;
  let tree;const props={context:'conversation',id:'thread',shop:true};await act(async()=>{tree=create(React.createElement(Avatar,props));});
  try{
-  assert.deepEqual(calls[0],['conversation','thread','viewer',0]);assert.equal(tree.root.findByType('Image').props.resizeMode,'cover');
+  assert.deepEqual(calls[0],['conversation','thread','viewer',0,false]);assert.equal(tree.root.findByType('Image').props.resizeMode,'cover');
   await act(async()=>tree.root.findByType('Image').props.onError());assert.equal(tree.root.findAllByType('Image').length,0);assert.equal(calls.length,1);
   state.offline=true;await act(async()=>tree.update(React.createElement(Avatar,props)));assert.equal(tree.root.findAllByType('Image').length,0);
   state.offline=false;state.focused=false;await act(async()=>tree.update(React.createElement(Avatar,props)));assert.equal(calls.length,1);
-  state.focused=true;state.user={uid:'second'};await act(async()=>tree.update(React.createElement(Avatar,props)));assert.deepEqual(calls.at(-1),['conversation','thread','second',0]);
+  state.focused=true;state.user={uid:'second'};await act(async()=>tree.update(React.createElement(Avatar,props)));assert.deepEqual(calls.at(-1),['conversation','thread','second',0,true]);
  }finally{await act(async()=>tree.unmount());}
+});
+
+test('signed URL renewal keeps the current image until its real expiry and removal clears it immediately',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout'],now:100000});
+ const {palettes}=loadUI('src/shared/theme/colors.js'),state={user:{uid:'viewer'},offline:false},calls=[];let resolveRenewal;
+ const Avatar=loadUI('src/shared/components/ProfileAvatar.js',{'../../features/auth/context/AuthContext':{useAuth:()=>state},'../theme/ThemeContext':{useTheme:()=>({theme:palettes.light})},'../../features/auth/services/profilePhotos':{onProfilePhotoChange:()=>()=>{},viewProfilePhoto:async(...args)=>{calls.push(args);if(calls.length===2)return new Promise(resolve=>{resolveRenewal=resolve;});return {url:'https://private.example.invalid/old',expiresAt:Date.now()+60000};}}}).default;
+ let tree;const props={context:'request',id:'job',revision:1};await act(async()=>{tree=create(React.createElement(Avatar,props));});
+ try{
+  const original=tree.root.findByType('Image');await act(async()=>t.mock.timers.tick(55000));assert.equal(calls.length,2);assert.equal(tree.root.findByType('Image'),original);
+  await act(async()=>t.mock.timers.tick(5000));assert.equal(tree.root.findAllByType('Image').length,0);
+  await act(async()=>resolveRenewal({url:'https://private.example.invalid/new',expiresAt:Date.now()+60000}));assert.match(tree.root.findByType('Image').props.source.uri,/new/);
+  await act(async()=>tree.update(React.createElement(Avatar,{...props,revision:2,enabled:false})));assert.equal(tree.root.findAllByType('Image').length,0);
+  await act(async()=>t.mock.timers.tick(120000));assert.equal(calls.length,2);
+ }finally{await act(async()=>tree.unmount());}
+});
+
+for(const authorRole of ['shop','customer'])test(authorRole+' Discover author uses the existing private avatar and current photo revision',async()=>{
+ const {palettes}=loadUI('src/shared/theme/colors.js'),calls=[];
+ const Card=loadUI('src/features/marketplace/components/PostCard.js',{'../../../shared/components/landing/LandingUI':{LandingText:'Text'},'../../auth/context/AuthContext':{useAuth:()=>({user:{uid:'viewer'},profile:{role:'owner'},offline:false})},'../../../shared/theme/ThemeContext':{useTheme:()=>({theme:palettes.dark})},'../../auth/services/profilePhotos':{onProfilePhotoChange:()=>()=>{},viewProfilePhoto:async(...args)=>{calls.push(args);return {url:'https://private.example.invalid/author',expiresAt:Date.now()+60000};}}}).PostCard;
+ const post={id:'build',authorRole,authorName:'Visible Author',authorPhotoRevision:4,images:[],...(authorRole==='shop'?{shop:{id:'workshop',name:'Visible Workshop'}}:{})};let tree;
+ await act(async()=>{tree=create(React.createElement(Card,{post}));});try{assert.equal(tree.root.findAllByType('Image').length,1);assert.deepEqual(calls[0].slice(0,4),[authorRole==='shop'?'shop':'post',authorRole==='shop'?'workshop':'build','viewer',4]);}finally{await act(async()=>tree.unmount());}
 });

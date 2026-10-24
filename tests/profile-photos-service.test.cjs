@@ -25,3 +25,9 @@ test('preview requests deduplicate, invalidate after changes and never cross acc
 test('malformed, remote and unsupported files are rejected before upload transport',async()=>{
  const c=client();for(const file of [{...c.file,uri:'https://remote.invalid/photo'},{...c.file,size:0},{...c.file,mimeType:'image/gif'},{...c.file,size:6*1024*1024}])await assert.rejects(()=>c.uploadProfilePhoto(file,0,'first'));assert.equal(c.calls.length,0);
 });
+
+test('re-entering a focused screen bypasses stale previews, while same-UID new sessions clear cached URLs',async()=>{
+ const c=client();await c.viewProfilePhoto('request','job','first',1);await c.viewProfilePhoto('request','job','first',1);assert.equal(c.calls.length,1);
+ await c.viewProfilePhoto('request','job','first',1,true);assert.equal(c.calls.length,2);
+ c.auth.currentUser={uid:'first'};await c.viewProfilePhoto('request','job','first',1);assert.equal(c.calls.length,3);
+});

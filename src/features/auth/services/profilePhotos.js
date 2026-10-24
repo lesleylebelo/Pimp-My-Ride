@@ -4,20 +4,20 @@ import {apiRequest,uploadRequest} from '../../../shared/services/api';
 import {photoFileError} from '../../marketplace/utils/photos';
 
 const pending=new Map(),cache=new Map(),inflight=new Map(),listeners=new Set();
-let lastUid;
+let lastUid,lastUser;
 function account(expected){
- const uid=firebase().auth.currentUser?.uid;
- if(uid!==lastUid){pending.clear();cache.clear();inflight.clear();lastUid=uid;}
+ const user=firebase().auth.currentUser,uid=user?.uid;
+ if(uid!==lastUid||user!==lastUser){pending.clear();cache.clear();inflight.clear();lastUid=uid;lastUser=user;}
  if(!uid||expected&&uid!==expected)throw new Error('Your account changed. Sign in and choose the photo again.');
  return uid;
 }
 export const onProfilePhotoChange=fn=>{listeners.add(fn);return()=>listeners.delete(fn);};
 export function invalidateProfilePhotos(){cache.clear();inflight.clear();listeners.forEach(fn=>fn());}
 export async function profilePhotoStatus(uid){account(uid);const result=await apiRequest('profile/photos',{op:'status'},{expectedUid:uid});account(uid);return result;}
-export async function viewProfilePhoto(context,id,uid,revision=0){
+export async function viewProfilePhoto(context,id,uid,revision=0,fresh=false){
  account(uid);const key=JSON.stringify([uid,context,id,revision]),saved=cache.get(key);
- if(saved&&saved.until>Date.now())return saved.value;
  if(inflight.has(key))return inflight.get(key);
+ if(!fresh&&saved&&saved.until>Date.now())return saved.value;
  const promise=(async()=>{
   const value=await apiRequest('profile/photos',{op:'view',context,...(id?{id}:{})},{expectedUid:uid});account(uid);
   if(inflight.get(key)===promise){cache.set(key,{value,until:value.url?Math.min(value.expiresAt-5000,Date.now()+45000):Date.now()+10000});if(cache.size>100)cache.delete(cache.keys().next().value);}

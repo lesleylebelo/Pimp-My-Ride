@@ -15,6 +15,7 @@ All routes pass through existing revoked-token-aware Firebase authentication and
 - `POST /api/profile/photos` with `{op:'status'}`: own `photoId` and `version` only.
 - `{op:'view',context:'self'}`: own private preview, with no account ID accepted.
 - `{op:'view',context:'shop',id:shopId}`: approved active workshop image for an eligible marketplace account.
+- `{op:'view',context:'request',id:requestId}`: the currently visible service-request author, for an active approved shop, using the same request audience/account checks as request details. Generic `Customer` identities cannot obtain an identifying photo.
 - `{op:'view',context:'post',id:postId}`: current active author image of an existing published post.
 - `{op:'view',context:'conversation',id:conversationId}`: current other participant image, using the existing messaging authorization function. Mere request browsing or an unapproved enquiry does not grant access. Rejection/revocation denies new previews. Existing send rules are unchanged.
 - `{op:'remove',version,requestId}`: transactional own-photo removal with a mutation receipt.
@@ -76,3 +77,38 @@ Verified with Node **22.23.3**:
 - `git diff --check` passed. Original branch remains `lesley`; protected payment/quotation logic, auth services/context, Firebase configuration and Firestore rules/indexes are unchanged.
 
 The emulator run used the repository's existing isolated loopback test pattern, with environment credentials removed and no production fallback. No production test writes, remote bucket/policy changes, commits, pushes or deployments occurred.
+
+
+## Customer-avatar visibility follow-up
+
+Confirmed root cause: Find Jobs still rendered customer initials; service-request mappings exposed no current avatar/revision metadata; the preview service had no request-author context. Existing workshop, self, post and authorized conversation previews were already supported. Customer images did not require a new upload system or bucket.
+
+The existing marketplace request-access helper now returns `customerAvatar` with only `{context:'request',id:requestId,revision,hasPhoto}` for a disclosed identity. It uses the same sanitized customer name as the existing feed. No separate anonymity flag exists in the current model: a generic `Customer` fallback carries no identifying avatar. The request-scoped preview repeats the existing role, direct/open audience, owner/account/Auth, vehicle and category checks before minting a short-lived URL. It resolves the photo subject from the request; customer UIDs and object paths are not accepted as authorization or exposed in this metadata. Viewing an avatar does not create a conversation or grant enquiry/send consent. Request visibility, communication rules and upload/replace/remove transactions are unchanged.
+
+The shared avatar now appears on Find Jobs/open request cards, direct request cards and shop request details beside already-disclosed customer identity. Customer build cards in Discover, authorized messaging inbox/chat headers, own settings and existing workshop identity locations remain supported. Existing quotation cards and booking identity rows now use the same shared component for identified workshops/customers. Shop booking customer previews use the request context and fall back if that current request is unavailable; historical booking data does not bypass request privacy. Notification rows have no person/workshop author identity, so no avatar was added there.
+
+Current author photo revisions are also hydrated, with deduplicated bounded profile reads, into customer/shop build-feed, saved-post and post-detail responses. They are response metadata rather than copied Firestore references. Revisions change the existing preview cache key. Request `hasPhoto:false` immediately disables the old image after a feed refresh/removal, with no additional preview request. Same-account re-login clears the cache when Firebase provides the new session user object; other account changes retain the existing isolation checks. Screen focus/background resume bypasses stale previews while retaining request deduplication. Successful signed-URL renewal keeps the current image until its true expiry, without a fallback flash. Failed loads stop renewal; URLs remain memory-only and are removed on expiry or loss of eligible context.
+
+Files changed for this follow-up:
+
+- `backend/marketplace.cjs`, `backend/posts.cjs`, `backend/profile-photos.cjs`, `backend/services.cjs` (read access/response metadata and wiring).
+- `src/shared/components/ProfileAvatar.js`, `src/features/auth/services/profilePhotos.js` (existing avatar/cache lifecycle).
+- `src/features/marketplace/screens/ShopMarketplaceScreens.js`.
+- `src/features/marketplace/components/PostCard.js`, `QuotationUI.js`, `BookingUI.js`.
+- `backend/test/profile-photos.test.cjs`, `backend/test/profile-photos-integration.test.cjs`.
+- `tests/marketplace-shop.test.cjs`, `tests/messaging-ui.test.cjs`, `tests/profile-photos-ui.test.cjs`, `tests/profile-photos-service.test.cjs`.
+- `docs/PROFILE_PHOTOS.md`.
+
+No storage bucket/configuration, upload transaction, Firebase configuration, rules/indexes, payment/quotation/booking mutation, branding or splash changes were needed. Deployment remains separate: the existing backend must receive the request preview context along with the matching frontend before hosted clients can use it. No deployment or production-data write was performed.
+
+### Follow-up verification
+
+Node **22.23.3**:
+
+- Full application suite: **504 passed, zero failures** (`.local-checks/avatar-full-app.log`). Includes Find Jobs rendering on iOS/Android/Web, unchanged-row refresh stability, replacement/removal and generic-identity fallback, request details, both Discover author roles, authorized conversation avatars, account/session switching, cache refresh and true signed-URL expiry without a renewal flash. The final request-details layout check also passed (`.local-checks/avatar-request-layout.log`).
+- Full configured backend suite: **313 passed, zero failures** (`.local-checks/avatar-full-backend.log`). New checks cover intended request subject, role/direct-audience denial, sanitized generic identities, current access rechecks and existing upload/replace/remove regressions.
+- Firebase emulator matrix: **85 passed, zero failures** across six files (`.local-checks/avatar-visibility-emulators/emulator-result.json`). Real Auth/Firestore tests cover request-feed pagination and replacement/removal revisions; cross-customer, direct-audience and generic-identity protection; no messaging permission from avatar access; and current revisions in customer build feeds, saved posts and details without persisted URL/revision duplication. Emulators shut down successfully.
+- Final Expo exports: **iOS, Android and Web passed**, including native Hermes bundles (`.local-checks/avatar-visibility-export.log`, artifacts `.local-checks/avatar-visibility-export`).
+- `git diff --check` passed. Existing bucket adapter/configuration, photo transactions, messaging authorization, payment mutations, Firestore rules/indexes, auth configuration and branding/splash files are unchanged.
+
+Outstanding checks: deploy the matching backend and frontend through the existing services when authorized; on physical iOS/Android and target browsers verify scrolling/pagination, pull-to-refresh, navigation away/back, first upload/replacement/removal across two accounts, offline/background transitions, long customer names/large fonts and correct fallbacks. These automated checks used local fixtures/emulators only; no production-data changes, commits, pushes or deployments occurred.

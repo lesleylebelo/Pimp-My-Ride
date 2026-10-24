@@ -174,7 +174,7 @@ async function completeProfile(request){
 const {listDocuments,checkUpload,uploadDocument}=createDocuments({db,storage,actor});
 const marketplace=createMarketplace({db,auth,actor,mockPaymentEnv});
 const messaging=createMessaging({db,auth,actor});
-const profilePhotos=createProfilePhotos({db,auth,actor,storage:profileStorage,messaging});
+const profilePhotos=createProfilePhotos({db,auth,actor,storage:profileStorage,messaging,marketplace});
 const aiAssist=createAIAssist({db,actor,provider:aiProvider,releaseControl:aiReleaseControl});
 const {photosApi,checkPhotoUpload,uploadPhoto}=createPhotos({db,auth,storage:photoStorage,requestStorage,actor});
 const {postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage}=createPosts({db,auth,actor,storage:postStorage});

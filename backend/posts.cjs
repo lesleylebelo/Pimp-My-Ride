@@ -53,6 +53,11 @@ function authorName(profile,role){
 }
 function createPosts({db,auth,actor,storage}){
  const audit=(tx,uid,op,id)=>tx.create(db.collection('auditLogs').doc(),{actor:uid,action:`posts.${op}`,target:id,details:{},createdAt:stamp()});
+ async function avatarRevisions(documents){
+  const ids=[...new Set(documents.map(doc=>doc.data()?.authorId||doc.data()?.shopId).filter(id=>typeof id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(id)))];
+  const profiles=await Promise.all(ids.map(id=>db.doc(`users/${id}`).get()));
+  return new Map(profiles.map(doc=>[doc.id,doc.data()?.profilePhotoRevision||0]));
+ }
  async function author(a){
   const profile=(await db.doc(`users/${a.uid}`).get()).data();
   if(!eligible(profile,a.profile.role))D.fail('An active account is required to manage posts.','permission-denied');
@@ -226,10 +231,11 @@ function createPosts({db,auth,actor,storage}){
   M.fields(input,['op',...allowed[op],...(['save'].includes(op)?[]:['feed','mine','saved'].includes(op)?[]:['requestId'])]);
   const posts=db.collection('posts');
   if(op==='get'){
-   const id=D.id(input.id),post=(await posts.doc(id).get()).data();
+   const id=D.id(input.id),document=await posts.doc(id).get(),post=document.data();
    if(!post||post.status!=='published')D.fail('Post not found.','not-found');
    const saved=(await db.doc(`users/${a.uid}/savedPosts/${id}`).get()).exists;
-   return {post:{id,...serialize(post),saved}};
+   const revisions=await avatarRevisions([document]);
+   return {post:{id,...serialize(post),saved,authorPhotoRevision:revisions.get(post.authorId||post.shopId)||0}};
   }
   if(op==='feed'||op==='mine'){
    let query=posts.where('status','==','published');
@@ -247,7 +253,8 @@ function createPosts({db,auth,actor,storage}){
    const snapshot=await query.limit(PAGE_SIZE+1).get(),docs=snapshot.docs.slice(0,PAGE_SIZE);
    const savedSnapshot=docs.length?await db.collection(`users/${a.uid}/savedPosts`).where(FieldPath.documentId(),'in',docs.map(doc=>doc.id)).get():{docs:[]};
    const saved=new Set(savedSnapshot.docs.map(doc=>doc.id));
-   return {items:docs.map(doc=>({...row(doc),saved:saved.has(doc.id)})),cursor:snapshot.docs.length>PAGE_SIZE?docs[PAGE_SIZE-1].id:null};
+   const revisions=await avatarRevisions(docs);
+   return {items:docs.map(doc=>({...row(doc),saved:saved.has(doc.id),authorPhotoRevision:revisions.get(doc.data().authorId||doc.data().shopId)||0})),cursor:snapshot.docs.length>PAGE_SIZE?docs[PAGE_SIZE-1].id:null};
   }
   if(op==='saved'){
    const savedRef=db.collection(`users/${a.uid}/savedPosts`);
@@ -255,7 +262,8 @@ function createPosts({db,auth,actor,storage}){
    if(input.cursor){const cursor=await savedRef.doc(D.id(input.cursor)).get();if(!cursor.exists)D.fail('Saved posts changed. Refresh the list.','failed-precondition');savedQuery=savedQuery.startAfter(cursor);}
    const savedPage=await savedQuery.limit(PAGE_SIZE+1).get(),ids=savedPage.docs.slice(0,PAGE_SIZE).map(doc=>doc.id);
    const docs=await Promise.all(ids.map(id=>posts.doc(id).get()));
-   return {items:docs.filter(doc=>doc.exists&&doc.data().status==='published').map(doc=>({...row(doc),saved:true})),cursor:savedPage.docs.length>PAGE_SIZE?ids.at(-1):null};
+   const revisions=await avatarRevisions(docs);
+   return {items:docs.filter(doc=>doc.exists&&doc.data().status==='published').map(doc=>({...row(doc),saved:true,authorPhotoRevision:revisions.get(doc.data().authorId||doc.data().shopId)||0})),cursor:savedPage.docs.length>PAGE_SIZE?ids.at(-1):null};
   }
   if(op==='save'){
    const id=D.id(input.id),saved=input.saved===true;
