@@ -37,15 +37,15 @@ function fixture(extra={},options={}){
  const db=queryable(memoryDb(structuredClone({...seed,...extra}))),users=new Map();let sequence=0;
  const auth={getUser:async uid=>users.get(uid)||{emailVerified:true,disabled:false}};
  const actor=async req=>({uid:req.auth.uid,profile:(await db.doc('users/'+req.auth.uid).get()).data()});
- db.projectId='demo-pmr-security';
- const api=createMarketplace({db,auth,actor,mockPaymentEnv:options.mockPaymentEnv===undefined?LOCAL_MOCK_ENV:options.mockPaymentEnv});
+ db.projectId=options.projectId||'demo-pmr-security';
+ let api=createMarketplace({db,auth,actor,paymentProvider:options.paymentProvider,mockPaymentEnv:options.mockPaymentEnv===undefined?LOCAL_MOCK_ENV:options.mockPaymentEnv});
  const read=(uid,op,data={})=>api({auth:{uid},data:{op,...data}});
  const write=(uid,op,data={},key=`retry-${++sequence}`)=>{
   const request=data.serviceRequestId&&db.rows.get(`serviceRequests/${data.serviceRequestId}`);
   const attempt=op==='paymentMockResult'?db.rows.get('bookings/'+data.id+'/paymentAttempts/'+data.paymentAttemptId):null;
   return read(uid,op,{requestId:key,...(op==='paymentMockResult'?{expectedBookingId:data.id,expectedAmountCents:attempt?.amountCents,expectedCurrency:attempt?.currency}:{}),...(op==='quoteAccept'&&!Object.hasOwn(data,'paymentMethod')?{paymentMethod:'pay_in_store'}:{}),...(op==='quoteSubmit'&&!Object.hasOwn(data,'termsVersion')?{termsVersion:request?.termsVersion||request?.version||1}:{}),...data});
  };
- return {db,auth,users,api,read,write};
+ return {db,auth,users,api,read,write,restart:()=>{api=createMarketplace({db,auth,actor,paymentProvider:options.paymentProvider,mockPaymentEnv:options.mockPaymentEnv===undefined?LOCAL_MOCK_ENV:options.mockPaymentEnv});}};
 }
 const vehicle={make:'Ford',model:'Fiesta',year:2022,colour:'Silver',registration:'abc 123 gp'};
 const requestData={vehicleId:'car',title:'Respray doors',description:'Repair and repaint both doors.',categoryId:'paint',city:'Johannesburg',budgetMinCents:10000,budgetMaxCents:200000,preferredDate:'',visibility:'open'};
@@ -456,6 +456,46 @@ async function booked(f){const offer=await offered(f),booking=await f.write('own
 const appointment={appointmentDate:'2099-12-01',appointmentTime:'09:30'};
 const bookingAudits=f=>audits(f).filter(([,v])=>['marketplace.quoteAccept','marketplace.bookingConfirm','marketplace.bookingCancel'].includes(v.action));
 
+test('hosted full, fixed and percentage deposit payments persist across backend recreation and settle balances once',async()=>{
+ const {PROJECT,HOSTED_MOCK_ENV}=require('./helpers/mock-payments.cjs');const config={...HOSTED_MOCK_ENV};
+ for(const depositType of ['none','fixed','percentage']){
+  const f=fixture({},{projectId:PROJECT,mockPaymentEnv:config});
+  assert.equal((await f.read('owner','paymentSimulation')).mode,'mock');
+  const quote={...quoteData,depositType,...(depositType==='none'?{}:{depositValue:depositType==='fixed'?25000:25})},offer=await offered(f,{quote});
+  const b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:depositType==='none'?'pay_now':'pay_deposit'});
+  await f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful'});
+  f.restart();let saved=(await f.read('shop','booking',{id:b.id})).booking;
+  assert.equal(saved.simulated,true);assert.equal(saved.paidCents,depositType==='none'?100000:25000);assert.equal(saved.balanceDueCents,depositType==='none'?0:75000);
+  if(saved.balanceDueCents){const next=await f.write('owner','paymentStart',{id:b.id});const results=await Promise.allSettled([f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:next.paymentAttemptId,outcome:'successful'}),f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:next.paymentAttemptId,outcome:'successful'})]);assert.equal(results.filter(r=>r.status==='fulfilled').length,1);}
+  saved=(await f.read('owner','booking',{id:b.id})).booking;assert.equal(saved.paidCents,100000);assert.equal(saved.balanceDueCents,0);assert.equal(saved.status,'pending_confirmation');assert.equal(saved.serviceStatus,'not_started');
+  await assert.rejects(()=>f.write('owner','paymentStart',{id:b.id}),{code:'failed-precondition'});
+ }
+});
+
+test('hosted failures, retries, store payments and multiple participants preserve isolation and demo-only history',async()=>{
+ const {PROJECT,HOSTED_MOCK_ENV}=require('./helpers/mock-payments.cjs');const config={...HOSTED_MOCK_ENV};
+ const f=fixture({},{projectId:PROJECT,mockPaymentEnv:config}),offer=await offered(f);
+ const b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_now'});
+ await f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'failed'});
+ let saved=(await f.read('owner','booking',{id:b.id})).booking;assert.equal(saved.paidCents,0);assert.equal(saved.balanceDueCents,100000);
+ const retry=await f.write('owner','paymentRetry',{id:b.id});await f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:retry.paymentAttemptId,outcome:'successful'});
+ await assert.rejects(()=>f.read('other','booking',{id:b.id}),{code:'not-found'});
+ const v=await f.write('other','vehicleSave',vehicle),r=await f.write('other','requestCreate',{...requestData,vehicleId:v.id}),q=await f.write('shop','quoteSubmit',{...quoteData,serviceRequestId:r.id}),store=await f.write('other','quoteAccept',{id:q.id,paymentMethod:'pay_in_store'});
+ saved=(await f.read('shop','booking',{id:store.id})).booking;assert.equal(saved.paymentStatus,'due');assert.equal(saved.paidCents,0);assert.equal(saved.balanceDueCents,100000);
+ await assert.rejects(()=>f.write('owner','paymentStart',{id:store.id}),{code:'not-found'});
+ await f.write('shop','paymentRecordInStore',{id:store.id,method:'simulated_cash'});assert.equal((await f.read('other','booking',{id:store.id})).booking.balanceDueCents,0);
+ assert.ok([...f.db.rows].filter(([path])=>path.startsWith('paymentReceipts/')).every(([,value])=>value.simulated===true&&value.testTransaction===true));
+ config.PMR_MOCK_PAYMENTS_ENABLED='false';const before=JSON.stringify([...f.db.rows]);
+ assert.equal((await f.read('owner','paymentSimulation')).enabled,false);await assert.rejects(()=>f.write('owner','paymentStart',{id:b.id}),{code:'failed-precondition'});assert.equal(JSON.stringify([...f.db.rows]),before);
+});
+test('feature flag deactivation racing a payment is rechecked inside the atomic transaction',async()=>{
+ const {PROJECT,HOSTED_MOCK_ENV}=require('./helpers/mock-payments.cjs');const config={...HOSTED_MOCK_ENV};
+ const f=fixture({},{projectId:PROJECT,mockPaymentEnv:config}),offer=await offered(f);
+ f.db.before=()=>{config.PMR_MOCK_PAYMENTS_ENABLED='false';};
+ await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_now'}),{code:'failed-precondition'});
+ assert.equal([...f.db.rows.keys()].some(key=>key.startsWith('bookings/')),false);assert.equal(f.db.rows.get('quotations/'+offer.id).status,'submitted');
+});
+
 test('acceptance atomically selects one quote and creates private immutable booking terms',async()=>{
  const f=fixture(),offer=await offered(f),result=await f.write('owner','quoteAccept',{id:offer.id});
  assert.equal(result.id,offer.serviceRequestId);
@@ -607,7 +647,7 @@ test('failed deposit retry preserves the original attempt and cancellation block
  await f.write('owner','bookingCancel',{id:booking.id,reason:'Academic cancellation test'});
  const cancelled=f.db.rows.get(`bookings/${booking.id}`);
  assert.equal(cancelled.status,'cancelled');assert.equal(cancelled.paidCents,20000);assert.equal(cancelled.balanceDueCents,80000);
- assert.equal(cancelled.paymentReconciliationStatus,'refund_review_required');
+ assert.equal(cancelled.paymentReconciliationStatus,'simulated_reconciliation_required');
  await assert.rejects(()=>f.write('owner','paymentStart',{id:booking.id}),{code:'failed-precondition'});
  await assert.rejects(()=>f.write('shop','paymentRecordInStore',{id:booking.id,method:'simulated_cash'}),{code:'failed-precondition'});
 });
@@ -829,13 +869,16 @@ test('in-store settlement following failed initial online payment permits separa
  await f.write('shop','bookingConfirm',{id:b.id,...appointment});assert.equal(f.db.rows.get('bookings/'+b.id).status,'confirmed');
 });
 
-test('every mock payment mutation fails closed without an explicitly authorised local demo environment',async()=>{
+test('every mock payment mutation fails closed without explicit simulation configuration matching the SDK project',async()=>{
  const configurations=[{},...Object.keys(LOCAL_MOCK_ENV).map(key=>({...LOCAL_MOCK_ENV,[key]:undefined})),
   {...LOCAL_MOCK_ENV,NODE_ENV:'production'}, {...LOCAL_MOCK_ENV,PMR_MOCK_PAYMENTS_ENABLED:'false'},
   {...LOCAL_MOCK_ENV,FIREBASE_PROJECT_ID:'real-project'}, {...LOCAL_MOCK_ENV,FIRESTORE_EMULATOR_HOST:'remote.example:8080'},
   {...LOCAL_MOCK_ENV,FIREBASE_AUTH_EMULATOR_HOST:'127.0.0.1:0'}, {...LOCAL_MOCK_ENV,GCLOUD_PROJECT:'real-project'}];
  for(const mockPaymentEnv of configurations){
   const f=fixture({}, {mockPaymentEnv});
+  const prior=JSON.stringify([...f.db.rows]);
+  assert.deepEqual(await f.read('owner','paymentSimulation'),{enabled:false,simulated:true,mode:'disabled'});
+  assert.equal(JSON.stringify([...f.db.rows]),prior);
   assert.deepEqual((await f.read('owner','vehicles')).items.map(v=>v.id),['car']);
   const offer=await offered(f); // request creation and quoting remain available
   const before=JSON.stringify([...f.db.rows]);
@@ -846,6 +889,64 @@ test('every mock payment mutation fails closed without an explicitly authorised 
  }
  const f=fixture();f.db.projectId='real-project';const offer=await offered(f);
  await assert.rejects(()=>f.write('owner','quoteAccept',{id:offer.id}),/Mock payments are disabled/);
+});
+
+test('mock capability is read-only for both participants and rejects a non-mock provider without invoking it',async()=>{
+ const f=fixture(),before=JSON.stringify([...f.db.rows]);
+ for(const uid of ['owner','shop'])assert.deepEqual(await f.read(uid,'paymentSimulation'),{enabled:true,simulated:true,mode:'local-emulator'});
+ assert.equal(JSON.stringify([...f.db.rows]),before);
+ let calls=0;
+ for(const provider of [{name:'live',simulated:false},{name:'mock',simulated:false},{name:'other',simulated:true}]){
+  const g=fixture({}, {paymentProvider:{...provider,createCheckout:()=>{calls++;throw Error('Must not run');}}});
+  assert.equal((await g.read('owner','paymentSimulation')).enabled,false);
+  const offer=await offered(g),unchanged=JSON.stringify([...g.db.rows]);
+  await assert.rejects(()=>g.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_now'}),{code:'failed-precondition'});
+  assert.equal(JSON.stringify([...g.db.rows]),unchanged);
+ }
+ assert.equal(calls,0);
+});
+
+test('new demo bookings, attempts and receipts remain explicitly separate from real settlement',async()=>{
+ for(const paymentMethod of ['pay_now','pay_deposit','pay_in_store']){
+  const f=fixture(),offer=await offered(f,{quote:{...quoteData,depositType:'fixed',depositValue:25000}}),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod});
+  const saved=f.db.rows.get('bookings/'+b.id),attempt=f.db.rows.get('bookings/'+b.id+'/paymentAttempts/'+b.paymentAttemptId);
+  assert.equal(saved.simulated,true);assert.equal(saved.testTransaction,true);assert.equal(saved.paymentProvider,'mock');assert.equal(saved.paidCents,0);assert.equal(saved.balanceDueCents,100000);
+  assert.equal(attempt.simulated,true);assert.equal(attempt.testTransaction,true);assert.equal(attempt.provider,'mock');
+  if(paymentMethod==='pay_in_store'){assert.equal(saved.paymentStatus,'due');assert.equal(f.db.rows.has('paymentReceipts/'+b.paymentAttemptId),false);continue;}
+  await f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful'});
+  const receipt=f.db.rows.get('paymentReceipts/'+b.paymentAttemptId);assert.equal(receipt.simulated,true);assert.equal(receipt.testTransaction,true);assert.match(receipt.notice,/NOT REAL PAYMENT/);
+ }
+});
+
+test('simulation cannot reinterpret unlabelled bookings or real payment evidence',async()=>{
+ for(const change of [{remove:'simulated'},{remove:'testTransaction'},{remove:'paymentProvider'},{simulated:false},{testTransaction:false},{paymentProvider:'real-provider'},{paymentAccountingMode:'real'}]){
+  const {PROJECT,HOSTED_MOCK_ENV}=require('./helpers/mock-payments.cjs');
+  const f=fixture({},{projectId:PROJECT,mockPaymentEnv:HOSTED_MOCK_ENV}),offer=await offered(f),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_now'});
+  const saved=f.db.rows.get('bookings/'+b.id),{remove,...values}=change;Object.assign(saved,values);if(remove)delete saved[remove];saved.paymentVerifiedAt=Timestamp.fromMillis(1234);
+  const before=JSON.stringify([...f.db.rows]);
+  for(const [uid,op,data] of [['owner','paymentMockResult',{paymentAttemptId:b.paymentAttemptId,outcome:'successful'}],['owner','paymentRetry',{}],['owner','paymentStart',{}],['shop','paymentRecordInStore',{method:'simulated_cash'}]])await assert.rejects(()=>f.write(uid,op,{id:b.id,...data}),{code:'failed-precondition'});
+  assert.equal((await f.read('owner','booking',{id:b.id})).booking.totalCents,100000);assert.equal(JSON.stringify([...f.db.rows]),before);
+ }
+});
+
+test('every payment mutation rejects non-simulated or mismatched attempts without rewriting evidence',async()=>{
+ for(const op of ['paymentMockResult','paymentRetry','paymentStart','paymentRecordInStore'])for(const change of [{simulated:false},{testTransaction:false},{provider:'real-provider'},{bookingId:'another-booking'},{currency:'USD'}]){
+  const f=fixture(),offer=await offered(f),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:['paymentStart','paymentRecordInStore'].includes(op)?'pay_in_store':'pay_now'});
+  if(op==='paymentRetry')await f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'failed'});
+  Object.assign(f.db.rows.get('bookings/'+b.id+'/paymentAttempts/'+b.paymentAttemptId),change);const before=JSON.stringify([...f.db.rows]);
+  await assert.rejects(()=>f.write(op==='paymentRecordInStore'?'shop':'owner',op,{id:b.id,...(op==='paymentMockResult'?{paymentAttemptId:b.paymentAttemptId,outcome:'successful'}:op==='paymentRecordInStore'?{method:'simulated_cash'}:{})}));
+  assert.equal(JSON.stringify([...f.db.rows]),before);
+ }
+});
+
+test('simulated confirmation has its own timestamp and never replaces existing settlement evidence',async()=>{
+ for(const inStore of [false,true]){
+  const f=fixture(),offer=await offered(f),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:inStore?'pay_in_store':'pay_now'});
+  const saved=f.db.rows.get('bookings/'+b.id);assert.equal(saved.paymentAccountingMode,'simulated');assert.equal(saved.paymentVerifiedAt,undefined);
+  const evidence=Timestamp.fromMillis(1234);saved.paymentVerifiedAt=evidence;
+  if(inStore)await f.write('shop','paymentRecordInStore',{id:b.id,method:'simulated_cash'});else await f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful'});
+  const updated=f.db.rows.get('bookings/'+b.id);assert.equal(updated.paymentVerifiedAt.toMillis(),1234);assert.ok(updated.simulatedPaymentVerifiedAt);assert.equal(updated.paidCents,100000);
+ }
 });
 
 test('malformed, incomplete and contradictory accounting is rejected without ledger writes',async()=>{
@@ -873,7 +974,7 @@ test('legacy accounting defaults apply only when both fields are absent and stat
   delete saved.paidCents;delete saved.balanceDueCents;if(status===undefined)delete saved.paymentStatus;else saved.paymentStatus=status;
   if(['partially_paid','invalid'].includes(status)){await assert.rejects(()=>f.write('owner','bookingCancel',{id:b.id,reason:'Legacy cancellation'}),{code:'failed-precondition'});continue;}
   await f.write('owner','bookingCancel',{id:b.id,reason:'Legacy cancellation'});
-  const after=f.db.rows.get('bookings/'+b.id);assert.equal(after.status,'cancelled');assert.equal(after.paymentReconciliationStatus,status==='paid'?'refund_review_required':undefined);
+  const after=f.db.rows.get('bookings/'+b.id);assert.equal(after.status,'cancelled');assert.equal(after.paymentReconciliationStatus,status==='paid'?'simulated_reconciliation_required':undefined);
  }
 });
 

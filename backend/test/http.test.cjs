@@ -70,7 +70,9 @@ test('photo routes validate identity and query fields before accepting a bounded
  for(const query of ['version=-1&requestId=x','version=1.5&requestId=x','version=0&requestId=x&path=forged'])await request(app).post('/api/photos/vehicles/car/1?'+query).set('Authorization','Bearer good').attach('file',Buffer.from('x'),'x.jpg').expect(400);
  await request(app).post(endpoint).set('Authorization','Bearer good').field('ownerId','forged').attach('file',Buffer.from('x'),'x.jpg').expect(400);
  const denied=createApp({auth:{verifyIdToken:async()=>({uid:'shop'})},services:{...base.services,checkPhotoUpload:async()=>{throw new ApiError('permission-denied','Owner access required.');}}});
- await request(denied).post(endpoint).set('Authorization','Bearer good').attach('file',Buffer.alloc(5242881),'oversized.jpg').expect(403);
+ // Test permission rejection with a small fixture. Streaming 5 MB into an
+ // intentionally rejected request can reset the Windows socket before 403 is read.
+ await request(denied).post(endpoint).set('Authorization','Bearer good').attach('file',Buffer.from('synthetic photo'),'denied.jpg').expect(403);
 });
 function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
 const eventTurn=()=>new Promise(resolve=>setImmediate(resolve));
