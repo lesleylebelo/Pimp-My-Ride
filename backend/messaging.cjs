@@ -26,7 +26,7 @@ function createMessaging({db, auth, actor, now = Date.now}) {
     ]);
     const request = requestDoc.data(), owner = ownerDoc.data(), shop = shopDoc.data(), booking = bookingDoc.data();
     if (!request || request.ownerId !== conversation.ownerId) D.fail('Service request not found.', 'not-found');
-    const base = {request, shop, canSend:false, canEnquire:false, reason:'This relationship no longer authorises new messages.', bookingId:null};
+    const base = {request, owner, shop, canSend:false, canEnquire:false, reason:'This relationship no longer authorises new messages.', bookingId:null};
     if (!active(owner,'owner') || !active(shop,'shop') || !(await enabled(conversation.ownerId)) || !(await enabled(conversation.shopId))) return {...base,reason:'A participant is no longer eligible to send messages.'};
     // Explicit customer denial takes precedence over automatic quotation/invitation/booking access.
     if (['rejected','revoked'].includes(conversation.consent)) return {...base,reason:'The customer has not authorised communication.'};
@@ -55,7 +55,7 @@ function createMessaging({db, auth, actor, now = Date.now}) {
   }
   function view(id, conversation, account, access) {
     const owner = account.profile.role === 'owner', received = conversation[owner?'receivedOwner':'receivedShop'] || 0, read = conversation[owner?'readOwner':'readShop'] || 0;
-    return {id,serviceRequestId:conversation.serviceRequestId,shopId:conversation.shopId,shopName:conversation.shopName,requestTitle:conversation.requestTitle,vehicle:conversation.vehicle,
+    return {id,serviceRequestId:conversation.serviceRequestId,shopId:conversation.shopId,shopName:conversation.shopName,requestTitle:conversation.requestTitle,vehicle:conversation.vehicle,avatar:access.canSend?{context:"conversation",id,revision:(owner?access.shop:access.owner)?.profilePhotoRevision||0}:null,
       consent:conversation.consent,enquiry:conversation.enquiry || '',canSend:access.canSend,reason:access.reason,bookingId:access.bookingId,expiresAt:access.expiresAt || null,
       unreadCount:Math.max(0,received-read),receivedCount:received,lastSequence:conversation.sequence || 0,lastMessage:conversation.lastMessage || '',updatedAt:serial(conversation.updatedAt)};
   }
@@ -72,7 +72,7 @@ function createMessaging({db, auth, actor, now = Date.now}) {
     const result = await query.limit(21).get(), docs = result.docs.slice(0,20);
     return {docs,cursor:result.docs.length>20?docs[19].id:null};
   }
-  return async function messaging(request) {
+  const messaging = async function(request) {
     const account = await actor(request), input = request.data || {}, op = input.op;
     if (!['owner','shop'].includes(account.profile.role) || !active(account.profile,account.profile.role)) D.fail('Messaging access is unavailable.','permission-denied');
     if (!Object.hasOwn(allowed,op)) D.fail('Unknown messaging operation.');
@@ -160,5 +160,16 @@ function createMessaging({db, auth, actor, now = Date.now}) {
       D.fail('Unknown messaging operation.');
     });
   };
+  // Private avatar access uses exactly the current conversation permission check.
+  messaging.authorizeAvatar = async (request, id) => {
+    const account = await actor(request);
+    if (!active(account.profile,account.profile.role)) D.fail('Messaging access is unavailable.','permission-denied');
+    const conversation = (await db.doc(`conversations/${D.id(id)}`).get()).data();
+    participant(conversation,account);
+    const access = await context(ref=>ref.get(),conversation);
+    if (!access.canSend) D.fail('Current customer-approved communication is required.','permission-denied');
+    return account.profile.role==='owner'?conversation.shopId:conversation.ownerId;
+  };
+  return messaging;
 }
 module.exports = {createMessaging,conversationId};

@@ -1,3 +1,4 @@
+import ProfileAvatar from '../../../shared/components/ProfileAvatar';
 import React, {useMemo, useRef, useEffect} from 'react';
 import {ActivityIndicator, Pressable, StyleSheet, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
@@ -10,7 +11,7 @@ export function useMessagingStyles() {
   const {theme, isDark} = useTheme();
   return {theme, styles: useMemo(() => makeStyles(theme, isDark), [theme, isDark])};
 }
-// The API supplies workshop names and request references, but no customer names or avatars.
+// The API supplies workshop names and request references, with permission-scoped avatar references.
 export const conversationLabel = (item, role) => (role === 'shop' ? item.requestTitle : item.shopName) || item.requestTitle || item.shopName || 'Conversation';
 export function messageDate(value, now = Date.now()) {
   if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isFinite(new Date(value).getTime())) return 'Date unavailable';
@@ -25,7 +26,7 @@ export function messageTime(value) {
   return new Date(value).toLocaleTimeString('en-ZA', {hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Johannesburg'}) + ' SAST';
 }
 export const activityTime = value => messageDate(value) === 'Today' ? messageTime(value) : messageDate(value);
-export function MessagingFrame({navigation, role, title, subtitle, icon, children}) {
+export function MessagingFrame({navigation, role, title, subtitle, icon, avatar, avatarShop, children}) {
   const {styles, theme} = useMessagingStyles(), focused = useIsFocused(), leaving = useRef(false);
   useEffect(() => {if (focused) leaving.current = false;}, [focused]);
   return <SafeAreaView style={styles.safe} edges={['top', 'bottom', 'left', 'right']}><View style={styles.page}>
@@ -34,7 +35,7 @@ export function MessagingFrame({navigation, role, title, subtitle, icon, childre
         if (leaving.current) return; leaving.current = true;
         if (navigation.canGoBack?.()) navigation.goBack(); else navigation.navigate(role === 'shop' ? 'ShopJobs' : 'Discover');
       }}><Ionicons name="arrow-back" size={22} color={theme.textPrimary}/></Pressable>
-      {!!icon && <View style={styles.avatar} accessible={false}><Ionicons name={icon} size={22} color={theme.textPrimary}/></View>}
+      {avatar ? <ProfileAvatar context="conversation" id={avatar.id} revision={avatar.revision} shop={avatarShop} size={46}/> : !!icon && <View style={styles.avatar} accessible={false}><Ionicons name={icon} size={22} color={theme.textPrimary}/></View>}
       <View style={styles.headerCopy}><Text accessibilityRole="header" weight="semibold" style={styles.title}>{title}</Text>{!!subtitle && <Text style={styles.secondary}>{subtitle}</Text>}</View>
     </View>{children}
   </View></SafeAreaView>;

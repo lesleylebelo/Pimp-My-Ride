@@ -10,6 +10,7 @@ import {accountStage} from '../utils/registration';
 import PrimaryButton from '../../../shared/components/PrimaryButton';
 import VerificationDocuments from '../components/VerificationDocuments';
 import BusinessLocation from '../components/BusinessLocation';
+import ProfilePhotoSettings from '../components/ProfilePhotoSettings';
 import { useTheme } from '../../../shared/theme/ThemeContext';
 
 export default function AccountScreen({ navigation }) {
@@ -19,6 +20,7 @@ export default function AccountScreen({ navigation }) {
  const [busy,setBusy]=useState(false),[message,setMessage]=useState(''),[resendAt,setResendAt]=useState(0);
  const [uploadBusy,setUploadBusy]=useState(false),[documentRefresh,setDocumentRefresh]=useState(0);
  const [locationBusy,setLocationBusy]=useState(false);
+ const [photoBusy,setPhotoBusy]=useState(false);
  const actionLock=useRef(false),uploadLock=useRef(false);
  const onUploadBusy=useCallback(value=>{uploadLock.current=value;setUploadBusy(value);},[]);
  const stage=accountStage(user,profile);
@@ -48,6 +50,7 @@ export default function AccountScreen({ navigation }) {
         {profile?.role === 'owner' ? 'Vehicle owner' : profile?.role === 'shop' ? 'Custom shop' : profile?.role === 'admin' ? 'Administrator' : ''}
       </Text>
     </View>
+    {user?.emailVerified&&['owner','shop'].includes(profile?.role)&&stage!=='restricted'&&<ProfilePhotoSettings disabled={busy||!!error||!!profile.reviewOperation||!!profile.statusOperation} onBusyChange={setPhotoBusy}/>}
     {profile?.role==='shop'&&<View style={styles.businessCard}>
       <Text accessibilityRole="header" style={styles.identity}>Business profile</Text>
       {profile.verificationStatus==='approved'&&<View style={{flexDirection:'row',alignItems:'center',gap:8}}><Ionicons name="checkmark-circle" size={20} color={theme.accent}/><Text style={styles.body}>Verified workshop</Text></View>}
@@ -79,7 +82,7 @@ export default function AccountScreen({ navigation }) {
 
     <PrimaryButton
       title={`Switch to ${mode === 'dark' ? 'light' : 'dark'} mode`}
-      disabled={busy||uploadBusy||locationBusy}
+      disabled={busy||uploadBusy||locationBusy||photoBusy}
       onPress={toggleTheme}
     />
     <PrimaryButton

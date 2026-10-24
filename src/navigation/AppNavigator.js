@@ -8,7 +8,8 @@ import ShopHomeScreen from '../features/marketplace/ShopNavigator';
 import AdminHomeScreen from '../features/admin/AdminNavigator';
 import { getAuthenticatedRoute } from './landingRoute';
 import LegalScreen from '../features/auth/screens/LegalScreen';
-import React from "react";
+import React, {useCallback, useState} from "react";
+import StartupSplash from "../shared/components/StartupSplash";
 import { StatusBar } from "expo-status-bar";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
@@ -34,19 +35,18 @@ export default function AppNavigation() {
   const authenticatedUser = user?.emailVerified ? user : null;
   const authenticatedRoute = getAuthenticatedRoute(authenticatedUser, profile, error);
 
-  if (initializing) return (
-    <SafeAreaProvider>
-      <View style={{flex:1,justifyContent:"center",alignItems:"center",backgroundColor:theme.background}}>
-        <ActivityIndicator color={theme.primary}/>
-        <Text style={{color:theme.textSecondary,marginTop:8}}>Please wait…</Text>
-      </View>
-    </SafeAreaProvider>
-  );
+  const [bootDismissed, setBootDismissed] = useState(false);
+  const [navigationReady, setNavigationReady] = useState(false);
+  const dismissBoot = useCallback(() => setBootDismissed(true), []);
 
   return (
     <SafeAreaProvider>
       <StatusBar style={isDark ? "light" : "dark"} />
-      <NavigationContainer>
+      <View style={{flex:1}} accessibilityElementsHidden={!bootDismissed} importantForAccessibility={bootDismissed ? "auto" : "no-hide-descendants"}>
+      {initializing ? <View style={{flex:1,justifyContent:"center",alignItems:"center",backgroundColor:theme.background}}>
+        <ActivityIndicator color={theme.primary}/>
+        <Text style={{color:theme.textSecondary,marginTop:8}}>Restoring your session...</Text>
+      </View> : <NavigationContainer onReady={() => setNavigationReady(true)}>
         <Stack.Navigator
           key={authenticatedUser ? `${authenticatedUser.uid}:${authenticatedRoute}` : "guest"}
           initialRouteName={authenticatedUser ? authenticatedRoute : "Splash"}
@@ -65,7 +65,8 @@ export default function AppNavigation() {
             </>
           )}
         </Stack.Navigator>
-      </NavigationContainer>
+      </NavigationContainer>}
+      </View>
 
       {working && (
         <View style={{position:"absolute",top:0,bottom:0,left:0,right:0,backgroundColor:isDark?"rgba(0,0,0,0.8)":"rgba(255,255,255,0.8)",alignItems:"center",justifyContent:"center"}}>
@@ -75,6 +76,7 @@ export default function AppNavigation() {
       )}
 
       <BackendStatus/>
+      {!bootDismissed && <StartupSplash ready={!initializing && navigationReady} onDismiss={dismissBoot}/>}
     </SafeAreaProvider>
   );
 }

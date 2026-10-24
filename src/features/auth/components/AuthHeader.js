@@ -1,55 +1,14 @@
-import React from "react";
-import { View, Text, StyleSheet } from "react-native";
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import colors from "../../../shared/theme/colors";
-import { spacing, radius } from "../../../shared/theme/typography";
-
-export default function AuthHeader({ title, subtitle, icon, iconSet = "ionicons" }) {
-  const IconComponent = iconSet === "material" ? MaterialCommunityIcons : Ionicons;
-  return (
-    <View style={styles.container}>
-      {icon ? (
-        <View style={styles.iconBadge}>
-          <IconComponent name={icon} size={32} color={colors.primary} />
-        </View>
-      ) : null}
-      <Text style={styles.title}>{title}</Text>
-      {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-    </View>
-  );
+import React from 'react';
+import {View,Text} from 'react-native';
+import {useTheme} from '../../../shared/theme/ThemeContext';
+import LogoMark from '../../../shared/components/LogoMark';
+export default function AuthHeader({title,subtitle}){
+ const {theme}=useTheme();
+ return <View style={{padding:24,gap:12,alignItems:'center',backgroundColor:theme.background}}>
+  <LogoMark size={88}/>
+  <Text style={{color:theme.textPrimary,fontSize:18,fontWeight:'600',textAlign:'center'}}>PimpMyRide</Text>
+  <Text style={{color:theme.textSecondary,fontSize:14,textAlign:'center'}}>Connect. Customize. Drive your style.</Text>
+  <Text accessibilityRole="header" style={{color:theme.textPrimary,fontSize:28,fontWeight:'500',textAlign:'center'}}>{title}</Text>
+  {!!subtitle&&<Text style={{color:theme.textSecondary,fontSize:15,lineHeight:23,textAlign:'center'}}>{subtitle}</Text>}
+ </View>;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    backgroundColor: colors.background,
-    minHeight: 132,
-    paddingTop: 32,
-    paddingBottom: spacing.lg,
-    paddingHorizontal: spacing.lg,
-    alignItems: "center",
-  },
-  iconBadge: {
-    width: 72,
-    height: 72,
-    borderRadius: radius.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.brandGreenLight,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: spacing.md,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "500",
-    color: colors.textPrimary,
-    textAlign: "center",
-  },
-  subtitle: {
-    fontSize: 15,
-    fontWeight: "400",
-    color: colors.textSecondary,
-    marginTop: spacing.sm,
-    textAlign: "center",
-  },
-});

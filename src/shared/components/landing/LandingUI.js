@@ -11,6 +11,7 @@ import { useTheme } from '../../theme/ThemeContext';
 import { palettes } from '../../theme/colors';
 import { spacing } from '../../theme/typography';
 import PrimaryButton from '../PrimaryButton';
+import LogoMark from '../LogoMark';
 import OutlineButton from '../OutlineButton';
 
 const FontContext = createContext(false);
@@ -82,6 +83,7 @@ export function LandingShell({ title, subtitle, tabs, feature, showFeature, onCl
           {offline && <View style={ui.offlineBar}><LandingText style={ui.offlineText}>Offline · Read-only preview{cachedAt ? ` · Saved ${new Date(cachedAt).toLocaleString()}` : ''}. Connect for updates.</LandingText></View>}
 
           <View style={ui.header}>
+            <LogoMark size={40}/>
             <View style={ui.headerLeft}>
               <Text accessibilityRole="header" style={[ui.title, { fontFamily: loaded ? fontNames.displaySemi : undefined }]} numberOfLines={1}>{title}</Text>
               {!!subtitle && <Text style={[ui.subtitle, { fontFamily: loaded ? fontNames.regular : undefined }]} numberOfLines={2}>{subtitle}</Text>}

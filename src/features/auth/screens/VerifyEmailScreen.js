@@ -9,10 +9,11 @@ import AuthNavHeader from '../components/AuthNavHeader';
 import AppTextInput from '../../../shared/components/AppTextInput';
 import PrimaryButton from '../../../shared/components/PrimaryButton';
 import OutlineButton from '../../../shared/components/OutlineButton';
-import colors from '../../../shared/theme/colors';
+import {useTheme} from '../../../shared/theme/ThemeContext';
 import {spacing} from '../../../shared/theme/typography';
 
 export default function VerifyEmailScreen({navigation, route}) {
+  const {theme:colors}=useTheme(),styles=makeStyles(colors);
   const {run, offline} = useAuth();
   const [email, setEmail] = useState(typeof route?.params?.email === 'string' ? route.params.email : '');
   const [password, setPassword] = useState('');
@@ -95,7 +96,7 @@ export default function VerifyEmailScreen({navigation, route}) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = colors => StyleSheet.create({
   safeArea:{flex:1,backgroundColor:colors.background},
   flex:{flex:1},
   content:{padding:spacing.lg,paddingBottom:spacing.xxl},

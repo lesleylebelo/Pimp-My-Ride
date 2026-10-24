@@ -5,36 +5,65 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "backgroundColor": "#0E3B2C",
+    "backgroundColor": "#0B0B0D",
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "icon": "./assets/branding/app-icon.png"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0E3B2C"
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/branding/adaptive-foreground.png",
+        "monochromeImage": "./assets/branding/adaptive-monochrome.png"
       }
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/branding/favicon.png"
     },
     "plugins": [
       "expo-status-bar",
       "expo-secure-store",
       "expo-web-browser",
       "expo-asset",
-      ["expo-location", {
-        "locationWhenInUsePermission": "Allow PimpMyRide to select your workshop or service location when you choose Use current location.",
-        "locationAlwaysPermission": false,
-        "locationAlwaysAndWhenInUsePermission": false,
-        "motionUsagePermission": false,
-        "isIosBackgroundLocationEnabled": false,
-        "isAndroidBackgroundLocationEnabled": false,
-        "isAndroidForegroundServiceEnabled": false,
-        "isAndroidMotionActivityEnabled": false
-      }]
-    ]
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow PimpMyRide to select your workshop or service location when you choose Use current location.",
+          "locationAlwaysPermission": false,
+          "locationAlwaysAndWhenInUsePermission": false,
+          "motionUsagePermission": false,
+          "isIosBackgroundLocationEnabled": false,
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": false,
+          "isAndroidMotionActivityEnabled": false
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0B0B0D",
+          "image": "./assets/branding/splash-logo.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#0B0B0D",
+            "image": "./assets/branding/splash-logo.png"
+          }
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow PimpMyRide to choose a profile image or showcase photo from your library.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ]
+    ],
+    "icon": "./assets/branding/app-icon.png"
   }
 }

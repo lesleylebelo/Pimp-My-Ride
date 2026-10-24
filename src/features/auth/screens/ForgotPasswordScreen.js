@@ -18,11 +18,12 @@ import AppTextInput from "../../../shared/components/AppTextInput";
 import PrimaryButton from "../../../shared/components/PrimaryButton";
 import OutlineButton from "../../../shared/components/OutlineButton";
 import OrDivider from "../../../shared/components/OrDivider";
-import colors from "../../../shared/theme/colors";
+import {useTheme} from '../../../shared/theme/ThemeContext';
 import { spacing } from "../../../shared/theme/typography";
 import { validateEmailField } from "../utils/validators";
 
 export default function ForgotPasswordScreen({ navigation }) {
+  const {theme:colors}=useTheme(),styles=makeStyles(colors);
   const content={icon:'car-sport-outline',iconSet:'ionicons',placeholder:'example@gmail.com',subtitle:"Enter your email address to request a password reset link."};
   const [sent,setSent] = useState(false);
   const [email, setEmail] = useState("");
@@ -105,7 +106,7 @@ export default function ForgotPasswordScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = colors => StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,

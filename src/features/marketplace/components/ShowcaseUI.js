@@ -1,4 +1,5 @@
 import React from 'react';
+import ProfileAvatar from '../../../shared/components/ProfileAvatar';
 import {Image,KeyboardAvoidingView,Platform,Pressable,ScrollView,View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Ionicons} from '@expo/vector-icons';
@@ -23,7 +24,7 @@ export function ShowcasePage({title,navigation,children,showTabs=false,keyboard=
 export function WorkshopIdentity({shop={},own=false}){
  const {theme:t}=useTheme(),s=showcaseStyles(t),[failed,setFailed]=React.useState(false);
  React.useEffect(()=>setFailed(false),[shop.avatar]);
- return <View style={s.section}><View style={s.row}><View style={{width:72,height:72,borderRadius:22,backgroundColor:t.surfaceMuted,alignItems:'center',justifyContent:'center',overflow:'hidden'}}>{shop.avatar&&!failed?<Image accessibilityLabel="Workshop logo" source={{uri:shop.avatar}} onError={()=>setFailed(true)} style={{width:72,height:72}}/>:<Ionicons name="storefront-outline" size={32} color={t.textSecondary}/>}</View><View style={s.copy}><Text style={s.muted}>{own?'YOUR WORKSHOP':'WORKSHOP'}</Text><Text accessibilityRole="header" weight="semibold" style={s.title}>{shop.name||'Workshop'}</Text>{!!(shop.city||shop.province)&&<Text style={s.muted}>{[shop.city,shop.province].filter(Boolean).join(' · ')}</Text>}</View></View>
+ return <View style={s.section}><View style={s.row}><ProfileAvatar context={own?"self":"shop"} id={own?undefined:shop.id} revision={shop.profilePhotoRevision} enabled={own||!!shop.id} shop size={72}/><View style={s.copy}><Text style={s.muted}>{own?'YOUR WORKSHOP':'WORKSHOP'}</Text><Text accessibilityRole="header" weight="semibold" style={s.title}>{shop.name||'Workshop'}</Text>{!!(shop.city||shop.province)&&<Text style={s.muted}>{[shop.city,shop.province].filter(Boolean).join(' · ')}</Text>}</View></View>
  {shop.verificationStatus==='approved'&&<View style={s.row}><Ionicons name="checkmark-circle" size={20} color={t.accent}/><Text style={s.body}>Verified workshop</Text></View>}
  {own&&shop.verificationStatus&&shop.verificationStatus!=='approved'&&<Text style={s.body}>Verification: {shop.verificationStatus}</Text>}
  </View>;

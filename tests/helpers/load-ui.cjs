@@ -13,6 +13,7 @@ function loadUI(file,mocks={}) {
   return React.createElement('FlatList',props,ListHeaderComponent,data.length?data.map((item,index)=>React.createElement(React.Fragment,{key:item.id},renderItem({item,index}))):ListEmptyComponent,ListFooterComponent);
  });
  native.AppState={currentState:'active',addEventListener:()=>({remove(){}})};
+ native.AccessibilityInfo={isReduceMotionEnabled:async()=>true,addEventListener:()=>({remove(){}})};
  // Complete the timing calls synchronously; UI tests do not run a native driver.
  class AnimatedValue {
   constructor(value){this.value=value;}
@@ -24,8 +25,11 @@ function loadUI(file,mocks={}) {
   stop(){},
  })};
  // Screen-specific mocks override exports without losing the shared defaults.
+ const defaultAppState=native.AppState;
  Object.assign(native,mocks['react-native']);
+ if(!native.AppState.addEventListener)native.AppState.addEventListener=defaultAppState.addEventListener;
  const cache={};
+ const resolvedMocks=Object.fromEntries(Object.entries(mocks).filter(([name])=>name.startsWith('.')).map(([name,value])=>[path.resolve(path.dirname(path.resolve(file)),name+'.js'),value]));
  const expoStubs={
    '@react-navigation/native': { useIsFocused: () => true },
    '@react-native-async-storage/async-storage': { getItem: async () => null, setItem: async () => undefined, removeItem: async () => undefined },
@@ -36,12 +40,13 @@ function loadUI(file,mocks={}) {
    'expo-font': { useFonts: () => [true], loadAsync: async () => true },
    'expo-secure-store': { getItemAsync: async () => null, setItemAsync: async () => undefined, deleteItemAsync: async () => undefined },
    'expo-status-bar': { StatusBar: () => null },
+   'expo-splash-screen': {preventAutoHideAsync:async()=>true,hideAsync:async()=>{}},
    'expo-web-browser': { openBrowserAsync: async () => ({type: 'success'}), warmUpAsync: async () => undefined, coolDownAsync: async () => undefined },
  };
- function load(f){f=path.resolve(f);if(cache[f])return cache[f].exports;
+ function load(f){f=path.resolve(f);if(/\.(png|jpg|jpeg|webp)$/.test(f)){if(!fs.existsSync(f))throw Error('Missing image asset: '+f);return f;}if(cache[f])return cache[f].exports;
  const mod={exports:{}};cache[f]=mod;
  const {code}=babel.transformSync(fs.readFileSync(f,'utf8'),{configFile:false,babelrc:false,plugins:[[require.resolve('@babel/plugin-transform-react-jsx'),{runtime:'automatic'}],require.resolve('@babel/plugin-transform-modules-commonjs')]});
- new Function('require','module','exports',code)(name=>{if(name==='react-native')return native;if(Object.hasOwn(mocks,name))return mocks[name];const matched=Object.keys(expoStubs).find(prefix=>name===prefix||name.startsWith(prefix+'/'));if(matched)return expoStubs[matched];if(name==='@expo/vector-icons')return {Ionicons:'Icon',MaterialCommunityIcons:'Icon'};if(name==='react-native-safe-area-context')return {SafeAreaView:'SafeAreaView'};if(name.startsWith('.'))return load(path.resolve(path.dirname(f),name+'.js'));return require(name);},mod,mod.exports);return mod.exports;}
+ new Function('require','module','exports',code)(name=>{if(name==='react-native')return native;if(Object.hasOwn(mocks,name))return mocks[name];const matched=Object.keys(expoStubs).find(prefix=>name===prefix||name.startsWith(prefix+'/'));if(matched)return expoStubs[matched];if(name==='@expo/vector-icons')return {Ionicons:'Icon',MaterialCommunityIcons:'Icon'};if(name==='react-native-safe-area-context')return {SafeAreaView:'SafeAreaView'};if(name.startsWith('.')&&Object.hasOwn(resolvedMocks,path.resolve(path.dirname(f),name+'.js')))return resolvedMocks[path.resolve(path.dirname(f),name+'.js')];if(name.startsWith('.'))return load(path.resolve(path.dirname(f),/\.(png|jpg|jpeg|webp)$/.test(name)?name:name+'.js'));return require(name);},mod,mod.exports);return mod.exports;}
  return load(file);
 }
 module.exports={loadUI};
