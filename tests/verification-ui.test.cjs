@@ -177,5 +177,5 @@ test('navigation refuses unverified user objects for every role and opens the gu
    initialRoutes.push(tree.root.findByType('StackNavigator').props.initialRouteName);
   }finally{await act(async()=>tree.unmount());}
  }
- assert.deepEqual(initialRoutes,['Splash','Splash','Splash']);
+ assert.deepEqual(initialRoutes,['SignIn','SignIn','SignIn']);
 });

@@ -61,3 +61,6 @@ backend/.env
 .claude/
 .emulators/
 .local-checks/
+
+# Local Netlify folder
+.netlify

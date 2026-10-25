@@ -194,3 +194,52 @@ test('expected AI failures remain handled errors without severe console errors o
  const s=setup(async url=>url.endsWith('/health')?{ok:true,json:async()=>({ok:true})}:{ok:false,status:500,json:async()=>({error:{code:'internal'}})});
  await assert.rejects(()=>s.apiRequest('ai/assist',{}));assert.equal(s.errors.length,1);
 });
+
+test('concurrent health failures coalesce and a short cooldown bounds polling without replaying API calls',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout'],now:1800000000000});
+ let fail=true,release;
+ const s=setup(async url=>{
+  if(url.endsWith('/health')){if(fail){await new Promise(r=>{release=r;});throw new TypeError('Failed to fetch');}return {ok:true,json:async()=>({ok:true})};}
+  return {ok:true,json:async()=>({data:{ready:true}})};
+ },{dev:true});
+ const first=assert.rejects(s.apiRequest('admin',{}),{code:'api/network-request-failed'});
+ const second=assert.rejects(s.apiRequest('session',{}),{code:'api/network-request-failed'});
+ for(let i=0;i<20;i++)await Promise.resolve();assert.equal(s.calls.length,1);
+ release();await Promise.all([first,second]);
+ for(let i=0;i<10;i++)await assert.rejects(()=>s.apiRequest('admin',{}),{connectionStage:'health'});
+ assert.equal(s.calls.length,1);assert.equal(s.warnings.length,1);
+ fail=false;t.mock.timers.tick(5000);
+ assert.deepEqual(await s.apiRequest('admin',{}),{ready:true});
+ assert.equal(s.calls.length,3);assert.equal(s.calls[2].options.headers.Authorization,'Bearer firebase-token');
+ await s.apiRequest('admin',{});assert.equal(s.calls.length,4,'successful health is reused for sixty seconds');
+});
+
+test('repeated health failures remain recoverable while duplicate development warnings are rate limited',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout'],now:1800000000000});
+ const s=setup(async()=>{throw new TypeError('Failed to fetch');},{dev:true});
+ for(let i=0;i<6;i++){await assert.rejects(()=>s.apiRequest('admin',{}));t.mock.timers.tick(5000);}
+ assert.equal(s.calls.length,6);assert.equal(s.warnings.length,1);
+ await assert.rejects(()=>s.apiRequest('admin',{}));assert.equal(s.calls.length,7);assert.equal(s.warnings.length,2);
+});
+
+test('opaque browser CORS failures and other network failures share safe classification, without claiming a known cause',async()=>{
+ for(const failure of [new TypeError('Failed to fetch'),new Error('A private DNS or TLS failure')]){
+  const s=setup(async()=>{throw failure;},{dev:true,base:'https://pimp-my-ride.onrender.com'});
+  await assert.rejects(()=>s.apiRequest('admin',{}),e=>{
+   assert.equal(e.code,'api/network-request-failed');assert.equal(e.connectionStage,'health');
+   assert.equal(e.message.includes('CORS'),false);assert.equal(e.message.includes('private'),false);return true;
+  });
+  assert.equal(s.calls[0].options.mode,undefined,'never bypass CORS with no-cors mode');
+  assert.equal(s.calls[0].options.headers,undefined);assert.equal(s.calls.length,1);
+ }
+});
+
+test('readable unhealthy and malformed health responses never send credentials and can recover after the cooldown',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout'],now:1800000000000});
+ for(const bad of [{ok:false,status:503,text:async()=>'{"ok":false}'},{ok:true,text:async()=>'<html>Starting</html>'},{ok:true,text:async()=>'{"ok":false}'}]){
+  let response=bad;const s=setup(async url=>url.endsWith('/health')?response:{ok:true,json:async()=>({data:{ok:true}})});
+  await assert.rejects(()=>s.apiRequest('admin',{}));await assert.rejects(()=>s.apiRequest('admin',{}));assert.equal(s.calls.length,1);
+  response={ok:true,json:async()=>({ok:true})};t.mock.timers.tick(5000);
+  assert.deepEqual(await s.apiRequest('admin',{}),{ok:true});assert.equal(s.calls.length,3);
+ }
+});

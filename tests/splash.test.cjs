@@ -46,10 +46,12 @@ test('unmount cancels startup timers, animations and accessibility subscriptions
  const s=await startup(t);await s.close();await act(async()=>t.mock.timers.tick(20000));
  assert.equal(s.calls.dismiss,0);assert.equal(s.calls.removed,1);assert.ok(s.calls.animations.every(a=>a.stopped));
 });
-test('compatibility Splash route immediately hands off to SignIn without a second animation or timer',async()=>{
- const Screen=loadUI('src/features/auth/screens/SplashScreen.js').default,moves=[];let tree;
- await act(async()=>{tree=create(React.createElement(Screen,{navigation:{replace:r=>moves.push(r)}}));});
- assert.deepEqual(moves,['SignIn']);assert.equal(tree.toJSON(),null);await act(async()=>tree.unmount());
+test('legacy Splash routes reuse SignIn without dispatching a replacement into a changed auth navigator',async()=>{
+ const SignIn=()=>null;
+ const Screen=loadUI('src/features/auth/screens/SplashScreen.js',{'./SignInScreen':SignIn}).default,moves=[];let tree;
+ assert.equal(Screen,SignIn);
+ await act(async()=>{tree=create(React.createElement(Screen,{navigation:{replace:r=>moves.push(r),getState:()=>({routeNames:['AdminHome']})},route:{params:{email:'saved@example.invalid'}}}));});
+ assert.deepEqual(moves,[]);assert.equal(tree.root.findByType(SignIn).props.route.params.email,'saved@example.invalid');await act(async()=>tree.unmount());
 });
 
 test('boot overlay hands off to existing role routes once, without resetting navigation state or replaying on auth changes',async()=>{
@@ -75,7 +77,7 @@ test('boot overlay hands off to existing role routes once, without resetting nav
    auth={...auth,initializing:false,user:role?{uid:'test',emailVerified:true}:null,profile:role?{role,verificationStatus:'approved',termsAccepted:true}:null};
    await act(async()=>tree.update(React.createElement(Navigator)));
    const route=tree.root.findByType('StackNavigator').props.initialRouteName;
-   assert.equal(route,role?{owner:'OwnerHome',shop:'ShopHome',admin:'AdminHome'}[role]:'Splash');
+   assert.equal(route,role?{owner:'OwnerHome',shop:'ShopHome',admin:'AdminHome'}[role]:'SignIn');
    const navigation=tree.root.findByType('NavigationContainer');
    // Overlay only observes readiness: no reset, replacement, or linking props.
    assert.deepEqual(Object.keys(navigation.props).sort(),['children','onReady']);
@@ -87,7 +89,7 @@ test('boot overlay hands off to existing role routes once, without resetting nav
    assert.equal(tree.root.findByType('NavigationContainer'),instance);
    auth={...auth,user:null,profile:null,working:false};await act(async()=>tree.update(React.createElement(Navigator)));
    assert.equal(tree.root.findAllByType('BootSplash').length,0);
-   assert.equal(tree.root.findByType('StackNavigator').props.initialRouteName,'Splash');
+   assert.equal(tree.root.findByType('StackNavigator').props.initialRouteName,'SignIn');
   }finally{await act(async()=>tree.unmount());}
  }
 });

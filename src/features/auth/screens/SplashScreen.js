@@ -1,6 +1,3 @@
-import React, {useEffect} from 'react';
-// Compatibility route for saved navigation state; startup animation lives above navigation.
-export default function SplashScreen({navigation}) {
-  useEffect(() => { navigation.replace('SignIn'); }, [navigation]);
-  return null;
-}
+// Keep legacy Splash routes usable without dispatching into an auth stack that
+// may already have changed. The animated startup splash lives above navigation.
+export {default} from './SignInScreen';

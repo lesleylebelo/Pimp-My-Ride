@@ -155,3 +155,23 @@ test('administrator text-profile editing preserves previously saved shop coordin
  await f.services.adminApi({auth:f.identity('admin'),data:{op:'editAccount',uid:'shop',fullName:'Updated name',phone:'0821234567',shop:{...text,address:'2 New Road'},requestId:'admin-text-edit'}});
  assert.deepEqual(f.db.rows.get('users/shop').shop.coordinates,coordinates);assert.equal(f.db.rows.get('users/shop').shop.address,'2 New Road');
 });
+
+test('explicit deployed CORS replaces defaults; adding exact Expo origins preserves Netlify and API authentication',async()=>{
+ const deployed='https://jocular-cupcake-480d95.netlify.app',local=['http://localhost:8081','http://127.0.0.1:8081'];
+ const make=origins=>createApp({allowedOrigins:corsOrigins(origins,true),auth:{verifyIdToken:async()=>{throw Error('No credentials in this test');}},services:{}});
+ const deployedOnly=make(deployed);
+ for(const origin of [deployed,...local]){
+  const health=await request(deployedOnly).get('/health').set('Origin',origin).expect(200);
+  assert.equal(health.headers['access-control-allow-origin'],origin===deployed?origin:undefined);
+ }
+ const combined=make([deployed,...local].join(','));
+ for(const origin of [deployed,...local]){
+  const health=await request(combined).get('/health').set('Origin',origin).expect(200);assert.equal(health.headers['access-control-allow-origin'],origin);
+  const preflight=await request(combined).options('/api/admin').set('Origin',origin).set('Access-Control-Request-Method','POST').set('Access-Control-Request-Headers','authorization,content-type').expect(204);
+  assert.equal(preflight.headers['access-control-allow-origin'],origin);
+  const denied=await request(combined).post('/api/admin').set('Origin',origin).send({op:'dashboard'}).expect(401);assert.equal(denied.headers['access-control-allow-origin'],origin);
+ }
+ for(const origin of ['http://localhost:8082','http://localhost:8081.evil.example','https://evil.example','null']){
+  const health=await request(combined).get('/health').set('Origin',origin).expect(200);assert.equal(health.headers['access-control-allow-origin'],undefined);
+ }
+});

@@ -93,3 +93,11 @@ test('unverified users cannot use an offline cache',async()=>{const s=await setu
 test('reconnection revalidates shop approval instead of trusting cached approval',async()=>{const s=await setup({role:'shop',cached:{profile:{role:'shop',verificationStatus:'approved'},savedAt:Date.now()}});await s.act(s.offline);assert.equal(s.state.profile.verificationStatus,'approved');s.profile({role:'shop',verificationStatus:'rejected'});await s.act(s.online);assert.equal(s.state.profile.verificationStatus,'rejected');assert.equal(s.state.offline,false);await s.close();});
 test('revoked session signs out and clears local cache',async()=>{const s=await setup();s.fail(Object.assign(new Error('revoked'),{code:'auth/user-token-expired'}));await s.act(s.resume);assert.equal(s.state.user,null);assert.ok(s.cleared.includes('u1'));await s.close();});
 test('shop approval changes refresh automatically through the profile listener',async()=>{const s=await setup({role:'shop'});await s.act(s.notify);s.profile({role:'shop',verificationStatus:'approved'});await s.act(s.notify);assert.equal(s.state.profile.verificationStatus,'approved');await s.close();});
+
+test('verified Admin restoration revalidates claims and a successful logout returns to an empty guest session',async()=>{
+ const s=await setup({role:'admin',admin:true});
+ assert.equal(s.state.user.uid,'u1');assert.equal(s.state.profile.role,'admin');assert.equal(s.state.initializing,false);
+ assert.ok(s.calls.tokens>0);assert.ok(s.calls.profile>0);
+ await s.act(()=>s.state.logout());assert.equal(s.state.user,null);assert.equal(s.state.profile,null);assert.equal(s.auth.currentUser,null);assert.ok(s.cleared.includes('u1'));
+ await s.act(s.resume);assert.equal(s.state.user,null);assert.equal(s.state.profile,null);await s.close();
+});
