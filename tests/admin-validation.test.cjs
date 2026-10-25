@@ -85,17 +85,18 @@ test('category live validation, failure retry and archive keep the draft until a
   '../services/adminApi':{adminError:e=>e.message,adminApi:async(op,input)=>{calls.push([op,input]);if(op==='categorySave'){await new Promise(r=>{release=r;});if(mode==='fail')throw Error('Retry later');}}},
  });
  const tree=await mount(CategoriesScreen);
+ await press(tree,'Add Category');
  await change(tree,'Name',' ');await change(tree,'Description','');
  assert.ok(says(tree,'Category name is required.'));assert.ok(says(tree,'Description is required.'));
  await press(tree,'Save category');assert.equal(calls.length,0);
  await change(tree,'Name','Draft service');await change(tree,'Description','Draft description');
- await press(tree,'Archive category');await press(tree,'Confirm');
+ await press(tree,'Cancel');await press(tree,'Archive category');await press(tree,'Confirm');await press(tree,'Resume category draft');
  assert.equal(field(tree,'Name').props.value,'Draft service');
  await act(async()=>{const submit=button(tree,'Save category').props.onPress;submit();submit();});
  assert.equal(calls.filter(([op])=>op==='categorySave').length,1);
  await act(async()=>release());assert.ok(says(tree,'Retry later'));assert.equal(field(tree,'Description').props.value,'Draft description');
  mode='success';await press(tree,'Save category');await act(async()=>release());
- assert.equal(field(tree,'Name').props.value,'');assert.equal(field(tree,'Description').props.value,'');
+ assert.equal(field(tree,'Name'),undefined);await press(tree,'Add Category');assert.equal(field(tree,'Name').props.value,'');assert.equal(field(tree,'Description').props.value,'');
  await act(async()=>tree.unmount());
 });
 
@@ -108,7 +109,7 @@ test('accounts append on scroll without duplicate cursors and reset for filters'
  assert.deepEqual(current.args,{filter:'all',cursor:null});assert.equal(button(tree,'Next page'),undefined);
  await scrollToBottom(tree);
  assert.equal(current.args.cursor,'a');assert.equal(button(tree,'Next page'),undefined);assert.ok(says(tree,'Demo'));
- await press(tree,'shop');
+ await press(tree,'Shop');
  assert.deepEqual(current.args,{filter:'shop',cursor:null});
  busy=true;await act(async()=>tree.update(React.createElement(AccountsScreen,{navigation,...props})));
  assert.equal(button(tree,'Next page'),undefined);
@@ -123,14 +124,16 @@ test('category lists append on scroll and search across loaded results while pre
   args=input;return {refresh:async()=>{},data:{items:[input.cursor?{id:'wheels',name:'Wheels',description:'Wheel service'}:{id:'paint',name:'Paint',description:'Paint service'}],cursor:input.cursor?null:'paint'}};
  }}});
  const tree=await mount(CategoriesScreen);
+ await press(tree,'Add Category');
  await change(tree,'Name','Draft');await change(tree,'Description','Unsubmitted details');
+ await press(tree,'Cancel');
  await change(tree,'Search categories by name or description','Wheels');
  assert.ok(says(tree,'No matching categories loaded yet.'));
  assert.equal(button(tree,'Next page'),undefined);await scrollToBottom(tree);assert.equal(args.cursor,'paint');assert.ok(says(tree,'Wheels'));
- assert.equal(field(tree,'Name').props.value,'Draft');assert.equal(button(tree,'Next page'),undefined);
+ await press(tree,'Resume category draft');assert.equal(field(tree,'Name').props.value,'Draft');assert.equal(button(tree,'Next page'),undefined);await press(tree,'Cancel');
  await change(tree,'Search categories by name or description','');
  assert.equal(args.cursor,'paint');
- assert.equal(field(tree,'Description').props.value,'Unsubmitted details');
+ await press(tree,'Resume category draft');assert.equal(field(tree,'Description').props.value,'Unsubmitted details');
  await act(async()=>tree.unmount());
 });
 
@@ -142,7 +145,7 @@ test('document requests use the same synchronous account action lock',async()=>{
   '../services/adminApi':{adminError:e=>e.message,adminApi:async(...args)=>{calls.push(args);await new Promise(r=>{release=r;});throw Error('Document unavailable');}},
  });
  const tree=await mount(AccountDetailScreen,{route:{params:{uid:'shop'}}});
- let pending;await act(async()=>{const view=button(tree,'View ownerId').props.onPress;pending=view();void view();});
+ let pending;await act(async()=>{const view=button(tree,'Owner ID').props.onPress;pending=view();void view();});
  assert.equal(calls.length,1);assert.deepEqual(calls[0],['document',{uid:'shop',kind:'ownerId'}]);
  await act(async()=>{release();await pending;});assert.ok(says(tree,'Document unavailable'));
  await act(async()=>tree.unmount());

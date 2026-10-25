@@ -1,6 +1,8 @@
 import {firebase,localDemo,prepareLocalDemo} from './firebase';
 import {requireConnection} from './network';
 let waking=null,lastReady=0;
+let lastHealthFailure=null,lastConnectionWarning=null;
+const HEALTH_FAILURE_COOLDOWN=5000,CONNECTION_WARNING_INTERVAL=30000;
 const listeners=new Set();
 export const onBackendWaiting=fn=>{listeners.add(fn);return()=>listeners.delete(fn);};
 function baseURL(){
@@ -17,7 +19,11 @@ function connectionError(url,stage,timedOut){
  if(__DEV__){
   let origin='invalid-address';try{origin=new URL(url).origin;}catch{}
   // Never print request URLs/queries, headers, bodies, local files or raw errors.
-  console.warn('[PimpMyRide connection]',{stage,origin,reason:timedOut?'timeout':'network'});
+  const reason=timedOut?'timeout':'network',key=`${origin}:${stage}:${reason}`,now=Date.now();
+  if(lastConnectionWarning?.key!==key||now-lastConnectionWarning.at>=CONNECTION_WARNING_INTERVAL){
+   lastConnectionWarning={key,at:now};
+   console.warn('[PimpMyRide connection]',{stage,origin,reason});
+  }
  }
  return error;
 }
@@ -41,9 +47,13 @@ async function fetchWithTimeout(url,options,ms,stage){
 async function ready(url){
  if(localDemo)await prepareLocalDemo();
  if(Date.now()-lastReady<60000)return;
+ // Share fast health failures between polling screens and foreground events.
+ // No timer retries requests: the next caller may probe again after five seconds.
+ if(lastHealthFailure?.url===url&&Date.now()<lastHealthFailure.retryAt)throw lastHealthFailure.error;
  if(!waking){waking=(async()=>{
   const timer=setTimeout(()=>listeners.forEach(fn=>fn(true)),4000);
-  try{const {response:r,responseBody}=await fetchWithTimeout(`${url}/health`,{},90000,'health');if(!r.ok)throw new Error('The backend is unavailable. Please try again shortly.');let body;try{body=JSON.parse(responseBody);}catch{throw new Error('The server is still starting. Please try again shortly.');}if(body.ok!==true)throw new Error('The backend is not ready.');lastReady=Date.now();}
+  try{const {response:r,responseBody}=await fetchWithTimeout(`${url}/health`,{},90000,'health');if(!r.ok)throw new Error('The backend is unavailable. Please try again shortly.');let body;try{body=JSON.parse(responseBody);}catch{throw new Error('The server is still starting. Please try again shortly.');}if(body.ok!==true)throw new Error('The backend is not ready.');lastReady=Date.now();lastHealthFailure=null;}
+  catch(error){lastHealthFailure={url,error,retryAt:Date.now()+HEALTH_FAILURE_COOLDOWN};throw error;}
   finally{clearTimeout(timer);listeners.forEach(fn=>fn(false));waking=null;}
  })();}
  await waking;

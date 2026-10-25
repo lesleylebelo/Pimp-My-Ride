@@ -12,7 +12,15 @@ test('format handling preserves grounding, non-AI runtime, dependencies, rules a
  const allowed=['backend/app.cjs','backend/messaging.cjs','backend/posts.cjs','backend/services.cjs','backend/storage.cjs','backend/ai-provider.cjs','backend/ai-assist.cjs','backend/ai-errors.cjs','backend/ai-release-control.cjs','backend/marketplace.cjs','backend/server.cjs','backend/mock-payment-gate.cjs','backend/quote-recommendations.cjs','backend/quote-recommendation-read.cjs'];
  const files=execFileSync('git',['ls-tree','-r','--name-only',BASE,'backend'],{cwd:root,encoding:'utf8',windowsHide:true}).trim().split('\n');
  for(const file of files.filter(file=>/^backend\/[^/]+\.cjs$/.test(file)&&!allowed.includes(file)))assert.equal(current(file),baseline(file),file);
- for(const file of ['backend/.env.example','backend/package-lock.json','firestore.rules','firestore.indexes.json','render.yaml','src/shared/services/api.js','src/features/marketplace/services/aiAssistApi.js','src/features/marketplace/services/pimpPilotPresentation.js','src/features/marketplace/components/AIAssistButton.js'])assert.equal(current(file),baseline(file),file);
+ for(const file of ['backend/.env.example','backend/package-lock.json','firestore.rules','firestore.indexes.json','render.yaml','src/features/marketplace/services/aiAssistApi.js','src/features/marketplace/services/pimpPilotPresentation.js','src/features/marketplace/components/AIAssistButton.js'])assert.equal(current(file),baseline(file),file);
+ // Local connection recovery now explicitly permits changes to health readiness
+ // and connection diagnostics, covered by tests/api.test.cjs. Keep configuration,
+ // fetch deadlines, authenticated operations and uploads byte-for-byte protected.
+ const apiFile='src/shared/services/api.js',previousAPI=baseline(apiFile),nextAPI=current(apiFile);
+ const section=(source,start,end)=>source.slice(source.indexOf(start),end?source.indexOf(end):undefined);
+ for(const [start,end] of [['function baseURL()','function connectionError('],['async function fetchWithTimeout(','async function ready('],['export async function apiRequest(']]){
+  assert.equal(section(nextAPI,start,end),section(previousAPI,start,end),`${apiFile}: ${start}`);
+ }
  const old=JSON.parse(baseline('backend/package.json')),next=JSON.parse(current('backend/package.json'));delete old.scripts.test;delete next.scripts.test;assert.deepEqual(next,old);
 });
 test('daily quota and storage guards differ only by content-free diagnostic fields',()=>{
