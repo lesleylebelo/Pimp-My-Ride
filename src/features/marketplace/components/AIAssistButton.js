@@ -1,6 +1,6 @@
 import {CustomerModal as Modal,CustomerPressable,useCustomerExperience} from '../../customer/components/CustomerUI';
 import React,{useEffect,useRef,useState} from 'react';
-import {KeyboardAvoidingView,Platform,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
+import {AppState,KeyboardAvoidingView,Platform,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Ionicons} from '@expo/vector-icons';
 import {useIsFocused} from '@react-navigation/native';
@@ -14,10 +14,12 @@ export default function AIAssistButton(props){const {user}=useAuth();return <Ass
 function AssistDraft({kind,title,description,categoryId='',disabled=false,onApply}){
  const {user,offline}=useAuth(),focused=useIsFocused(),{theme}=useTheme();
  const [visible,setVisible]=useState(false),[loading,setLoading]=useState(false),[error,setError]=useState(''),[suggestion,setSuggestion]=useState(null),[editing,setEditing]=useState(false),[useCategory,setUseCategory]=useState(false);
+ const [backgrounded,setBackgrounded]=useState(['background','inactive'].includes(AppState.currentState));
  const epoch=useRef(0),mounted=useRef(true),current=useRef(null),lock=useRef(false);
  const basis=JSON.stringify([user?.uid,kind,title,description,categoryId]);
- current.current={basis,uid:user?.uid,disabled:disabled||offline||!focused,onApply};
+ current.current={basis,uid:user?.uid,disabled:disabled||offline||!focused||backgrounded,onApply};
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;++epoch.current;};},[]);
+ useEffect(()=>{const listener=AppState.addEventListener('change',state=>{const hidden=['background','inactive'].includes(state);setBackgrounded(hidden);if(hidden){++epoch.current;setVisible(false);setSuggestion(null);}});return()=>listener.remove();},[]);
  useEffect(()=>{if(offline||!focused){++epoch.current;setVisible(false);setSuggestion(null);}},[offline,focused,user?.uid]);
  // Dismiss hides the preview; it cannot cancel an already dispatched provider
  // call. Keep its lock until settlement to prevent another costly submission.
@@ -35,7 +37,7 @@ function AssistDraft({kind,title,description,categoryId='',disabled=false,onAppl
   finally{if(mounted.current){lock.current=false;setLoading(false);}}
  }
  const customer=useCustomerExperience(),Interaction=customer?CustomerPressable:Pressable;
- const triggerDisabled=disabled||offline||!focused||loading||`${title}${description}`.trim().length<3;
+ const triggerDisabled=disabled||offline||!focused||backgrounded||loading||`${title}${description}`.trim().length<3;
  const stale=suggestion&&suggestion.basis!==basis;
  const valid=suggestion&&suggestion.title.trim()&&suggestion.title.length<=100&&suggestion.description.trim()&&suggestion.description.length<=(kind==='request'?300:2000);
  function apply(){if(!valid||stale||current.current.disabled||loading)return;current.current.onApply({title:suggestion.title.trim(),description:suggestion.description.trim(),category:useCategory?suggestion.category:null});dismiss();}
@@ -52,7 +54,7 @@ function AssistDraft({kind,title,description,categoryId='',disabled=false,onAppl
     <Text style={[styles.subtitle,{color:theme.textSecondary}]}>{pimpPilotCopy.subtitle}</Text>
    </View>
   </Interaction>
-  {visible&&!offline&&focused&&<Modal visible transparent animationType="fade" onRequestClose={dismiss}>
+  {visible&&!offline&&focused&&!backgrounded&&<Modal visible transparent animationType="fade" onRequestClose={dismiss}>
    <SafeAreaView style={styles.overlay}><KeyboardAvoidingView style={styles.fill} behavior={Platform.OS==='ios'?'padding':undefined}>
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scroll}>
      <View accessibilityViewIsModal style={[styles.card,{backgroundColor:theme.surfaceCard,borderColor:theme.border}]}>

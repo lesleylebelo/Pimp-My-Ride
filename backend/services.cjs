@@ -12,7 +12,7 @@ const {createPosts}=require('./posts.cjs');
 const {saveShopLocation}=require('./shop-location.cjs');
 const {createMessaging}=require('./messaging.cjs');
 const {createAIAssist}=require('./ai-assist.cjs');
-function createServices({db,auth,storage,photoStorage,profileStorage=photoStorage,requestStorage=photoStorage,postStorage=photoStorage,mockPaymentEnv=process.env,aiProvider,aiReleaseControl}){
+function createServices({db,auth,storage,photoStorage,profileStorage=photoStorage,requestStorage=photoStorage,postStorage=photoStorage,mockPaymentEnv=process.env,aiProvider,aiDiagnostic}){
 const reviews=createReviews({db,auth,storage});
 const stamp=()=>FieldValue.serverTimestamp();
 const audit=(actor,action,target,details={})=>({actor,action,target,details,createdAt:stamp()});
@@ -175,7 +175,7 @@ const {listDocuments,checkUpload,uploadDocument}=createDocuments({db,storage,act
 const marketplace=createMarketplace({db,auth,actor,mockPaymentEnv});
 const messaging=createMessaging({db,auth,actor});
 const profilePhotos=createProfilePhotos({db,auth,actor,storage:profileStorage,messaging,marketplace});
-const aiAssist=createAIAssist({db,actor,provider:aiProvider,releaseControl:aiReleaseControl});
+const aiAssist=createAIAssist({db,actor,provider:aiProvider,onDiagnostic:aiDiagnostic});
 const {photosApi,checkPhotoUpload,uploadPhoto}=createPhotos({db,auth,storage:photoStorage,requestStorage,actor});
 const {postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage}=createPosts({db,auth,actor,storage:postStorage});
 return {...profilePhotos,adminApi,sessionEvent,completeProfile,listDocuments,checkUpload,uploadDocument,marketplace,messaging,aiAssist,photosApi,checkPhotoUpload,uploadPhoto,postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage};

@@ -1,100 +1,71 @@
-const {test}=require('node:test'),assert=require('node:assert/strict');
-const {createAIReleaseControl,CONTROL_PATH,DAILY_PREFIX}=require('../ai-release-control.cjs');
-const {createAIAssist}=require('../ai-assist.cjs');
-const {createAIProvider}=require('../ai-provider.cjs');
-const {store}=require('./helpers/ai-store.cjs');
-const env={PMR_AI_TEST_UIDS:'tester-a,tester-b'};
+﻿const {test}=require('node:test'),assert=require('node:assert/strict');
+const {createAIAssist,MAX_CONCURRENT}=require('../ai-assist.cjs');
+const {failure}=require('../ai-errors.cjs');
 const input={kind:'showcase',title:'Black wrap',description:'Wrap doors in black.',categoryId:'Wrap & Paint'};
-const output={title:'Black wrap',description:'Wrap doors in black.',categoryId:'Wrap & Paint',missingDetails:[]};
-const identity=uid=>({auth:{uid},data:input});
-function assist(db,provider,options={}){
- return createAIAssist({db,provider,releaseControl:createAIReleaseControl({db,env}),actor:async request=>({uid:request.auth.uid,profile:{role:'shop',accountStatus:'active',verificationStatus:'approved'}}),...options});
+const output={title:input.title,description:input.description,categoryId:input.categoryId,missingDetails:[]};
+function setup(provider,options={}){
+ const diagnostics=[];
+ // Any old counter access or new accounting write is a regression.
+ const db={doc:()=>assert.fail('Showcase generation must not access accounting'),collection:()=>assert.fail('No historical quota queries'),runTransaction:()=>assert.fail('No quota transaction')};
+ const actor=async request=>({uid:request.auth.uid,profile:{role:'shop',accountStatus:'active',verificationStatus:'approved'}});
+ const run=createAIAssist({db,actor,provider:provider||{enabled:true,suggest:async()=>output},onDiagnostic:value=>diagnostics.push(value),...options});
+ return {run,diagnostics,request:(uid='new-eligible-user',data=input)=>({auth:{uid},data})};
 }
-test('allowlist is explicit, supports multiple testers and fails closed without storage or dispatch',async()=>{
- const db=store();for(const config of [{},{PMR_AI_TEST_UIDS:''},{PMR_AI_TEST_UIDS:'bad uid'},{PMR_AI_TEST_UIDS:'a,'}])assert.throws(()=>createAIReleaseControl({db,env:config}).authorize('tester-a'),{reason:'configuration'});
- const control=createAIReleaseControl({db,env});control.authorize('tester-a');control.authorize('tester-b');
- await assert.rejects(()=>assist(db,{enabled:true,suggest:async()=>assert.fail('not authorised')})(identity('other')),{code:'permission-denied'});assert.equal(db.attempts().length,0);
-});
-test('five global reservations survive concurrent instances/restarts and UTC midnight selects a new day',async()=>{
- const db=store();let clock=Date.parse('2026-10-22T23:59:59Z');
- const reserve=()=>createAIReleaseControl({db,env,now:()=>clock}).reserve();
- const results=await Promise.allSettled(Array.from({length:20},reserve));
- assert.equal(results.filter(r=>r.status==='fulfilled').length,5);assert.equal(results.filter(r=>r.reason?.code==='resource-exhausted').length,15);
- await assert.rejects(reserve,{code:'resource-exhausted'});assert.equal(db.attempts().length,5);
- assert.deepEqual(db.rows.get(CONTROL_PATH),{version:1,attempts:1});
- clock=Date.parse('2026-10-23T00:00:00Z');await reserve();assert.equal(db.attempts().length,6);
- assert.equal(db.rows.get(DAILY_PREFIX+'/2026-10-22').attempts,5);assert.equal(db.rows.get(DAILY_PREFIX+'/2026-10-23').attempts,1);
- assert.ok(db.attempts().every(row=>row.state==='unknown'&&row.dispatchInitiatedAt===null));
-});
-test('sixth request is rejected before provider dispatch; failed and timed-out requests still count',async()=>{
- for(const timeout of [false,true]){
-  const db=store();let calls=0;
-  const provider={enabled:true,suggest:async()=>{calls++;if(timeout)return new Promise(()=>{});throw Error('private provider detail');}};
-  for(let i=0;i<5;i++)await assert.rejects(()=>assist(db,provider,{timeoutMs:5})(identity(i%2?'tester-a':'tester-b')),{code:'unavailable'});
-  await assert.rejects(()=>assist(db,provider)(identity('tester-a')),{code:'resource-exhausted'});
-  assert.equal(calls,5);assert.equal(db.attempts().length,5);assert.ok(db.attempts().every(row=>row.state==='failed'&&row.dispatchInitiatedAt&&row.outputValidated===false));
-  if(timeout)assert.ok(db.attempts().every(row=>row.reasonCode==='provider_timeout'));
- }
-});
-test('storage failures and uncertain commits fail closed, with no dispatch or refund',async()=>{
- for(const mode of ['fail','uncertain','failUpdates']){
-  const db=store();db[mode]=true;
-  await assert.rejects(()=>assist(db,{enabled:true,suggest:async()=>assert.fail('must not dispatch')})(identity('tester-a')),{code:'unavailable'});
-  assert.equal(db.attempts().length,mode==='fail'?0:1);
-  assert.ok(db.attempts().every(row=>row.state==='unknown'));
- }
- const db=store(),day=new Date().toISOString().slice(0,10);db.rows.set(DAILY_PREFIX+'/'+day,{version:1,day,attempts:-1});
- await assert.rejects(()=>createAIReleaseControl({db,env}).reserve(),{reason:'quota_storage'});
-});
-test('content-free diagnostics distinguish provider HTTP, parsing, grounding and completion',async()=>{
- const config={PMR_AI_ASSIST_ENABLED:'true',PMR_AI_PROVIDER:'gemini',PMR_AI_MODEL:'gemini-3.5-flash-lite',GEMINI_API_KEY:'secret-never-persist'};
- const response=value=>JSON.stringify({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:JSON.stringify(value),thoughtSignature:'synthetic-opaque-signature'}]}}]});
- for(const [status,body,reason] of [[400,JSON.stringify({error:{status:'INVALID_ARGUMENT',message:'secret-never-persist',details:[{reason:'API_KEY_INVALID'}]}}),'provider_auth'],[401,'private','provider_auth'],[403,'private','provider_auth'],[404,'private','model_unavailable'],[429,'private','provider_quota'],[500,'private','provider_http'],[200,'not JSON','malformed_output'],[200,response({...output,description:'Invented turbo gains.'}),'grounding_rejected'],[200,response(output),null]]){
-  const db=store(),provider=createAIProvider({env:config,fetcher:async()=>({status,ok:status===200,text:async()=>body})});
-  const run=()=>assist(db,provider)(identity('tester-a'));
-  if(reason)await assert.rejects(run,{reason});else assert.equal((await run()).title,output.title);
-  const row=db.attempts()[0];assert.equal(row.reasonCode,reason);assert.equal(row.providerHttpStatus,status);assert.ok(row.responseReceivedAt);assert.ok(row.dispatchInitiatedAt);assert.equal(row.state,reason?'failed':'successful');assert.equal(row.outputValidated,!reason);
-  assert.match(row.correlationId,/^[a-f0-9-]{36}$/);const serial=JSON.stringify(row);for(const privateValue of ['secret-never-persist','Black wrap','tester-a','private','turbo','synthetic-opaque-signature'])assert.ok(!serial.includes(privateValue));
- }
-});
-test('completion storage failure never returns output, and crashes remain unknown',async()=>{
- const db=store();
- await assert.rejects(()=>assist(db,{enabled:true,suggest:async()=>{db.failUpdates=true;return output;}})(identity('tester-a')),{reason:'diagnostic_storage'});
- assert.equal(db.attempts()[0].state,'unknown');
- const other=store(),attempt=await createAIReleaseControl({db:other,env}).reserve();await attempt.dispatch();assert.equal(other.attempts()[0].state,'unknown');
+
+test('first, second, sixth, tenth and later generations never depend on allowance or tester configuration',async()=>{
+ const previous=Object.fromEntries(['PMR_AI_TEST_UIDS','PMR_AI_TEST_UID'].map(key=>[key,process.env[key]]));
+ try{
+  for(const config of [undefined,'','someone-else','bad uid,']){
+   if(config===undefined)delete process.env.PMR_AI_TEST_UIDS;else process.env.PMR_AI_TEST_UIDS=config;
+   process.env.PMR_AI_TEST_UID='another-uid';let clock=Date.parse('2042-01-01T23:59:59Z');
+   const f=setup(undefined,{now:()=>clock});
+   for(let i=1;i<=30;i++){if(i===11)clock+=86400000;assert.equal((await f.run(f.request(i%2?'eligible-a':'eligible-b'))).title,output.title);}
+   assert.equal(f.diagnostics.length,30);assert.ok(f.diagnostics.every(value=>value.state==='successful'));
+  }
+ }finally{for(const [key,value] of Object.entries(previous))if(value===undefined)delete process.env[key];else process.env[key]=value;}
 });
 
-test('a reservation crossing UTC midnight cannot dispatch using the previous day allowance',async()=>{
- const db=store();let clock=Date.parse('2026-10-22T23:59:59Z');
- const control=createAIReleaseControl({db,env,now:()=>clock}),attempt=await control.reserve();
- clock=Date.parse('2026-10-23T00:00:00Z');await assert.rejects(()=>attempt.dispatch(),{reason:'reservation_expired'});
- assert.equal(db.attempts()[0].dispatchInitiatedAt,null);assert.equal(db.attempts()[0].state,'unknown');assert.equal(db.rows.get(DAILY_PREFIX+'/2026-10-22').attempts,1);
+test('concurrency is bounded only while work is pending and every slot recovers on completion',async()=>{
+ const resolve=[];let calls=0;
+ const f=setup({enabled:true,suggest:()=>{calls++;return new Promise(done=>resolve.push(done));}});
+ const active=Array.from({length:MAX_CONCURRENT},(_,i)=>f.run(f.request('user-'+i)));
+ while(resolve.length<MAX_CONCURRENT)await new Promise(done=>setImmediate(done));
+ await assert.rejects(()=>f.run(f.request('user-extra')),{fields:{aiReason:'busy'}});
+ await assert.rejects(()=>f.run(f.request('user-0')),{fields:{aiReason:'busy'}});assert.equal(calls,4);
+ for(const done of resolve)done(output);await Promise.all(active);
+ const next=f.run(f.request('user-extra'));while(resolve.length<5)await new Promise(done=>setImmediate(done));resolve[4](output);await next;
+ assert.equal(calls,5);
 });
 
-test('first and second generations succeed for new testers; exhaustion reports verified UTC reset, not personal credits',async()=>{
- const db=store();let clock=Date.parse('2041-02-03T21:59:00Z'),calls=0;
- const control=createAIReleaseControl({db,env,now:()=>clock});
- const run=assist(db,{enabled:true,suggest:async()=>{calls++;return output;}},{releaseControl:control,now:()=>clock});
- assert.equal((await run(identity('tester-a'))).title,output.title);
- assert.equal((await run(identity('tester-a'))).title,output.title);assert.equal(calls,2);
- assert.equal(db.rows.get(DAILY_PREFIX+'/2041-02-03').attempts,2);
- for(let i=0;i<3;i++){clock+=60001;await run(identity('tester-b'));}
- // New instance bypasses no durable quota, even when its per-process counters are empty.
- await assert.rejects(()=>assist(db,{enabled:true,suggest:async()=>assert.fail('no sixth dispatch')},{releaseControl:control})(identity('tester-a')),
-  {code:'resource-exhausted',fields:{aiReason:'daily_allowance',resetAt:Date.parse('2041-02-04T00:00:00Z')}});
- clock=Date.parse('2041-02-04T00:00:00Z');await run(identity('tester-a'));assert.equal(calls,6);
- assert.equal(db.rows.get(DAILY_PREFIX+'/2041-02-03').attempts,5);assert.equal(db.rows.get(DAILY_PREFIX+'/2041-02-04').attempts,1);
+test('matching in-flight identity and draft coalesce once; conflict, cross-account and subsequent generation remain isolated',async()=>{
+ const resolve=[];let calls=0;
+ const f=setup({enabled:true,suggest:()=>{calls++;return new Promise(done=>resolve.push(done));}});
+ const data={...input,requestId:'ai_shared_123456'},first=f.run(f.request('a',data));
+ while(!resolve.length)await new Promise(done=>setImmediate(done));
+ const duplicate=f.run(f.request('a',data));
+ await assert.rejects(()=>f.run(f.request('a',{...data,title:'Different draft'})),{code:'already-exists',fields:{aiReason:'request_conflict'}});
+ const other=f.run(f.request('b',data));while(resolve.length<2)await new Promise(done=>setImmediate(done));assert.equal(calls,2);
+ resolve[0](output);resolve[1](output);await Promise.all([first,duplicate,other]);
+ const again=f.run(f.request('a',data));while(resolve.length<3)await new Promise(done=>setImmediate(done));resolve[2](output);await again;assert.equal(calls,3);
 });
 
-test('a pending duplicate is rejected before reservation and no automatic provider retry occurs',async()=>{
- const db=store();let resolve,calls=0;
- const run=assist(db,{enabled:true,suggest:()=>{calls++;return new Promise(done=>{resolve=done;});}});
- const first=run(identity('tester-a'));while(!resolve)await new Promise(done=>setImmediate(done));
- await assert.rejects(()=>run(identity('tester-a')),{fields:{aiReason:'busy'}});
- assert.equal(calls,1);assert.equal(db.attempts().length,1);
- // Client dismissal cannot undo an already dispatched attempt; completion still counts.
- resolve(output);await first;assert.equal(db.attempts()[0].state,'successful');
- const other=store();let failures=0;
- await assert.rejects(()=>assist(other,{enabled:true,suggest:async()=>{failures++;throw require('../ai-errors.cjs').failure('provider_network');}})(identity('tester-a')),{fields:{aiReason:'provider_network'}});
- assert.equal(failures,1);assert.equal(other.attempts().length,1);
+test('failure, timeout and dismissed clients do not consume future generation access; no provider retry',async()=>{
+ for(const reason of ['provider_network','provider_quota','provider_billing','provider_http']){
+  let calls=0;const f=setup({enabled:true,suggest:async()=>{if(++calls===1)throw failure(reason);return output;}});
+  await assert.rejects(()=>f.run(f.request()),{reason});assert.equal((await f.run(f.request())).title,output.title);assert.equal(calls,2);
+ }
+ let calls=0,signal;const f=setup({enabled:true,suggest:async(_,options)=>{signal=options.signal;if(++calls===1)return new Promise(()=>{});return output;}},{timeoutMs:5});
+ await assert.rejects(()=>f.run(f.request()),{reason:'provider_timeout'});assert.equal(signal.aborted,true);
+ assert.equal((await f.run(f.request())).title,output.title);assert.equal(calls,2);
+});
+
+test('telemetry is content-free, best effort, and never a generation gate',async()=>{
+ const f=setup();await f.run(f.request());const row=f.diagnostics[0];assert.match(row.correlationId,/^[a-f0-9-]{36}$/);
+ for(const privateValue of ['new-eligible-user','Wrap doors','Black wrap','Wrap & Paint'])assert.ok(!JSON.stringify(row).includes(privateValue));
+ const broken=setup(undefined,{onDiagnostic:()=>{throw Error('logging unavailable');}});for(let i=0;i<12;i++)await broken.run(broken.request());
+});
+
+test('historical module exports paths only and cannot authorise, reserve or restore quotas',()=>{
+ const legacy=require('../ai-release-control.cjs');assert.deepEqual(Object.keys(legacy).sort(),['ATTEMPT_PREFIX','CONTROL_PATH','DAILY_PREFIX']);
+ assert.equal(legacy.createAIReleaseControl,undefined);assert.equal(legacy.DAILY_LIMIT,undefined);
 });

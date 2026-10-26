@@ -6,9 +6,7 @@ const input={kind:'request',title:'Black wrap',description:'Wrap doors in black.
 const output={title:'Black wrap request',description:'I would like black wrap for the doors.',categoryId:'paint',missingDetails:['What details would you like to provide?']};
 const geminiEnv={PMR_AI_ASSIST_ENABLED:'true',PMR_AI_PROVIDER:'gemini',PMR_AI_MODEL:'gemini-3.5-flash-lite',GEMINI_API_KEY:'synthetic-server-key'};
 const geminiResponse=(value,signature=false)=>({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:JSON.stringify(value),...(signature?{thoughtSignature:'synthetic-opaque-signature'}:{})}]}}]});
-// Only deterministic tests bypass the separately tested durable release control.
-const testReleaseControl={authorize(){},async reserve(){}};
-function fixture(provider,releaseControl=testReleaseControl){
+function fixture(provider){
  const rows={
   'users/owner':{role:'owner',accountStatus:'active'},'users/other':{role:'owner',accountStatus:'active'},
   'users/shop':{role:'shop',accountStatus:'active',verificationStatus:'approved'},'users/admin':{role:'admin',accountStatus:'active'},
@@ -20,7 +18,7 @@ function fixture(provider,releaseControl=testReleaseControl){
  }};
  const users={},auth={getUser:async uid=>users[uid]||{emailVerified:true,disabled:false,metadata:{creationTime:'2020-01-01'},tokensValidAfterTime:'2020-01-01'},verifyIdToken:async token=>{if(token==='revoked')throw Error('Revoked');return {uid:token,email_verified:true,auth_time:Date.now()/1000};}};
  const adapter=provider||{enabled:true,suggest:async draft=>{calls.push(draft);return {...output,categoryId:draft.kind==='request'?'paint':'Wrap & Paint'};}};
- const services=createServices({db,auth,storage:{},aiProvider:adapter,aiReleaseControl:releaseControl});
+ const services=createServices({db,auth,storage:{},aiProvider:adapter,aiDiagnostic:()=>{}});
  const request=(uid='owner',data=input)=>({auth:{uid,token:{email_verified:true,auth_time:Date.now()/1000}},data});
  const call=(uid='owner',data=input)=>services.aiAssist(request(uid,data));
  return {rows,users,calls,db,auth,adapter,services,request,call,app:createApp({services,auth})};
@@ -32,7 +30,7 @@ test('customer and approved shop receive structured suggestions from authoritati
  const shop=await f.call('shop',{...input,kind:'showcase',categoryId:'Wrap & Paint'});assert.equal(shop.category.id,'Wrap & Paint');
  assert.equal(f.calls[0].limits.description,300);assert.equal(f.calls[1].limits.description,2000);
  assert.deepEqual(f.calls[0].categories,[{id:'paint',name:'Wrap & Paint'}]);assert.equal(JSON.stringify(f.rows),before);
- assert.deepEqual(Object.keys(f.calls[0]).sort(),['categories','categoryId','description','editorialWords','kind','limits','title']);
+ assert.deepEqual(Object.keys(f.calls[0]).sort(),['categories','categoryId','description','editorialWords','kind','limits','questionWords','title']);
 });
 
 test('AI HTTP uses existing verified authentication, rejects wrong roles and never publishes or writes media',async()=>{
@@ -77,18 +75,14 @@ test('provider errors are sanitised and a stalled provider is aborted at the dea
  const failing=fixture({enabled:true,suggest:async()=>{throw new ApiError('permission-denied','secret provider content');}});
  await assert.rejects(()=>failing.call(),error=>error.code==='unavailable'&&!error.message.includes('secret'));
  const f=fixture();let signal;
- const assist=createAIAssist({db:f.db,actor:async()=>({uid:'owner',profile:f.rows['users/owner']}),releaseControl:testReleaseControl,provider:{enabled:true,suggest:async(_,options)=>{signal=options.signal;return new Promise(()=>{});}},timeoutMs:5});
+ const assist=createAIAssist({db:f.db,actor:async()=>({uid:'owner',profile:f.rows['users/owner']}),provider:{enabled:true,suggest:async(_,options)=>{signal=options.signal;return new Promise(()=>{});}},timeoutMs:5});
  await assert.rejects(()=>assist(f.request()),{code:'unavailable'});assert.equal(signal.aborted,true);
 });
 
-test('usage limits apply per verified user, including regenerate, and reset by minute and hour',async()=>{
- const f=fixture();let clock=1800000000000;
- const assist=createAIAssist({db:f.db,actor:async request=>({uid:request.auth.uid,profile:f.rows['users/'+request.auth.uid]}),releaseControl:testReleaseControl,provider:f.adapter,now:()=>clock});
- for(let index=0;index<3;index++)await assist(f.request());await assert.rejects(()=>assist(f.request()),{code:'resource-exhausted'});
- await assist(f.request('other'));
- for(let index=0;index<7;index++){clock+=60000;await assist(f.request());}
- clock+=60000;await assert.rejects(()=>assist(f.request()),{code:'resource-exhausted'});
- clock+=3600000;await assist(f.request());
+test('eligible users can generate repeatedly without minute/hour/day generation counters',async()=>{
+ const f=fixture(),before=JSON.stringify(f.rows);
+ for(let index=0;index<25;index++)assert.equal((await f.call(index%2?'owner':'other')).title,output.title);
+ assert.equal(f.calls.length,25);assert.equal(JSON.stringify(f.rows),before);
 });
 
 test('concurrent requests for one user are rejected and access/category changes are rechecked',async()=>{
@@ -160,22 +154,17 @@ test('Gemini output still passes existing category/grounding validation and dead
   await assert.rejects(()=>fixture(adapter).call(),{code:'unavailable'});
  }
  let signal;const provider=createAIProvider({env:geminiEnv,fetcher:async(_,options)=>{signal=options.signal;return {ok:true,text:()=>new Promise(()=>{})};}});
- const f=fixture(provider),assist=createAIAssist({db:f.db,actor:async()=>({uid:'owner',profile:f.rows['users/owner']}),releaseControl:testReleaseControl,provider,timeoutMs:5});
+ const f=fixture(provider),assist=createAIAssist({db:f.db,actor:async()=>({uid:'owner',profile:f.rows['users/owner']}),provider,timeoutMs:5});
  await assert.rejects(()=>assist(f.request()),{code:'unavailable'});assert.equal(signal.aborted,true);
 });
 
-test('authenticated AI route restricts the initial release UID and enforces the durable allowance',async()=>{
- const {createAIReleaseControl}=require('../ai-release-control.cjs');const {store}=require('./helpers/ai-store.cjs');const db=store();let calls=0;
- const control=createAIReleaseControl({env:{PMR_AI_TEST_UID:'owner'},db});
- const provider=createAIProvider({env:geminiEnv,fetcher:async()=>{calls++;return {ok:true,text:async()=>JSON.stringify(geminiResponse(output))};}});
- const f=fixture(provider,control),before=JSON.stringify(f.rows);
- await http(f.app).post('/api/ai/assist').set('Authorization','Bearer other').send(input).expect(403);
- await http(f.app).post('/api/ai/assist').set('Authorization','Bearer shop').send({...input,kind:'showcase',categoryId:'Wrap & Paint'}).expect(403);
- assert.equal(calls,0);assert.equal(db.attempts().length,0);
- await http(f.app).post('/api/ai/assist').set('Authorization','Bearer owner').send(input).expect(200);
- for(let i=0;i<4;i++)await control.reserve();
- await http(f.app).post('/api/ai/assist').set('Authorization','Bearer owner').send(input).expect(429);
- assert.equal(calls,1);assert.equal(db.attempts().length,5);assert.equal(JSON.stringify(f.rows),before);
+test('authenticated AI HTTP allows unlisted Customers and approved Workshops to generate ten times each',async()=>{
+ const f=fixture(),before=JSON.stringify(f.rows);
+ for(const uid of ['owner','other','shop'])for(let i=0;i<10;i++){
+  const data=uid==='shop'?{...input,kind:'showcase',categoryId:'Wrap & Paint'}:input;
+  await http(f.app).post('/api/ai/assist').set('Authorization','Bearer '+uid).send(data).expect(200);
+ }
+ assert.equal(f.calls.length,30);assert.equal(JSON.stringify(f.rows),before);
 });
 
 test('both explicit Gemini models retain the same schema and bounds without model/provider fallback',async()=>{
@@ -274,18 +263,14 @@ test('required fields, nulls, types, bounds and question format remain strict wi
  assert.throws(()=>validateSuggestion({...output,description:'Invented turbo gains.'},draft),{reason:'grounding_rejected',outputStage:null,outputRule:null});
 });
 
-test('format subcodes are allowlisted and persisted without private response content',async()=>{
- const {failure}=require('../ai-errors.cjs'),{store}=require('./helpers/ai-store.cjs'),{createAIReleaseControl}=require('../ai-release-control.cjs');
+test('format subcodes remain allowlisted and are returned without private provider content',async()=>{
+ const {failure}=require('../ai-errors.cjs');
  const forged=failure('malformed_output',{outputStage:'private content',outputRule:'private content'});assert.equal(forged.outputStage,null);assert.equal(forged.outputRule,null);
- const db=store(),control=createAIReleaseControl({db,env:{PMR_AI_TEST_UID:'owner'}});
  const provider=createAIProvider({env:geminiEnv,fetcher:async()=>({status:200,ok:true,text:async()=>JSON.stringify(geminiResponse({...output,title:null}))})});
- await assert.rejects(()=>fixture(provider,control).call(),{outputStage:'suggestion',outputRule:'title_type'});
- const row=db.attempts()[0];assert.equal(row.outputStage,'suggestion');assert.equal(row.outputRule,'title_type');assert.equal(row.providerHttpStatus,200);assert.equal(row.state,'failed');assert.equal(row.outputValidated,false);
- assert.match(row.correlationId,/^[a-f0-9-]{36}$/);assert.ok(!JSON.stringify(row).includes(output.description));assert.ok(!JSON.stringify(row).includes(geminiEnv.GEMINI_API_KEY));
- assert.equal(db.rows.get('aiAssistDaily/'+row.day).attempts,1);
+ await assert.rejects(()=>fixture(provider).call(),error=>error.outputStage==='suggestion'&&error.outputRule==='title_type'&&!JSON.stringify(error).includes(output.description));
 });
 
-test('authorisation classifications distinguish live account state, draft type and test allowlist',async()=>{
+test('authorisation classifications distinguish live account state and draft type',async()=>{
  for(const [uid,changes,reason] of [
   ['shop',{verificationStatus:'pending'},'account_eligibility'],['shop',{verificationStatus:'rejected'},'account_eligibility'],
   ['shop',{accountStatus:'suspended'},'account_access'],['shop',{accountStatus:'archived'},'account_access'],
@@ -300,15 +285,13 @@ test('authorisation classifications distinguish live account state, draft type a
  const stale=fixture();await assert.rejects(()=>stale.services.aiAssist({...stale.request(),auth:{uid:'owner',token:{email_verified:true,auth_time:1}}}),{code:'unauthenticated'});
  const unverified=fixture();await assert.rejects(()=>unverified.services.aiAssist({...unverified.request(),auth:{uid:'owner',token:{email_verified:false,auth_time:Date.now()/1000}}}),{fields:{aiReason:'account_access'}});
  const disabled=fixture();disabled.users.owner={emailVerified:true,disabled:true};await assert.rejects(()=>disabled.call(),{fields:{aiReason:'account_access'}});
- const restricted=fixture(undefined,{authorize(){throw require('../ai-errors.cjs').rejection('permission-denied','tester_required','Restricted');}});
- const response=await http(restricted.app).post('/api/ai/assist').set('Authorization','Bearer owner').send(input).expect(403);
- assert.equal(response.body.error.fields.aiReason,'tester_required');assert.equal(restricted.calls.length,0);
+
 });
 
 test('fresh role and UID checks reject late output after account changes',async()=>{
  for(const change of ['role','uid']){
   const f=fixture();let checks=0;
-  const assist=createAIAssist({db:f.db,releaseControl:testReleaseControl,provider:f.adapter,actor:async()=>({uid:++checks===2&&change==='uid'?'other':'owner',profile:{role:checks===2&&change==='role'?'shop':'owner',accountStatus:'active',verificationStatus:'approved'}})});
+  const assist=createAIAssist({db:f.db,provider:f.adapter,actor:async()=>({uid:++checks===2&&change==='uid'?'other':'owner',profile:{role:checks===2&&change==='role'?'shop':'owner',accountStatus:'active',verificationStatus:'approved'}})});
   await assert.rejects(()=>assist(f.request()),{fields:{aiReason:'account_changed'}});
  }
 });
@@ -334,22 +317,45 @@ test('shared HTTP IP and user throttles classify AI rate limits without changing
  }
 });
 
-test('provider prompt offers question vocabulary that passes the unchanged grounding validator',async()=>{
- const {validateSuggestion}=require('../ai-assist.cjs');let payload;
- const provider=createAIProvider({env:geminiEnv,fetcher:async(_,options)=>{payload=JSON.parse(options.body);return {ok:true,status:200,text:async()=>JSON.stringify(geminiResponse(output))};}});
- await fixture(provider).call();
- const prompt=payload.systemInstruction.parts[0].text;
- assert.match(prompt,/Retain every content fact from the original description/);assert.match(prompt,/copy the original non-empty field verbatim/);
- const templates=[...prompt.matchAll(/"([^"]+\?)"/g)].map(match=>match[1]);assert.equal(templates.length,2);
- // Both fallback questions satisfy the real validator without introducing any
- // source-specific claims, and empty questions remain a valid response.
- for(const missingDetails of [[],...templates.map(question=>[question])]){
-  const draft={...input,categories:[{id:'paint',name:'Paint'}],limits:{title:100,description:300}};
-  assert.deepEqual(validateSuggestion({title:input.title,description:input.description,categoryId:input.categoryId,missingDetails},draft).missingDetails,missingDetails);
+test('provider prompt and validator support neutral context questions and safe paraphrases',async()=>{
+ let payload;const provider=createAIProvider({env:geminiEnv,fetcher:async(_,options)=>{payload=JSON.parse(options.body);return {ok:true,status:200,text:async()=>JSON.stringify(geminiResponse(output))};}});
+ await fixture(provider).call();const prompt=payload.systemInstruction.parts[0].text,draft=JSON.parse(payload.contents[0].parts[0].text);
+ assert.match(prompt,/Never invent/);assert.match(prompt,/not fixed question templates/);assert.ok(draft.questionWords.includes('timeframe'));
+ const {validateSuggestion}=require('../ai-assist.cjs');
+ for(const missingDetails of [[],['Could you share your preferred timeframe?'],['Do you have any reference photos?']])assert.deepEqual(validateSuggestion({...output,missingDetails},draft).missingDetails,missingDetails);
+ assert.throws(()=>validateSuggestion({...output,description:'Invented turbo gains.'},draft),{reason:'grounding_rejected'});
+});
+
+test('a fully wrapped JSON fence is repaired once, while trailing prose, truncation and unsafe JSON remain rejected',async()=>{
+ const {createAIProvider}=require('../ai-provider.cjs');
+ const backtick=String.fromCharCode(96).repeat(3);
+ for(const [answer,valid] of [
+  [backtick+'json\n'+JSON.stringify(output)+'\n'+backtick,true],
+  [backtick+'json\n'+JSON.stringify(output)+'\n'+backtick+' trailing prose',false],
+  ['Here is JSON: '+JSON.stringify(output),false],
+  [backtick+'json\n'+JSON.stringify(output).slice(0,-1)+'\n'+backtick,false],
+  [backtick+'json\n'+JSON.stringify({...output,description:'Invented turbo gains.'})+'\n'+backtick,false],
+ ]){
+  let calls=0;const reply=geminiResponse(output);reply.candidates[0].content.parts[0].text=answer;
+  const provider=createAIProvider({env:geminiEnv,fetcher:async()=>{calls++;return {status:200,ok:true,text:async()=>JSON.stringify(reply)};}});
+  if(valid)assert.equal((await fixture(provider).call()).title,output.title);else await assert.rejects(()=>fixture(provider).call(),{code:'unavailable'});
+  assert.equal(calls,1);
  }
- for(const [bad,validationRule,rejectedField] of [
-  [{...output,description:'I would like black wrap.'},'source_fact_omitted','description'],
-  [{...output,description:'Wrap doors with new turbo in black.'},'new_content_term','description'],
-  [{...output,missingDetails:['What is your timeframe?']},'question_unprovided_term','missingDetails'],
- ])assert.throws(()=>validateSuggestion(bad,{...input,categories:[{id:'paint',name:'Paint'}],limits:{title:100,description:300}}),{reason:'grounding_rejected',validationRule,rejectedField,fields:{aiReason:'suggestion_rejected'}});
+});
+
+test('invalid roles and malformed generation identifiers are rejected before dispatch',async()=>{
+ const f=fixture();f.rows['users/owner'].role='unsupported';await assert.rejects(()=>f.call(),{code:'permission-denied'});assert.equal(f.calls.length,0);
+ const valid=fixture();for(const requestId of ['short','../../sensitive','x'.repeat(101),123])await assert.rejects(()=>valid.call('owner',{...input,requestId}),{code:'invalid-argument'});
+ assert.equal(valid.calls.length,0);
+});
+
+test('account/category infrastructure failures remain service errors with no private exception text or account blame',async()=>{
+ for(const mode of ['account','category','bad-category']){
+  const f=fixture();
+  if(mode==='account')f.auth.getUser=async()=>{throw Error('private-account-id and secret credential');};
+  else if(mode==='category')f.db.collection=()=>{throw Error('private database path and secret credential');};
+  else f.rows['serviceCategories/paint'].name='';
+  const response=await http(f.app).post('/api/ai/assist').set('Authorization','Bearer owner').send(input).expect(503);
+  assert.equal(response.body.error.fields.aiReason,'service_unavailable');assert.doesNotMatch(JSON.stringify(response.body),/private-|credential|database path/);assert.equal(f.calls.length,0);
+ }
 });

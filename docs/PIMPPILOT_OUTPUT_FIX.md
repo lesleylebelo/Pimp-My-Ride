@@ -1,3 +1,5 @@
+> Historical record ? superseded by [PimpPilot production service](PIMPPILOT_PRODUCTION.md). Tester allowlists, generation allowances and old release patches below are obsolete and must not be used for the new service. Historical evidence is retained.
+
 # PimpPilot structured-output compatibility
 
 Baseline: deployed main `1a98e86d7ce301a9f6fe396d2d0b6bbd7508fdd2`. Prepared only in the original lesley checkout, without provider calls, production writes or quota changes.

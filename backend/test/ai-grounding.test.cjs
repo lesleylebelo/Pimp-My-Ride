@@ -2,8 +2,6 @@ const {test}=require('node:test'),assert=require('node:assert/strict');
 const {validateSuggestion}=require('../ai-assist.cjs');
 const {failure}=require('../ai-errors.cjs');
 const {createAIAssist}=require('../ai-assist.cjs');
-const {createAIReleaseControl}=require('../ai-release-control.cjs');
-const {store}=require('./helpers/ai-store.cjs');
 const sample=(description='Wrap doors in black.',title='Black wrap')=>({title,description,limits:{title:100,description:2000},categories:[{id:'wrap',name:'Wrap'}]});
 const value=(draft,change={})=>({title:draft.title,description:draft.description,categoryId:'wrap',missingDetails:[],...change});
 const check=(draft,change)=>validateSuggestion(value(draft,change),draft);
@@ -67,12 +65,18 @@ test('unsupported categories and malformed model output remain rejected',()=>{
  assert.throws(()=>check(sample(),{categoryId:'invented'}),{reason:'malformed_output',rejectedField:'categoryId',validationRule:'category_unsupported'});
  for(const change of [{extra:'private'},{title:''},{description:'x'.repeat(2001)},{missingDetails:['An assertion.']},{missingDetails:null}])assert.throws(()=>check(sample(),change),{reason:'malformed_output'});
 });
-test('rejected field and rule are allowlisted, cannot contain private text, and persist with the correlation ID',async()=>{
+test('validation diagnostics are content-free and never require a quota record',async()=>{
  const forged=failure('grounding_rejected',{rejectedField:'private input',validationRule:'private response'});assert.equal(forged.rejectedField,null);assert.equal(forged.validationRule,null);
- const db=store(),control=createAIReleaseControl({db,env:{PMR_AI_TEST_UID:'tester'}});
- const provider={enabled:true,suggest:async()=>({title:'Black wrap',description:'Invented turbo.',categoryId:'Wrap & Paint',missingDetails:[]})};
- const assist=createAIAssist({db,releaseControl:control,provider,actor:async()=>({uid:'tester',profile:{role:'shop',accountStatus:'active',verificationStatus:'approved'}})});
+ const diagnostics=[];const assist=createAIAssist({db:{},onDiagnostic:value=>diagnostics.push(value),provider:{enabled:true,suggest:async()=>({title:'Black wrap',description:'Invented turbo.',categoryId:'Wrap & Paint',missingDetails:[]})},actor:async()=>({uid:'tester',profile:{role:'shop',accountStatus:'active',verificationStatus:'approved'}})});
  await assert.rejects(()=>assist({data:{kind:'showcase',title:'Black wrap',description:'Wrap doors in black.',categoryId:'Wrap & Paint'}}),{validationRule:'new_content_term'});
- const row=db.attempts()[0];assert.equal(row.rejectedField,'description');assert.equal(row.validationRule,'new_content_term');assert.equal(row.reasonCode,'grounding_rejected');assert.equal(row.state,'failed');assert.equal(row.outputValidated,false);assert.match(row.correlationId,/^[a-f0-9-]{36}$/);
- assert.ok(!JSON.stringify(row).includes('turbo'));assert.ok(!JSON.stringify(row).includes('Black wrap'));assert.ok(!JSON.stringify(row).includes('tester'));
+ assert.equal(diagnostics[0].validationRule,'new_content_term');assert.ok(!JSON.stringify(diagnostics).includes('turbo'));assert.ok(!JSON.stringify(diagnostics).includes('tester'));
+});
+
+test('safe ordinary paraphrases and general clarification questions avoid superficial vocabulary rejection',()=>{
+ assert.ok(check(sample('Please repair the doors.','Door repair'),{description:'I am looking for help to fix the doors.'}));
+ assert.ok(check(sample('Paint doors in matt black.','Matt black paint'),{description:'Please paint the doors in matte black.'}));
+ const missingDetails=['Could you share your preferred timeframe?','Do you have any reference photos?','What would you like the final result to look like?','Is there a deadline for this work?','How much would you like to spend?'];
+ assert.deepEqual(check(sample(),{missingDetails}).missingDetails,missingDetails);
+ // General questions never grant permission to invent a new service or fact.
+ for(const question of ['Which supercharger would you like?','What horsepower do you want?','Could you share the turbo specifications?'])assert.throws(()=>check(sample(),{missingDetails:[question]}),{reason:'grounding_rejected'});
 });
