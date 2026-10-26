@@ -1,5 +1,6 @@
+import {CustomerModal as Modal,CustomerPressable,useCustomerExperience} from '../../customer/components/CustomerUI';
 import React,{useEffect,useRef,useState} from 'react';
-import {KeyboardAvoidingView,Modal,Platform,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
+import {KeyboardAvoidingView,Platform,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Ionicons} from '@expo/vector-icons';
 import {useIsFocused} from '@react-navigation/native';
@@ -17,8 +18,10 @@ function AssistDraft({kind,title,description,categoryId='',disabled=false,onAppl
  const basis=JSON.stringify([user?.uid,kind,title,description,categoryId]);
  current.current={basis,uid:user?.uid,disabled:disabled||offline||!focused,onApply};
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;++epoch.current;};},[]);
- useEffect(()=>{if(offline||!focused){++epoch.current;lock.current=false;setVisible(false);setLoading(false);setSuggestion(null);}},[offline,focused,user?.uid]);
- function dismiss(){++epoch.current;lock.current=false;setVisible(false);setLoading(false);setSuggestion(null);setError('');}
+ useEffect(()=>{if(offline||!focused){++epoch.current;setVisible(false);setSuggestion(null);}},[offline,focused,user?.uid]);
+ // Dismiss hides the preview; it cannot cancel an already dispatched provider
+ // call. Keep its lock until settlement to prevent another costly submission.
+ function dismiss(){++epoch.current;setVisible(false);setSuggestion(null);setError('');}
  async function generate(){
   if(lock.current||current.current.disabled||!current.current.uid)return;
   lock.current=true;const generation=++epoch.current,original=current.current.basis,uid=current.current.uid;
@@ -29,14 +32,15 @@ function AssistDraft({kind,title,description,categoryId='',disabled=false,onAppl
    if(original!==current.current.basis)throw Error('Your draft changed. Use Regenerate Suggestions before applying a PimpPilot suggestion.');
    setSuggestion({...result,basis:original});
   }catch(e){if(mounted.current&&generation===epoch.current&&uid===current.current.uid)setError(pimpPilotErrorMessage(e));}
-  finally{if(mounted.current&&generation===epoch.current){lock.current=false;setLoading(false);}}
+  finally{if(mounted.current){lock.current=false;setLoading(false);}}
  }
+ const customer=useCustomerExperience(),Interaction=customer?CustomerPressable:Pressable;
  const triggerDisabled=disabled||offline||!focused||loading||`${title}${description}`.trim().length<3;
  const stale=suggestion&&suggestion.basis!==basis;
  const valid=suggestion&&suggestion.title.trim()&&suggestion.title.length<=100&&suggestion.description.trim()&&suggestion.description.length<=(kind==='request'?300:2000);
  function apply(){if(!valid||stale||current.current.disabled||loading)return;current.current.onApply({title:suggestion.title.trim(),description:suggestion.description.trim(),category:useCategory?suggestion.category:null});dismiss();}
  return <>
-  <Pressable accessibilityRole="button" accessibilityLabel={pimpPilotCopy.trigger}
+  <Interaction accessibilityRole="button" accessibilityLabel={pimpPilotCopy.trigger}
    accessibilityHint={pimpPilotCopy.subtitle+'. Review suggestions before applying them.'}
    accessibilityState={{disabled:!!triggerDisabled,busy:loading}} disabled={triggerDisabled}
    onPress={()=>void generate()} style={({pressed})=>[styles.trigger,{borderColor:theme.border,backgroundColor:theme.surfaceCard,opacity:triggerDisabled?0.5:pressed?0.8:1}]}>
@@ -47,7 +51,7 @@ function AssistDraft({kind,title,description,categoryId='',disabled=false,onAppl
     <Text style={[styles.triggerTitle,{color:theme.accent}]}>{pimpPilotCopy.trigger}</Text>
     <Text style={[styles.subtitle,{color:theme.textSecondary}]}>{pimpPilotCopy.subtitle}</Text>
    </View>
-  </Pressable>
+  </Interaction>
   {visible&&!offline&&focused&&<Modal visible transparent animationType="fade" onRequestClose={dismiss}>
    <SafeAreaView style={styles.overlay}><KeyboardAvoidingView style={styles.fill} behavior={Platform.OS==='ios'?'padding':undefined}>
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scroll}>

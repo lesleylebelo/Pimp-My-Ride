@@ -12,7 +12,7 @@ async function screen(options={}){
  const Gallery=loadUI('src/features/marketplace/components/PhotoGallery.js',{
   '../../auth/context/AuthContext':{useAuth:()=>state.auth},'@react-navigation/native':{useIsFocused:()=>state.focused},
   ...(options.theme?{'../../../shared/theme/ThemeContext':{useTheme:()=>({theme:options.theme})}}:{}),
-  'expo-document-picker':{getDocumentAsync:async input=>{state.calls.picker.push(input);return options.pick?options.pick():{canceled:false,assets:[selected()]};}},
+  'expo-image-picker':{getCameraPermissionsAsync:async()=>({granted:true}),launchCameraAsync:async input=>{state.calls.picker.push(input);return options.capture?options.capture():{assets:[{uri:'file:///capture'}]};},launchImageLibraryAsync:async input=>{state.calls.picker.push(input);return options.pick?options.pick():{canceled:false,assets:[selected()]};}},
   './MarketplaceUI':{Button,Card:({children,...rest})=>React.createElement('View',rest,children),Notice:({busy,error})=>React.createElement('Text',null,busy?'Loading...':error)},
   '../services/photoApi':{
    listPhotos:async(...args)=>{state.calls.list.push(args);return options.list?options.list(...args):{items:state.items,version:state.version,canManage:state.canManage};},
@@ -30,7 +30,13 @@ async function screen(options={}){
   return root?.findAllByType('Pressable').find(node=>node.props.accessibilityLabel===title);
  };
  return {state,tree,button,text:()=>tree.root.findAllByType('Text').map(node=>[node.props.children].flat().join('')).join('\n'),images:()=>tree.root.findAllByType('Image'),
-  press:async (title,slot)=>act(async()=>{assert.ok(button(title,slot),`Missing button: ${title} in photo ${slot ?? 'gallery'}`);await button(title,slot).props.onPress();}),
+  press:async (title,slot)=>{
+   assert.ok(button(title,slot),`Missing button: ${title} in photo ${slot ?? 'gallery'}`);
+   if(['Choose photo','Choose replacement'].includes(title)&&!button(title,slot).props.disabled){
+    await act(async()=>{void button(title,slot).props.onPress();});
+    await act(async()=>button('Choose from gallery').props.onPress());
+   }else await act(async()=>button(title,slot).props.onPress());
+  },
   update:async next=>act(async()=>{if(Object.hasOwn(next,'uid'))state.auth.user=next.uid?{uid:next.uid}:null;if(Object.hasOwn(next,'offline'))state.auth.offline=next.offline;if(Object.hasOwn(next,'focused'))state.focused=next.focused;props={...props,...next.props};tree.update(render());}),
   close:async()=>act(async()=>tree.unmount()),
  };
@@ -117,13 +123,14 @@ test('picker cancellation and invalid file types or sizes keep uploads unavailab
  choice={canceled:false,assets:[]};await s.press('Choose photo','1');assert.equal(s.button('Upload photo','1'),undefined);
  choice={canceled:false,assets:[{...selected('selected.webp'),mimeType:'image/webp'}]};await s.press('Choose photo','1');assert.ok(s.button('Upload photo','1'));
  assert.equal(s.state.calls.upload.length,0);
- assert.deepEqual(s.state.calls.picker[0],{type:['image/jpeg','image/png','image/webp','image/heic','image/heif'],multiple:false,copyToCacheDirectory:true});
+ assert.deepEqual(s.state.calls.picker[0],{mediaTypes:['images'],allowsMultipleSelection:false,quality:1});
 });
 
 test('picker responses after blur/refocus, account changes or external disable cannot select a stale file',async()=>{
  for(const transition of ['focus','account','disable']){
   const pending=deferred(),s=await screen({pick:()=>pending.promise});let picking;
-  await act(async()=>{const choose=s.button('Choose photo','1').props.onPress;picking=choose();void choose();});assert.equal(s.state.calls.picker.length,1);
+  await act(async()=>{const choose=s.button('Choose photo','1').props.onPress;picking=choose();void choose();});
+  await act(async()=>s.button('Choose from gallery').props.onPress());assert.equal(s.state.calls.picker.length,1);
   if(transition==='focus'){await s.update({focused:false});await s.update({focused:true});}
   if(transition==='account')await s.update({uid:'other-owner'});
   if(transition==='disable')await s.update({props:{disabled:true}});
@@ -199,4 +206,16 @@ test('offline, archived and request galleries prevent vehicle mutations and reco
 test('a malformed vehicle revision or denied metadata keeps editing unavailable',async()=>{
  const s=await screen({list:async()=>({items:[photo()],version:null,canManage:true})});assert.match(s.text(),/current photo version/);assert.equal(s.button('Choose photo','1'),undefined);assert.equal(s.state.calls.view.length,0);await s.close();
  const denied=await screen({list:async()=>{throw Error('Vehicle not found');}});assert.match(denied.text(),/Vehicle not found/);assert.equal(denied.button('Remove photo','1'),undefined);await denied.close();
+});
+
+test('Garage capture with missing metadata previews locally, cancels safely and uses the existing confirmed vehicle upload',async()=>{
+ const s=await screen({props:{presentation:'garage'}});try{
+  await act(async()=>{void s.button('Choose photo','1').props.onPress();});await s.press('Take photo');
+  assert.ok(s.images().some(n=>n.props.accessibilityLabel==='Selected photo: photo.jpg'));assert.equal(s.state.calls.upload.length,0);
+  await s.press('Choose photo','1'); // gallery remains available after capture
+  await s.press('Discard selection','1');
+  await act(async()=>{void s.button('Choose photo','1').props.onPress();});await s.press('Cancel');assert.equal(s.state.calls.upload.length,0);
+  await act(async()=>{void s.button('Choose photo','1').props.onPress();});await s.press('Take photo');
+  await s.press('Upload photo','1');await s.press('Confirm');assert.equal(s.state.calls.upload.length,1);const args=s.state.calls.upload[0];assert.deepEqual(args.slice(0,3),['car','1',2]);assert.equal(args[3].mimeType,'image/jpeg');assert.equal(args[4],'owner');
+ }finally{await s.close();}
 });

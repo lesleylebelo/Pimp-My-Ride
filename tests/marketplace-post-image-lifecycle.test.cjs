@@ -115,3 +115,13 @@ test('a later photo-upload failure does not delete earlier uploaded showcase pho
   assert.ok(form.tree.root.findAllByType('Text').some(node=>node.props.children==='Upload connection lost.'));
  }finally{await form.unmount();}
 });
+
+test('reselecting an identical processed photo cannot duplicate preview keys or uploads',async()=>{
+ let uploads=0,writes=0;const form=await renderForm({pickPostPhotos:async()=>[photo('same')],uploadPostPhoto:async()=>{uploads++;return {path:'posts/shop-1/one'};},postsApi:async()=>{writes++;}});
+ try{
+  for(let i=0;i<2;i++)await act(async()=>form.tree.root.findAllByType('Pressable').find(n=>n.props.accessibilityLabel?.startsWith('Add photos (')).props.onPress());
+  assert.ok(form.tree.root.findAllByType('Pressable').some(n=>n.props.accessibilityLabel==='Add photos (1/10)'));assert.equal(uploads,0);assert.equal(writes,0);
+  await act(async()=>form.tree.root.findAllByType('TextInput').find(n=>n.props.label==='Title').props.onChangeText('Single capture'));
+  await act(async()=>form.tree.root.findAllByType('Pressable').find(n=>n.props.accessibilityLabel==='Post').props.onPress());assert.equal(uploads,1);assert.equal(writes,1);
+ }finally{await form.unmount();}
+});

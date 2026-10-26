@@ -1,5 +1,6 @@
+import {CustomerModal as Modal,CustomerGrid,CustomerState,CustomerPressable} from '../../customer/components/CustomerUI';
 import React, {useEffect, useRef, useState} from 'react';
-import {ActivityIndicator, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, View} from 'react-native';
+import {ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
 import ConfirmationButton from '../../../shared/components/ConfirmationButton';
@@ -65,20 +66,20 @@ function GarageContent({navigation}) {
     }
   }
   function open(route,params){if(!disabled){setSelected(null);if(params)navigation.navigate(route,params);else navigation.navigate(route);}}
-  const cover=vehicle=><View style={styles.cover}>
+  const cover=vehicle=><View style={[styles.cover,!vehicle.photoIds?.length&&{height:160}]}>
     <View style={styles.coverPlaceholder}><Ionicons name="car-sport-outline" size={64} color={theme.textSecondary}/><Text style={styles.placeholderText}>{vehicle.photoIds?.length?'Private vehicle photo':'Add photos to make it yours'}</Text></View>
     {!!vehicle.photoIds?.length&&<PrivatePhoto target="vehicle" id={vehicle.id} imageStyle={styles.coverImage} accessibilityLabel={`Photo of ${vehicle.make} ${vehicle.model}`}/>}
   </View>;
   const archiveControl=vehicle=><ConfirmationButton palette={theme} title={vehicle.archived ? `Restore ${vehicle.make} ${vehicle.model}` : `Remove ${vehicle.make} ${vehicle.model}`} message={vehicle.archived ? 'Restore this vehicle to your active garage. Its open requests can become visible to shops again.' : 'Remove this vehicle from your active garage. It will not be deleted permanently; past service requests, quotations, and bookings will be preserved.'} disabled={disabled} danger={!vehicle.archived} onConfirm={() => archive(vehicle)}/>;
-  return <GaragePage title="My Garage" subtitle="Your vehicles. Ready for their next chapter." navigation={navigation} tabs onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}
+  return <GaragePage title="My Garage" subtitle="Your vehicles, details and private photos." navigation={navigation} tabs onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}
     refreshControl={<RefreshControl refreshing={busy&&!!feed.items.length} onRefresh={()=>{if(!disabled)void refresh().catch(()=>{});}} tintColor={theme.textPrimary}/>}>
-    <View style={styles.toolbar}><View style={styles.intro}><Text style={styles.eyebrow}>YOUR COLLECTION</Text><Text weight="semibold" style={styles.sectionTitle}>{archived?'Archived vehicles':'Made for the road'}</Text><Text style={styles.secondary}>Choose a vehicle to view its details or request a service.</Text></View>
+    <View style={styles.toolbar}><View style={styles.intro}><Text style={styles.eyebrow}>YOUR COLLECTION</Text><Text weight="semibold" style={styles.sectionTitle}>{archived?'Archived vehicles':'Your vehicles'}</Text><Text style={styles.secondary}>Choose a vehicle to view its details or request a service.</Text></View>
       <GarageAction title="Add vehicle" icon="add-outline" primary disabled={disabled} onPress={()=>open('VehicleForm')}/></View>
-    <View style={styles.filters}>{[false,true].map(value=><Pressable key={String(value)} accessibilityRole="button" accessibilityLabel={value?'Archived vehicles':'Active vehicles'} accessibilityState={{selected:archived===value,disabled}} disabled={disabled} onPress={()=>{if(!disabled&&archived!==value){feed.reset();setArchived(value);setCursor(null);setSelected(null);setMessage('');}}} style={[styles.filter,archived===value&&styles.filterSelected]}><Text weight={archived===value?'semibold':'regular'} style={styles.filterText}>{value?'Archived vehicles':'Active vehicles'}</Text></Pressable>)}</View>
+    <View style={styles.filters}>{[false,true].map(value=><CustomerPressable key={String(value)} accessibilityRole="button" accessibilityLabel={value?'Archived vehicles':'Active vehicles'} accessibilityState={{selected:archived===value,disabled}} disabled={disabled} onPress={()=>{if(!disabled&&archived!==value){feed.reset();setArchived(value);setCursor(null);setSelected(null);setMessage('');}}} style={[styles.filter,archived===value&&styles.filterSelected]}><Text weight={archived===value?'semibold':'regular'} style={styles.filterText}>{value?'Archived vehicles':'Active vehicles'}</Text></CustomerPressable>)}</View>
     <Notice busy={mutation.saving} error={mutation.offline?'Connect to view or update your garage.':mutation.error || error}/>
     {busy&&!feed.items.length&&<View accessibilityRole="status" style={styles.empty}><ActivityIndicator color={theme.textPrimary}/><Text style={styles.secondary}>Loading your garage...</Text></View>}
     {!!message && <Text accessibilityRole="status">{message}</Text>}
-    <View style={styles.grid}>{feed.items.map(vehicle=><View key={vehicle.id} testID={`garage-vehicle-${vehicle.id}`} style={[styles.vehicleCard,wide&&styles.desktopCard]}>
+    <CustomerGrid>{feed.items.map(vehicle=><View key={vehicle.id} testID={`garage-vehicle-${vehicle.id}`} style={[styles.vehicleCard,{width:'100%',borderRadius:12,borderWidth:1,borderColor:theme.border}]}>
       <Pressable accessibilityRole="button" accessibilityLabel={`View details for ${vehicle.make} ${vehicle.model}`} disabled={disabled} onPress={()=>{if(!disabled)setSelected(vehicle);}}>{cover(vehicle)}</Pressable>
       <View style={styles.cardBody}><Text style={styles.eyebrow}>{String(vehicle.year)}</Text><Text weight="semibold" style={styles.vehicleTitle}>{vehicle.make} {vehicle.model}</Text><Text style={styles.specLine}>{[vehicle.colour,vehicle.registration].filter(Boolean).join(' · ')}</Text>
         <GarageAction title={`View ${vehicle.make} ${vehicle.model}`} icon="car-outline" disabled={disabled} onPress={()=>{if(!disabled)setSelected(vehicle);}}/>
@@ -87,7 +88,7 @@ function GarageContent({navigation}) {
         {!archived&&<GarageAction title={`Request service for ${vehicle.make} ${vehicle.model}`} icon="construct-outline" primary disabled={disabled} onPress={()=>open('RequestForm',{vehicleId:vehicle.id,vehicle})}/>}
         {archiveControl(vehicle)}
       </View>
-    </View>)}</View>
+    </View>)}</CustomerGrid>
     {data&&!busy&&!error&&!feed.items.length&&<View style={styles.empty}><Ionicons name={archived?'archive-outline':'car-sport-outline'} size={56} color={theme.textSecondary}/><Text weight="semibold" style={styles.emptyTitle}>{archived?'No archived vehicles.':'Your garage is empty.'}</Text><Text style={styles.emptyBody}>{archived?'Vehicles you remove from your active garage will stay here with their history.':'Add your first vehicle to keep its details and photos together, ready for your next service request.'}</Text></View>}
     <GarageAction title="Refresh vehicles" icon="refresh-outline" disabled={disabled} onPress={()=>{if(!disabled)void refresh().catch(()=>{});}}/>
     {busy&&!!feed.items.length&&<Text style={styles.secondary}>Loading more vehicles...</Text>}
@@ -121,7 +122,7 @@ function VehicleDraft({route, navigation}) {
       if (result) navigation.goBack();
     } catch (_) {}
   }
-  return <GaragePage title={vehicle?'Edit vehicle':'Add vehicle'} subtitle={vehicle?'Keep your vehicle details up to date.':'A place for your next pride and joy.'} navigation={navigation} keyboard>
+  return <GaragePage title={vehicle?'Edit vehicle':'Add vehicle'} subtitle={vehicle?'Keep your vehicle details up to date.':'Vehicle details stay with your account.'} navigation={navigation} keyboard>
     <View style={styles.form}><View style={styles.privacy}><Ionicons name="lock-closed-outline" size={20} color={theme.textSecondary}/><Text style={styles.privacyText}>Vehicle registration stays private to your account. Shops receive the make, model, year and colour with a request.</Text></View>
       <Text style={styles.secondary}>All fields marked * are required.</Text>
       {[['Vehicle identity',[['make','Make',80,'e.g. Toyota'],['model','Model',80,'e.g. Corolla'],['year','Year',4,'e.g. 2024']]],['Appearance & registration',[['colour','Colour',80,'e.g. Pearl white'],['registration','Registration number',20,'Your registration']]]].map(([heading,fields])=><View key={heading} style={styles.formSection}>
@@ -141,18 +142,18 @@ export function OwnerRequestsScreen({navigation}) {
   const {data, busy, error, refresh} = useMarketData('requests', {feed: 'mine', cursor}, setCursor);
   const feed = useInfiniteCursor(data, busy, setCursor, {pageCursor:cursor});
   const disabled = busy || offline;
-  return <Page title="My Requests" subtitle="Track your service requests" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
+  return <Page title="Requests" subtitle="Your work, from first idea to accepted quote" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
     <Button title="Create service request" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('RequestForm');}}/>
     <Notice busy={busy} error={error}/>
-    {feed.items.map(request => <Card key={request.id}>
+    <CustomerGrid>{feed.items.map(request => <Card key={request.id}>
       <Text weight="semibold" style={styles.heading}>{request.title}</Text>
       <Text>{request.categoryName} · {request.city}</Text>
       <StatusTag>{requestStatus(request.status)}</StatusTag>
       <Text>{request.visibility === 'direct' ? 'Direct request' : 'Open request'}</Text>
       <Text>{formatMoney(request.budgetMinCents)} – {formatMoney(request.budgetMaxCents)}</Text>
       <Button title={`View ${request.title}`} disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('OwnerRequest', {id: request.id});}}/>
-    </Card>)}
-    {data && !busy && !feed.items.length && <Text style={styles.muted}>No service requests yet. Choose a vehicle and describe what you need.</Text>}
+    </Card>)}</CustomerGrid>
+    {data && !busy && !feed.items.length && <Text style={styles.muted}>No requests yet. Add a vehicle, then tell workshops what you need.</Text>}
     <Button title="Refresh requests" outline disabled={disabled} onPress={() => {if (!disabled) void refresh().catch(() => {});}}/>
     {busy && !!feed.items.length && <Text style={styles.muted}>Loading more requests...</Text>}
   </Page>;
@@ -187,8 +188,8 @@ function RequestDraft({route, navigation}) {
   const categories = useMarketData('categories', {cursor: categoryCursor});
   const shops = useMarketData('shops', {cursor: shopCursor});
   const vehicleFeed=useInfiniteCursor(vehicles.data,vehicles.busy,setVehicleCursor,{autoLoad:false}),categoryFeed=useInfiniteCursor(categories.data,categories.busy,setCategoryCursor,{autoLoad:false}),shopFeed=useInfiniteCursor(shops.data,shops.busy,setShopCursor,{autoLoad:false});
-  const [form, setForm] = useState(() => ({vehicleId: request?.vehicleId || route.params?.vehicleId || '', title: request?.title || '', description: request?.description || '', categoryId: request?.categoryId || '', city: request?.city || '', budgetMin: request?.budgetMinCents === undefined ? '' : String(request.budgetMinCents / 100), budgetMax: request?.budgetMaxCents === undefined ? '' : String(request.budgetMaxCents / 100), preferredDate: request?.preferredDate || '', visibility: request?.visibility || 'open', shopId: request?.shopId || '', photoIds: request?.photoIds || []}));
-  const [selected, setSelected] = useState(() => ({vehicle: route.params?.vehicle || null, category: null, shop: null}));
+  const [form, setForm] = useState(() => ({vehicleId: request?.vehicleId || route.params?.vehicleId || '', title: request?.title || '', description: request?.description || '', categoryId: request?.categoryId || '', city: request?.city || '', budgetMin: request?.budgetMinCents === undefined ? '' : String(request.budgetMinCents / 100), budgetMax: request?.budgetMaxCents === undefined ? '' : String(request.budgetMaxCents / 100), preferredDate: request?.preferredDate || '', visibility: request?.visibility || (route.params?.shop?.id?'direct':'open'), shopId: request?.shopId || route.params?.shop?.id || '', photoIds: request?.photoIds || []}));
+  const [selected, setSelected] = useState(() => ({vehicle: route.params?.vehicle || null, category: null, shop: route.params?.shop || null}));
   const [mandatoryServicesText, setMandatoryServicesText] = useState((request?.mandatoryServices || []).join('\n'));
   const [serviceLocation, setServiceLocation] = useState(request?.serviceLocation || null), [locating, setLocating] = useState(false);
   const [touched, setTouched] = useState({}), [submitted, setSubmitted] = useState(false);
@@ -218,7 +219,7 @@ function RequestDraft({route, navigation}) {
   return <Page title={editing ? 'Edit service request' : 'Request a service'} subtitle="Tell us what you need" navigation={navigation} onScroll={loadMore} onLayout={layoutPage}>
     <Text style={styles.formIntro}>Tell us what you have in mind. Shops will use these details to prepare a quote.</Text>
     <SelectionList title="01  /  YOUR VEHICLE" state={vehicles} feed={vehicleFeed} selected={form.vehicleId} onSelect={item => choose('vehicle', item)} label={vehicleName} disabled={disabled} onLayout={layoutSelector('vehicle')}/>
-    {form.vehicleId && <View style={styles.selectedVehicle}><View style={styles.selectedVehicleCopy}>
+    {!!form.vehicleId && <View style={styles.selectedVehicle}><View style={styles.selectedVehicleCopy}>
       <Text style={styles.selectedVehicleLabel}>SELECTED VEHICLE</Text>
       <Text style={styles.selectedVehicleName}>{selected.vehicle ? vehicleName(selected.vehicle) : 'Vehicle from your garage'}</Text>
     </View><Ionicons name="checkmark-circle" size={21} color={theme.accent}/></View>}
@@ -319,7 +320,7 @@ const makeStyles = (colors) => StyleSheet.create({
   sectionEyebrow: {fontSize: 11, lineHeight: 16, letterSpacing: 1.1, color: colors.textMuted, fontWeight: '600'},
   selectionCard: {padding: 20, gap: 14},
   selectionChips: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
-  selectionChip: {minHeight: 40, maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, backgroundColor: colors.surfaceMuted, borderWidth: 0},
+  selectionChip: {minHeight: 40, maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8, backgroundColor: colors.surfaceMuted, borderWidth: 1, borderColor:colors.border},
   selectedChip: {backgroundColor: colors.primary},
   selectionText: {fontSize: 13, color: colors.textSecondary, fontWeight: '500'},
   selectedText: {color: colors.primaryText, fontWeight: '700'},
@@ -328,7 +329,7 @@ const makeStyles = (colors) => StyleSheet.create({
   selectedVehicleLabel: {fontSize: 10, letterSpacing: 1, color: colors.textMuted, fontWeight: '600'},
   selectedVehicleName: {fontSize: 15, lineHeight: 21, color: colors.textPrimary, fontWeight: '500'},
   selectionSummary: {fontSize: 13, color: colors.textSecondary},
-  formSection: {padding: 20, borderRadius: 24, backgroundColor: colors.surfaceCard, gap: 12, borderWidth: 1, borderColor: colors.border},
+  formSection: {padding: 20, borderRadius: 12, backgroundColor: colors.surfaceCard, gap: 12, borderWidth: 1, borderColor: colors.border},
   budgetLabel: {fontSize: 11, letterSpacing: 1, color: colors.textMuted, fontWeight: '600', paddingTop: 2},
   budgetRow: {flexDirection: 'row', gap: 12},
   budgetField: {flex: 1, minWidth: 0},

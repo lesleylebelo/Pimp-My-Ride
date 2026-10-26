@@ -40,7 +40,7 @@ test('customer and shop feed headers show the same accessible inbox icon, aggreg
    assert.equal(inbox.findByType('Icon').props.name,'chatbubbles-outline');
    const style=inbox.props.style({pressed:false})[0];assert.ok(style.width>=44&&style.height>=44);
    const title=tree.root.findAllByType('Text').find(node=>node.props.children===(role==='owner'?'Discover':'Find Jobs'));
-   assert.ok(title.parent.parent.findAllByType('Pressable').includes(inbox));
+   assert.ok((role==='owner'?title.parent.parent.parent:title.parent.parent).findAllByType('Pressable').includes(inbox));
    assert.equal(badge(tree).length,1);assert.match(texts(tree),/5/);assert.doesNotMatch(texts(tree),/Sign out/i);
    assert.ok(button(tree,'All'));assert.ok(button(tree,'More filters'));assert.equal(tree.root.findAllByType('TextInput').length,1);
    await act(async()=>inbox.props.onPress());assert.deepEqual(s.state.moves,[['Messages']]);
@@ -83,18 +83,18 @@ test('both Account screens keep Sign out last inside safe scrollable content and
  for(const role of ['owner','shop']){
   const s=setup(role),Component=s.load('src/features/auth/screens/AccountScreen.js').default,tree=await mount(Component,{navigation:s.navigation});
   try{
-   const scroll=tree.root.findByType('ScrollView');assert.ok(scroll.props.contentContainerStyle.padding>=24);assert.ok(tree.root.findByType('SafeAreaView'));
-   assert.equal(scroll.findAllByType('Pressable').at(-1),button(tree,'Sign out'));assert.equal(button(tree,'Messages'),undefined);
+   const scroll=tree.root.findByType('ScrollView');assert.ok((scroll.props.contentContainerStyle.padding||scroll.props.contentContainerStyle.paddingHorizontal)>=16);assert.ok(tree.root.findByType('SafeAreaView'));
+   assert.ok(scroll.findAllByType('Pressable').at(-1)===button(tree,'Sign out'));assert.equal(!!button(tree,'Messages'),role==='owner');
    await act(async()=>button(tree,'Sign out').props.onPress());assert.equal(s.state.logoutCalls,1);
    s.state.logout=async()=>{throw Error('Sign-out failed');};await act(async()=>button(tree,'Sign out').props.onPress());assert.match(texts(tree),/Sign-out failed/);
   }finally{await close(tree);}
  }
 });
 
-test('generic marketplace navigation has no global Messages or Sign out shortcuts or Messages tabs',async()=>{
+test('customer utility links and unchanged Workshop navigation retain existing inbox routes',async()=>{
  for(const role of ['owner','shop']){
   const s=setup(role),{Page}=s.load('src/features/marketplace/components/MarketplaceUI.js'),tree=await mount(Page,{title:'Bookings',navigation:s.navigation});
-  try{assert.equal(button(tree,'Messages'),undefined);assert.doesNotMatch(texts(tree),/Sign out/i);assert.ok(!tree.root.findAllByType('Pressable').some(node=>node.props.accessibilityRole==='tab'&&node.props.accessibilityLabel==='Messages'));}
+  try{assert.equal(!!button(tree,'Messages'),role==='owner');assert.doesNotMatch(texts(tree),/Sign out/i);assert.ok(!tree.root.findAllByType('Pressable').some(node=>node.props.accessibilityRole==='tab'&&node.props.accessibilityLabel==='Messages'));}
   finally{await close(tree);}
  }
 });

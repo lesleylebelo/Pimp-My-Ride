@@ -1,6 +1,6 @@
 const {randomUUID}=require('node:crypto');
 const {ApiError}=require('./errors.cjs');
-const {AIFailure,failure}=require('./ai-errors.cjs');
+const {AIFailure,failure,rejection}=require('./ai-errors.cjs');
 // Historical evidence only. Never read, update, delete or reuse as a daily counter.
 const CONTROL_PATH='aiAssistControl/initial-provider-test-v1';
 const DAILY_PREFIX='aiAssistDaily',ATTEMPT_PREFIX='aiAssistAttempts',DAILY_LIMIT=5;
@@ -11,7 +11,7 @@ function createAIReleaseControl({db,env=process.env,now=Date.now}={}){
  return {
   authorize(uid){
    if(!valid)throw failure('configuration');
-   if(!uids.includes(uid))throw new ApiError('permission-denied','AI Assist is restricted to designated test accounts.');
+   if(!uids.includes(uid))throw rejection('permission-denied','tester_required','AI Assist is restricted to designated test accounts.');
   },
   async reserve(){
    const correlationId=randomUUID(),reservedAt=new Date(now()),day=reservedAt.toISOString().slice(0,10);
@@ -24,7 +24,7 @@ function createAIReleaseControl({db,env=process.env,now=Date.now}={}){
      const snapshot=await tx.get(counter),value=snapshot.data();
      if(snapshot.exists&&(value?.version!==1||value.day!==day||!Number.isInteger(value.attempts)||value.attempts<1||value.attempts>DAILY_LIMIT))throw failure('quota_storage');
      const attempts=snapshot.exists?value.attempts:0;
-     if(attempts>=DAILY_LIMIT)throw new ApiError('resource-exhausted','The daily AI test allowance has been used. Your draft is unchanged.');
+     if(attempts>=DAILY_LIMIT)throw rejection('resource-exhausted','daily_allowance','The daily AI test allowance has been used. Your draft is unchanged.',Date.parse(day+'T00:00:00Z')+86400000);
      tx.set(counter,{version:1,day,attempts:attempts+1});
      tx.create(attempt,{version:1,correlationId,day,reservedAt,dispatchInitiatedAt:null,responseReceivedAt:null,
       providerHttpStatus:null,outputValidated:false,failureStage:null,reasonCode:null,rejectedField:null,validationRule:null,outputStage:null,outputRule:null,state:'unknown',finishedAt:null});

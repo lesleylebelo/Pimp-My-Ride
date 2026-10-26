@@ -1,7 +1,8 @@
+import {useCustomerExperience} from '../../customer/components/CustomerUI';
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {ActivityIndicator,Image,Text,View} from 'react-native';
 import {useIsFocused} from '@react-navigation/native';
-import * as ImagePicker from 'expo-image-picker';
+import {usePhotoSource} from '../../../shared/components/PhotoSourceChooser';
 import * as ImageManipulator from 'expo-image-manipulator';
 import {useAuth} from '../context/AuthContext';
 import {useTheme} from '../../../shared/theme/ThemeContext';
@@ -14,6 +15,7 @@ import {profilePhotoStatus,uploadProfilePhoto,removeProfilePhoto} from '../servi
 
 function Settings({uid,disabled,onBusyChange}){
  const {profile,offline,refresh}=useAuth(),{theme}=useTheme(),focused=useIsFocused();
+ const photoSource=usePhotoSource({scopeKey:uid,enabled:!offline&&!disabled});
  const [saved,setSaved]=useState(null),[file,setFile]=useState(null),[busy,setBusy]=useState(false),[loading,setLoading]=useState(false),[progress,setProgress]=useState(null),[error,setError]=useState(''),[message,setMessage]=useState('');
  const active=useRef(true),lock=useRef(false),epoch=useRef(0),permission=useRef({});
  permission.current={offline,disabled,focused};
@@ -30,7 +32,7 @@ function Settings({uid,disabled,onBusyChange}){
   if(!allowed()||lock.current||loading||!saved)return;
   lock.current=true;setBusy(true);setError('');setMessage('');const generation=epoch.current;
   try{
-   const picked=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:true,aspect:[1,1],quality:1,allowsMultipleSelection:false});
+   const picked=await photoSource.choose({maximum:1,crop:true});
    if(picked.canceled||!picked.assets?.[0])return;
    const asset=picked.assets[0];
    if(asset.mimeType&&!PICKER_PHOTO_TYPES.includes(asset.mimeType))throw new Error('Choose a JPEG, PNG, WebP or HEIC photo.');
@@ -61,14 +63,15 @@ function Settings({uid,disabled,onBusyChange}){
    if(active.current&&generation===epoch.current){setError(e.message||'Unable to save photo. Retry the selected photo.');if(e.retryWithNewRequest){setFile(null);setSaved(null);}}
   }finally{lock.current=false;onBusyChange?.(false);if(active.current){setBusy(false);setProgress(null);}}
  }
+ const customer=useCustomerExperience();
  const blocked=busy||loading||disabled||offline||!focused||!saved;
  const text={color:theme.textSecondary,fontSize:14,lineHeight:22};
- return <View style={{padding:20,borderRadius:22,backgroundColor:theme.surfaceCard,gap:14}}>
+ return <View style={{padding:20,borderRadius:customer?12:22,borderWidth:customer?1:0,borderColor:theme.border,backgroundColor:theme.surfaceCard,gap:14}}>
   <Text accessibilityRole="header" style={{color:theme.textPrimary,fontSize:19,fontWeight:'600'}}>{profile?.role==='shop'?'Workshop logo / profile image':'Profile photo'}</Text>
   <View style={{alignItems:'center',gap:12}}><ProfileAvatar size={96} shop={profile?.role==='shop'} revision={saved?.version??profile?.profilePhotoRevision}/>
    {!!file&&<><Text style={text}>Preview your new photo</Text><Image accessibilityLabel="Selected profile photo preview" source={{uri:file.uri}} resizeMode="cover" style={{width:160,height:160,borderRadius:80}}/></>}
   </View>
-  <Text style={text}>Choose a square photo. JPG, PNG, WebP and HEIC selections are prepared securely on your device. Maximum 5 MB.</Text>
+  <Text style={text}>{customer?'Choose a square JPG, PNG, WebP or HEIC photo, up to 5 MB.':'Choose a square photo. JPG, PNG, WebP and HEIC selections are prepared securely on your device. Maximum 5 MB.'}</Text>
   {(loading||busy)&&<View accessibilityRole="status"><ActivityIndicator color={theme.accent}/><Text style={text}>{loading?'Loading photo…':progress===null?'Preparing or saving photo…':`Uploading photo: ${progress}%`}</Text></View>}
   {!!error&&<Text accessibilityRole="alert" style={{...text,color:theme.error}}>{error}</Text>}
   {!!message&&<Text accessibilityRole="status" style={text}>{message}</Text>}
@@ -77,6 +80,7 @@ function Settings({uid,disabled,onBusyChange}){
   {!!file&&<><PrimaryButton title="Save Photo" disabled={blocked} onPress={()=>save()}/><OutlineButton title="Cancel Photo" disabled={busy} onPress={()=>setFile(null)}/></>}
   {!!saved?.photoId&&<ConfirmationButton palette={theme} title="Remove Photo" message="Remove your current profile photo? Your avatar will return to the default icon." disabled={blocked} onConfirm={()=>save(true)} danger/>}
   {!saved&&!loading&&!offline&&<OutlineButton title="Refresh Photo" disabled={busy||disabled} onPress={load}/>}
+  {photoSource.chooser}
  </View>;
 }
 export default function ProfilePhotoSettings(props){const {user}=useAuth();return user?.uid?<Settings key={user.uid} uid={user.uid} {...props}/>:null;}

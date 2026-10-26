@@ -3,6 +3,7 @@ import {MessagesScreen,ChatScreen} from './screens/MessagingScreens';
 import {ReceiptDetailScreen,NotificationsScreen} from './screens/CommunicationScreens';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import OwnerHomeScreen from '../customer/screens/OwnerHomeScreen';
+import CustomerSavedScreen from '../customer/screens/CustomerSavedScreen';
 import AccountScreen from '../auth/screens/AccountScreen';
 import {BookingsScreen,BookingDetailScreen} from './screens/BookingScreens';
 import {QuoteComparisonScreen} from './screens/QuoteComparisonScreen';
@@ -29,6 +30,7 @@ export default function OwnerNavigator(){
       <Stack.Screen name="Discover" component={OwnerHomeScreen}/>
       <Stack.Screen name="PostDetail" component={PostDetailScreen}/>
       <Stack.Screen name="ShopProfile" component={ShopProfileScreen}/>
+      <Stack.Screen name="SavedPosts" component={CustomerSavedScreen}/>
       <Stack.Screen name="Garage" component={GarageScreen}/>
       <Stack.Screen name="VehicleForm" component={VehicleFormScreen} options={{presentation:'modal'}}/>
       <Stack.Screen name="OwnerRequests" component={OwnerRequestsScreen}/>

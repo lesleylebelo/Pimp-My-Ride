@@ -1,3 +1,4 @@
+import {CustomerFrame,CustomerPressable,useCustomerExperience} from '../../customer/components/CustomerUI';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {ActivityIndicator, Pressable, SectionList, StyleSheet, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
@@ -12,7 +13,7 @@ import {notificationDestination, notificationIcon, notificationSections, notific
 
 export default function NotificationHistory({navigation}) {
   const {profile, offline} = useAuth(), {theme, isDark} = useTheme(), focused = useIsFocused();
-  const feed = useNotificationHistory();
+  const feed = useNotificationHistory(),customer=useCustomerExperience(),Interaction=customer?CustomerPressable:Pressable;
   const [readIds, setReadIds] = useState(new Set()), [saving, setSaving] = useState(false), [failure, setFailure] = useState('');
   const [now, setNow] = useState(Date.now);
   const active = useRef(true), lock = useRef(false), navigating = useRef(false);
@@ -49,20 +50,21 @@ export default function NotificationHistory({navigation}) {
   function loadNext() {if (!disabled && !feed.error) void feed.loadNext();}
   const message = offline ? 'Connect to view your notifications.' : failure || feed.error;
   function action(title, onPress, blocked = false, label = title) {
-    return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{disabled: blocked}} disabled={blocked} onPress={onPress}
+    return <Interaction accessibilityRole="button" accessibilityLabel={label} accessibilityState={{disabled: blocked}} disabled={blocked} onPress={onPress}
       style={({pressed}) => [styles.action, pressed && styles.pressed, blocked && styles.disabled]}>
       <Text weight="semibold" style={styles.actionText}>{title}</Text>
-    </Pressable>;
+    </Interaction>;
   }
-  return <SafeAreaView style={styles.safe} edges={['top', 'bottom', 'left', 'right']}>
+  const Frame=customer?CustomerNotificationFrame:SafeAreaView;
+  return <Frame navigation={navigation} style={styles.safe} edges={['top', 'bottom', 'left', 'right']}>
     <View style={styles.page}>
-      <View style={styles.header}>
+      {!customer&&<View style={styles.header}>
         <Pressable accessibilityRole="button" accessibilityLabel="Go back" style={({pressed}) => [styles.back, pressed && styles.pressed]}
           onPress={() => {if (navigating.current) return; navigating.current = true; if (navigation.canGoBack?.()) navigation.goBack(); else navigation.navigate(profile?.role === 'shop' ? 'ShopJobs' : 'Discover');}}>
           <Ionicons name="arrow-back" size={22} color={theme.textPrimary}/>
         </Pressable>
         <Text accessibilityRole="header" weight="displaySemi" style={styles.title}>Notifications</Text>
-      </View>
+      </View>}
       <SectionList testID="notification-list" style={styles.list} sections={sections} keyExtractor={item => item.id}
         contentContainerStyle={styles.content} stickySectionHeadersEnabled={false}
         initialNumToRender={12} maxToRenderPerBatch={12} windowSize={7}
@@ -78,7 +80,7 @@ export default function NotificationHistory({navigation}) {
           const title = item.title || item.event?.replace(/_/g, ' ') || 'Marketplace update';
           const timestamp = notificationTime(item.createdAt, now);
           return <View testID={`notification-${item.id}`} style={[styles.row, !read && styles.unread]}>
-            <Pressable disabled={disabled || !destination} accessibilityRole={destination ? 'button' : undefined}
+            <Interaction disabled={disabled || !destination} accessibilityRole={destination ? 'button' : undefined}
               accessibilityLabel={`${read ? 'Read' : 'Unread'}: ${title}${item.body ? `. ${item.body}` : ''}. ${timestamp}`}
               accessibilityHint={destination ? 'Opens the related record' : undefined}
               accessibilityState={destination ? {disabled} : undefined} onPress={() => open(item)}
@@ -94,7 +96,7 @@ export default function NotificationHistory({navigation}) {
               </View>
               {!read && <View testID="notification-unread-dot" style={styles.dot}/>}
               {!!destination && <Ionicons name="chevron-forward" size={16} color={theme.textSecondary}/>}
-            </Pressable>
+            </Interaction>
             {!read && <View style={styles.readAction}>{action('Mark as read', () => void markRead(item), disabled, `Mark as read: ${title}`)}</View>}
           </View>;
         }}
@@ -106,8 +108,10 @@ export default function NotificationHistory({navigation}) {
           {action('Refresh notifications', refresh, offline || saving || feed.refreshing)}
         </View>}/>
     </View>
-  </SafeAreaView>;
+  </Frame>;
 }
+
+function CustomerNotificationFrame({navigation,children}){return <CustomerFrame title="Notifications" navigation={navigation} activeRoute="Notifications" back>{children}</CustomerFrame>;}
 
 const makeStyles = (theme, isDark) => StyleSheet.create({
   safe: {flex: 1, backgroundColor: theme.surfaceCanvas},

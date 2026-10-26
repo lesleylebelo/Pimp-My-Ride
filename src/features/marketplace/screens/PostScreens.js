@@ -1,3 +1,4 @@
+import {CustomerAction,CustomerGrid,CustomerPressable,useCustomerExperience} from '../../customer/components/CustomerUI';
 import React,{useEffect,useRef,useState} from 'react';
 import {Image,Pressable,RefreshControl,ScrollView,View,useWindowDimensions} from 'react-native';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
@@ -13,12 +14,18 @@ import ShowcasePhoto,{hasPostImage} from '../components/ShowcasePhoto';
 import AIAssistButton from '../components/AIAssistButton';
 import {useTheme} from '../../../shared/theme/ThemeContext';
 import {ShowcaseAction as Button,ShowcasePage,WorkshopIdentity,ShowcaseEmpty,showcaseStyles} from '../components/ShowcaseUI';
+import {WorkshopFeedColumn} from '../components/WorkshopFeedCards';
+import {usePhotoSource} from '../../../shared/components/PhotoSourceChooser';
+import {useIsFocused} from '@react-navigation/native';
 const categories = ['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
 const failure=e=>e?.message||'Unable to save this post. Please retry.';
 
 export function PostFormScreen({navigation,route}){
  const {theme}=useTheme(),ui=showcaseStyles(theme),[review,setReview]=useState(false),{width,fontScale}=useWindowDimensions();
  const {user,profile,offline}=useAuth(),post=route.params?.post,type=route.params?.type||(profile?.role==='shop'?'showcase':'build'),shop=profile?.role==='shop';
+ const focused=useIsFocused(),photoSource=usePhotoSource({scopeKey:user?.uid,enabled:!offline});
+ const selectionEpoch=useRef(0),selectionLock=useRef(false);
+ useEffect(()=>{++selectionEpoch.current;return()=>{++selectionEpoch.current;};},[user?.uid,offline,focused]);
  const savedImages=(Array.isArray(post?.images)?post.images:[]).filter(image=>typeof image?.path==='string'&&(typeof image.bucket==='string'||isMediaUrl(image.url)));
  const invalidSavedMedia=!!post&&(post.images!=null&&!Array.isArray(post.images)||Array.isArray(post.images)&&savedImages.length!==post.images.length);
  const [title,setTitle]=useState(post?.title||''),[description,setDescription]=useState(post?.description||''),[category,setCategory]=useState(post?.category||'Other');
@@ -27,9 +34,17 @@ export function PostFormScreen({navigation,route}){
  const [files,setFiles]=useState([]),[imageOrder,setImageOrder]=useState(()=>savedImages.map(image=>`p:${image.path}`)),[busy,setBusy]=useState(false),[progress,setProgress]=useState(0),[error,setError]=useState('');
  const lock=useRef(false),confirmedUploads=useRef(new Map()),verified=shop&&profile?.verificationStatus==='approved';
  async function selectPhotos(){
-  if(busy||offline)return;
-  try{const selected=await pickPostPhotos(Math.max(0,10-images.length-files.length));setFiles(previous=>[...previous,...selected].slice(0,Math.max(0,10-images.length)));setImageOrder(previous=>[...previous,...selected.map(file=>`f:${file.uri}`)]);}
+  if(busy||offline||!focused||selectionLock.current)return;
+  selectionLock.current=true;const epoch=selectionEpoch.current;
+  try{
+   const selected=await pickPostPhotos(Math.max(0,10-images.length-files.length),{selectAssets:photoSource.choose});if(epoch!==selectionEpoch.current)return;
+   // Web processing can return the same data URI when the same photo is picked
+   // again from camera/gallery. URI keys and pending uploads must stay unique.
+   const known=new Set(files.map(file=>file.uri)),added=selected.filter(file=>{if(known.has(file.uri))return false;known.add(file.uri);return true;}).slice(0,Math.max(0,10-images.length-files.length));
+   setFiles(previous=>[...previous,...added]);setImageOrder(previous=>[...previous,...added.map(file=>`f:${file.uri}`)]);
+  }
   catch(e){if(__DEV__)console.error('[PimpMyRide showcase photo picker failed]',e);setError(failure(e));}
+  finally{selectionLock.current=false;}
  }
  async function save(){
   if(lock.current||busy||offline)return;
@@ -68,6 +83,7 @@ export function PostFormScreen({navigation,route}){
  const disabled=busy||offline||shop&&!verified;
  const styles={pills:{flexDirection:'row',flexWrap:'wrap',gap:8},pill:{minHeight:44,padding:12,borderRadius:14,backgroundColor:theme.surfaceMuted},selected:{backgroundColor:theme.accentLight},pillText:{color:theme.textPrimary},selectedText:{color:theme.textPrimary},warning:{color:theme.error},photoRow:{width:width>=900&&fontScale<1.4?'48%':'100%',padding:12,borderRadius:16,backgroundColor:theme.surfaceMuted,gap:12},preview:{width:'100%',aspectRatio:4/3,borderRadius:12},photoName:{color:theme.textPrimary}};
  return <ShowcasePage title={post?'Edit post':shop?'New showcase':'Share a build'} navigation={navigation} keyboard>
+  {photoSource.chooser}
   <Text style={ui.muted}>Add project details, choose your photos and review before publishing. Title is required.</Text>
   {offline&&<Text accessibilityRole="alert" style={ui.muted}>You are offline. Connect before selecting photos or publishing.</Text>}
   {shop&&!verified&&<Text style={styles.warning}>Shop verification is required before you can publish showcases. You can complete verification from My Shop.</Text>}
@@ -106,7 +122,7 @@ export function MyPostsScreen({navigation,route}){
   <Notice busy={feed.busy} error={feed.error}/>
   {!!feed.error&&<Button title="Retry loading posts" outline onPress={()=>void feed.refresh()}/>}
   <Text accessibilityRole="header" style={ui.heading}>{shop?'Your portfolio':'Your builds'}</Text>
-  <View style={{flexDirection:'row',flexWrap:'wrap',gap:18}}>{feed.items.filter(post=>post.type===type).map(post=><View key={post.id} style={{width:width>=800&&fontScale<1.4?'48%':'100%'}}><PostCard post={post} editable onOpen={()=>navigation.navigate('PostDetail',{id:post.id})} onEdit={item=>navigation.navigate('PostForm',{type,post:item})} onRemoved={()=>void feed.refresh()}/></View>)}</View>
+  <View style={shop?{width:'100%',maxWidth:680,alignSelf:'center',gap:24}:{flexDirection:'row',flexWrap:'wrap',gap:18}}>{feed.items.filter(post=>post.type===type).map(post=><View key={post.id} style={{width:shop?'100%':width>=800&&fontScale<1.4?'48%':'100%'}}><PostCard post={post} presentation={shop?'feed':'card'} editable onOpen={()=>navigation.navigate('PostDetail',{id:post.id})} onEdit={item=>navigation.navigate('PostForm',{type,post:item})} onRemoved={()=>void feed.refresh()}/></View>)}</View>
   {!feed.busy&&!feed.error&&!feed.items.length&&<ShowcaseEmpty>{shop?'Add your first showcase to start your portfolio.':'You have not shared any builds yet.'}</ShowcaseEmpty>}
   {feed.busy&&!!feed.items.length&&<Text style={ui.muted}>Loading more posts...</Text>}
  </ShowcasePage>;
@@ -123,6 +139,7 @@ export function SavedPostsScreen({navigation}){
 
 export function PostDetailScreen({navigation,route}){
  const {theme}=useTheme(),ui=showcaseStyles(theme),{width}=useWindowDimensions(),[selected,setSelected]=useState(0);
+ const customer=useCustomerExperience(),Interaction=customer?CustomerPressable:Pressable;
  const {user}=useAuth(),[post,setPost]=useState(null),[busy,setBusy]=useState(true),[error,setError]=useState('');
  const [retry,setRetry]=useState(0);
  useEffect(()=>{let active=true;setBusy(true);setPost(null);setError('');postsApi('get',{id:route.params?.id},user?.uid).then(result=>{if(active)setPost(result.post);}).catch(e=>{if(active)setError(e.message||failure(e));}).finally(()=>{if(active)setBusy(false);});return()=>{active=false;};},[route.params?.id,user?.uid,retry]);
@@ -135,7 +152,7 @@ export function PostDetailScreen({navigation,route}){
   {!busy&&!error&&!post&&<ShowcaseEmpty>This project is unavailable or you do not have access.</ShowcaseEmpty>}
   {post&&<>
    {photos.length?<View style={{gap:12}}><ShowcasePhoto postId={post.id} image={photos[Math.min(selected,photos.length-1)]} style={[ui.photo,{maxHeight:620}]} resizeMode="contain"/>
-   {photos.length>1&&<><Text style={ui.muted}>Photo {selected+1} of {photos.length}</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:12}}>{photos.map((image,index)=><Pressable key={image.path||image.url||index} accessibilityRole="button" accessibilityLabel={'View project photo '+(index+1)} accessibilityState={{selected:selected===index}} onPress={()=>setSelected(index)} style={{padding:3,borderWidth:2,borderColor:selected===index?theme.accent:'transparent',borderRadius:14}}><ShowcasePhoto postId={post.id} image={image} style={{width:Math.min(100,width/4),height:80,borderRadius:10}}/></Pressable>)}</ScrollView></>}
+   {photos.length>1&&<><Text style={ui.muted}>Photo {selected+1} of {photos.length}</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:12}}>{photos.map((image,index)=><Interaction key={image.path||image.url||index} accessibilityRole="button" accessibilityLabel={'View project photo '+(index+1)} accessibilityState={{selected:selected===index}} onPress={()=>setSelected(index)} style={{padding:3,borderWidth:2,borderColor:selected===index?theme.accent:'transparent',borderRadius:14}}><ShowcasePhoto postId={post.id} image={image} style={{width:Math.min(100,width/4),height:80,borderRadius:10}}/></Interaction>)}</ScrollView></>}
    </View>:<ShowcaseEmpty>No project photos available.</ShowcaseEmpty>}
    <View style={ui.section}><Text accessibilityRole="header" weight="semibold" style={ui.title}>{post.title}</Text>
    {!!(post.serviceCategory||post.category)&&<Text style={ui.chip}>{post.serviceCategory||post.category}</Text>}
@@ -155,13 +172,15 @@ export function ShopProfileScreen({navigation,route}){
 }
 function ShopPortfolio({navigation,shop}){
  const {theme}=useTheme(),ui=showcaseStyles(theme),{width,fontScale}=useWindowDimensions();
- const feed=usePostsFeed({view:'feed',shopId:shop.id});
+ const feed=usePostsFeed({view:'feed',shopId:shop.id}),customer=useCustomerExperience();
  const onScroll=event=>{const {contentOffset,contentSize,layoutMeasurement}=event.nativeEvent;if(contentSize.height-contentOffset.y-layoutMeasurement.height<240)feed.loadNext();};
  return <ShowcasePage title="Workshop portfolio" navigation={navigation} onScroll={onScroll} refreshControl={<RefreshControl refreshing={feed.refreshing} onRefresh={()=>void feed.refresh()}/>}>
-  {shop?.id?<><WorkshopIdentity shop={shop}/><Text accessibilityRole="header" style={ui.heading}>Featured work</Text>
+  {shop?.id?<><WorkshopIdentity shop={shop}/>
+  {customer&&<>{!!shop.services?.length&&<View style={ui.section}><Text style={ui.heading}>Services</Text><Text style={ui.body}>{Array.isArray(shop.services)?shop.services.join(' / '):shop.services}</Text></View>}{shop.id&&<CustomerAction title="Request a service" icon="construct-outline" primary onPress={()=>navigation.navigate('RequestForm',{shop:{id:shop.id,shopName:shop.name,city:shop.city}})}/>}</>}
+  <Text accessibilityRole="header" style={ui.heading}>{customer?'Workshop showcases':'Featured work'}</Text>
   <Notice busy={feed.busy} error={feed.error}/>
   {!!feed.error&&<Button title="Retry loading portfolio" outline onPress={()=>void feed.refresh()}/>}
-  <View style={{flexDirection:'row',flexWrap:'wrap',gap:18}}>{feed.items.map(post=><View key={post.id} style={{width:width>=800&&fontScale<1.4?'48%':'100%'}}><PostCard post={post} onOpen={()=>navigation.navigate('PostDetail',{id:post.id})}/></View>)}</View>
+  {customer?<CustomerGrid>{feed.items.map(post=><PostCard key={post.id} post={post} onOpen={()=>navigation.navigate('PostDetail',{id:post.id})}/>)}</CustomerGrid>:<WorkshopFeedColumn>{feed.items.map(post=><PostCard key={post.id} post={post} presentation="feed" onOpen={()=>navigation.navigate('PostDetail',{id:post.id})}/>)}</WorkshopFeedColumn>}
   {!feed.busy&&!feed.error&&!feed.items.length&&<ShowcaseEmpty>This workshop has not shared any showcases yet.</ShowcaseEmpty>}
   {!!feed.cursor&&<Button title="Load more showcases" outline disabled={feed.busy} onPress={()=>feed.loadNext()}/>}</>:<ShowcaseEmpty>Workshop unavailable. Return to the project and try again.</ShowcaseEmpty>}
  </ShowcasePage>;

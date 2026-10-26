@@ -87,10 +87,10 @@ test('legacy backend failures are presented as PimpPilot errors without changing
  const input={kind:'request',title:'Black wrap',description:'Wrap doors.',categoryId:'paint'},before=JSON.stringify(input);
  for(const [status,code,message,expected] of [
   [503,'api/unavailable','AI Assist is unavailable.','PimpPilot is temporarily unavailable. Your draft is unchanged.'],
-  [429,'api/resource-exhausted','The initial AI test allowance has been used.',"PimpPilot's usage limit has been reached. Your draft is unchanged."],
-  [403,'api/permission-denied','AI Assist is restricted to designated test accounts.','PimpPilot is not available for this account. Your draft is unchanged.'],
-  [undefined,'api/network-request-failed','Connection failed.','PimpPilot is temporarily unavailable. Your draft is unchanged.'],
-  [undefined,'api/connection-timeout','Connection timed out.','PimpPilot is temporarily unavailable. Your draft is unchanged.'],
+  [429,'api/resource-exhausted','The initial AI test allowance has been used.','PimpPilot is busy or its test allowance has been reached. Please try again later. Your draft is unchanged.'],
+  [403,'api/permission-denied','AI Assist is restricted to designated test accounts.','PimpPilot access could not be authorised. Refresh your session or contact the project owner. Your draft is unchanged.'],
+  [undefined,'api/network-request-failed','Connection failed.',"Couldn't connect to PimpPilot. Check your connection and try again. Your draft is unchanged."],
+  [undefined,'api/connection-timeout','Connection timed out.','PimpPilot took too long to respond. Please try again later. Your draft is unchanged.'],
   [400,'api/invalid-argument','Enter a title or description.','Enter a title or description.'],
  ]){
   let calls=0;const {aiAssist}=loadUI('src/features/marketplace/services/aiAssistApi.js',{'../../../shared/services/api':{apiRequest:async()=>{calls++;throw Object.assign(Error(message),{status,code});}}});
@@ -100,5 +100,59 @@ test('legacy backend failures are presented as PimpPilot errors without changing
  const s=await setup();try{
   s.state.reply=async()=>{throw Object.assign(Error('AI Assist is unavailable.'),{status:503});};await s.press('Optimise with PimpPilot');
   assert.match(text(s.tree),/PimpPilot is temporarily unavailable\. Your draft is unchanged\./);assert.doesNotMatch(text(s.tree),/AI Assist/);assert.equal(s.state.applied.length,0);
+ }finally{await s.close();}
+});
+
+test('Dismiss and focus/offline transitions retain the pending lock until settlement, then recover',async()=>{
+ for(const transition of ['dismiss','focus','offline']){
+  const s=await setup();let resolve;
+  try{
+   s.state.reply=()=>new Promise(done=>{resolve=done;});
+   await s.press('Optimise with PimpPilot');
+   if(transition==='dismiss')await s.press('Dismiss');
+   else if(transition==='focus'){s.state.focused=false;await s.update({});s.state.focused=true;await s.update({});}
+   else{s.state.auth.offline=true;await s.update({});s.state.auth.offline=false;await s.update({});}
+   await s.press('Optimise with PimpPilot');assert.equal(s.state.calls.length,1);
+   assert.equal(button(s.tree,'Optimise with PimpPilot').props.disabled,true);
+   await act(async()=>{resolve(suggestion);await new Promise(done=>setImmediate(done));});
+   assert.equal(s.tree.root.findAllByType('Modal').length,0);assert.equal(s.state.applied.length,0);
+   s.state.reply=async()=>suggestion;await s.press('Optimise with PimpPilot');assert.equal(s.state.calls.length,2);
+   await s.press('Apply');assert.equal(s.state.applied.length,1);
+  }finally{await s.close();}
+ }
+});
+
+test('classified server failures survive client and component presentation without retries or draft changes',async()=>{
+ const {pimpPilotErrorMessage}=loadUI('src/features/marketplace/services/pimpPilotPresentation.js');
+ const cases=[
+  [429,'daily_allowance',/shared daily.*2026-10-27 00:00:00 UTC/],
+  [429,'rate_limit',/busy/],[429,'busy',/busy/],
+  [403,'tester_required',/designated test accounts/],[403,'account_access',/account access could not be verified/],
+  [403,'account_eligibility',/active Customer or approved Workshop/],[403,'draft_type',/draft type/],[403,'account_changed',/account access changed/],
+  [503,'configuration',/temporarily unavailable/],[503,'provider_limit',/AI provider has reached a usage or capacity limit/],
+  [503,'provider_billing',/billing review/],[503,'provider_timeout',/too long/],[503,'provider_network',/could not reach its AI provider/],
+  [503,'service_unavailable',/temporarily unavailable/],
+  [503,'suggestion_rejected',/could not validate a suggestion/],
+ ];
+ for(const [status,aiReason,expected] of cases){
+  let calls=0;const fields={aiReason,resetAt:Date.parse('2026-10-27T00:00:00Z')};
+  const {aiAssist}=loadUI('src/features/marketplace/services/aiAssistApi.js',{'../../../shared/services/api':{apiRequest:async()=>{calls++;throw Object.assign(Error('The server could not complete this request.'),{status,code:status===503?'api/unavailable':status===429?'api/resource-exhausted':'api/permission-denied',responseBody:{fields}});}}});
+  let presented;try{await aiAssist({kind:'request',title:'Draft',description:'Original text'},'owner');assert.fail('must reject');}catch(error){presented=error;}
+  assert.equal(calls,1);assert.match(presented.message,expected);assert.equal(pimpPilotErrorMessage(presented),presented.message);
+  const s=await setup();try{s.state.reply=async()=>{throw presented;};await s.press('Optimise with PimpPilot');assert.match(text(s.tree),expected);assert.equal(s.state.applied.length,0);}finally{await s.close();}
+ }
+ for(const resetAt of ['tomorrow',NaN,Infinity,1e99])assert.doesNotMatch(pimpPilotErrorMessage({aiReason:'daily_allowance',resetAt}),/resets at/);
+ assert.match(pimpPilotErrorMessage({status:401}),/Sign in again/);
+});
+
+test('account switching discards an older in-flight suggestion and isolates the new preview',async()=>{
+ const s=await setup();let resolve;
+ try{
+  s.state.reply=()=>new Promise(done=>{resolve=done;});await s.press('Optimise with PimpPilot');
+  s.state.auth.user={uid:'new-owner'};await s.update({});
+  s.state.reply=async()=>({...suggestion,title:'New account draft'});await s.press('Optimise with PimpPilot');
+  await act(async()=>{resolve(suggestion);await new Promise(done=>setImmediate(done));});
+  assert.match(text(s.tree),/New account draft/);assert.doesNotMatch(text(s.tree),/Suggested title: Black wrap request/);
+  assert.equal(s.state.calls[0][1],'owner');assert.equal(s.state.calls[1][1],'new-owner');assert.equal(s.state.applied.length,0);
  }finally{await s.close();}
 });

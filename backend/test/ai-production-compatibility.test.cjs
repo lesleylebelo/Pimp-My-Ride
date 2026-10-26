@@ -12,7 +12,9 @@ test('format handling preserves grounding, non-AI runtime, dependencies, rules a
  const allowed=['backend/app.cjs','backend/messaging.cjs','backend/posts.cjs','backend/services.cjs','backend/storage.cjs','backend/ai-provider.cjs','backend/ai-assist.cjs','backend/ai-errors.cjs','backend/ai-release-control.cjs','backend/marketplace.cjs','backend/server.cjs','backend/mock-payment-gate.cjs','backend/quote-recommendations.cjs','backend/quote-recommendation-read.cjs'];
  const files=execFileSync('git',['ls-tree','-r','--name-only',BASE,'backend'],{cwd:root,encoding:'utf8',windowsHide:true}).trim().split('\n');
  for(const file of files.filter(file=>/^backend\/[^/]+\.cjs$/.test(file)&&!allowed.includes(file)))assert.equal(current(file),baseline(file),file);
- for(const file of ['backend/.env.example','backend/package-lock.json','firestore.rules','firestore.indexes.json','render.yaml','src/features/marketplace/services/aiAssistApi.js','src/features/marketplace/services/pimpPilotPresentation.js','src/features/marketplace/components/AIAssistButton.js'])assert.equal(current(file),baseline(file),file);
+ // AI presentation and its pending-request lock are deliberately changed by the
+ // PimpPilot audit; their behavioural contracts live in tests/ai-assist.test.cjs.
+ for(const file of ['backend/.env.example','backend/package-lock.json','firestore.rules','firestore.indexes.json','render.yaml'])assert.equal(current(file),baseline(file),file);
  // Local connection recovery now explicitly permits changes to health readiness
  // and connection diagnostics, covered by tests/api.test.cjs. Keep configuration,
  // fetch deadlines, authenticated operations and uploads byte-for-byte protected.
@@ -25,13 +27,24 @@ test('format handling preserves grounding, non-AI runtime, dependencies, rules a
 });
 test('daily quota and storage guards differ only by content-free diagnostic fields',()=>{
  const restored=current('backend/ai-release-control.cjs')
+  .replace("{AIFailure,failure,rejection}","{AIFailure,failure}")
+  .replace("rejection('permission-denied','tester_required',","new ApiError('permission-denied',")
+  .replace("rejection('resource-exhausted','daily_allowance','The daily AI test allowance has been used. Your draft is unchanged.',Date.parse(day+'T00:00:00Z')+86400000)","new ApiError('resource-exhausted','The daily AI test allowance has been used. Your draft is unchanged.')")
   .replace('outputStage:null,outputRule:null,','')
   .replace('outputStage:safe?.outputStage??null,outputRule:safe?.outputRule??null,','');
  assert.equal(restored,baseline('backend/ai-release-control.cjs'));
 });
-test('authentication, request validation, rate limits, timeout and post-provider access checks stay unchanged',()=>{
+test('request validation, quota values, timeout, provider request and post-provider access guards stay protected',()=>{
  const previous=baseline('backend/ai-assist.cjs'),next=current('backend/ai-assist.cjs');
- const section=source=>source.slice(source.indexOf('function createAIAssist'));
- assert.equal(section(next),section(previous));
- assert.equal(current('backend/ai-provider.cjs').split('   const bad=')[0],baseline('backend/ai-provider.cjs').split('   const body=')[0],'provider request, model selection and HTTP errors remain unchanged');
+ const section=(source,start,end)=>source.slice(source.indexOf(start),source.indexOf(end));
+ for(const [start,end] of [["  if(Buffer.byteLength",'  releaseControl.authorize'],['  let categories=','  const clock='],['  quota.pending=true;','  }catch(error){']])assert.equal(section(next,start,end),section(previous,start,end));
+ const access=source=>source.split('\n').find(line=>line.includes('fresh.uid!==account.uid'));
+ assert.equal(access(next),access(previous));
+ assert.match(next,/quota\.minuteCount>=3\|\|quota\.hourCount>=10/);assert.match(next,/concurrent>=4/);assert.match(next,/usage\.size>=5000/);
+ const nextProvider=current('backend/ai-provider.cjs'),oldProvider=baseline('backend/ai-provider.cjs');
+ assert.equal(section(nextProvider,'function createAIProvider','  const instructions='),section(oldProvider,'function createAIProvider','  const instructions='),'provider selection and response schema unchanged');
+ assert.equal(section(nextProvider,'  try{','   if(!response.ok)'),section(oldProvider,'  try{','   if(!response.ok)'),'provider request, token bounds and dispatch unchanged');
+ // Only the additional preservation/question guidance changes the original prompt.
+ const oldPrompt=section(oldProvider,'  const instructions=','  try{').trimEnd().slice(0,-1);
+ assert.ok(section(nextProvider,'  const instructions=','  try{').startsWith(oldPrompt+'+'));
 });

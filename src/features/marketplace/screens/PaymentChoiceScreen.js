@@ -67,7 +67,7 @@ function PaymentChoice({route,navigation}) {
     finally{setBusy(false);}
   }
 
-  return <Page title="Payment choice" subtitle="Review the existing choice before opening your booking" navigation={navigation} maxWidth={820}>
+  return <Page title="Payment choice" subtitle="Review the amount, then confirm your booking" navigation={navigation} maxWidth={820}>
     <MockPaymentNotice capability={capability}/>
     <BookingProgress choice reviewing={!!method}/>
     <Notice busy={saving} error={error|| (offline?'Connect to choose a payment method.':'')}/>
@@ -80,14 +80,14 @@ function PaymentChoice({route,navigation}) {
       {hasDeposit&&<Text>Shop-required deposit{quote.depositType==='percentage'?` (${quote.depositValue}%)`:''}: {formatMoney(quote.depositAmountCents)}</Text>}
       <Text>Amount payable now: {formatMoney(amountNow)}</Text>
       <Text>Remaining balance: {formatMoney(remaining)}</Text>
-      <Text style={styles.muted}>This is a preview after the selected outcome succeeds. Failed or pending simulations leave the full unpaid amount due.</Text>
+      <Text style={styles.muted}>Preview assumes a successful simulation. A failed or pending result leaves the full amount due.</Text>
       <Text style={styles.notice}>SIMULATION ONLY — no real money, card or banking details are used. This project does not process charges or payouts.</Text>
     </Card>
     <Card>
-      <Text weight="semibold" style={styles.heading}>Choose your existing payment option</Text>
-      <Button title={`Pay in Full · ${formatMoney(quote.totalCents)}`} outline={method!=='pay_now'} disabled={busy||offline||!capability.enabled} onPress={()=>setMethod('pay_now')}/>
-      {hasDeposit&&<Button title={`Pay Deposit · ${formatMoney(quote.depositAmountCents)}`} outline={method!=='pay_deposit'} disabled={busy||offline||!capability.enabled} onPress={()=>setMethod('pay_deposit')}/>}
-      <Button title={`Pay In-Store · ${formatMoney(quote.totalCents)} due`} outline={method!=='pay_in_store'} disabled={busy||offline||!capability.enabled} onPress={()=>setMethod('pay_in_store')}/>
+      <Text weight="semibold" style={styles.heading}>Choose a payment option</Text>
+      <Button title={`Pay in full · ${formatMoney(quote.totalCents)}`} outline={method!=='pay_now'} disabled={busy||offline||!capability.enabled} onPress={()=>setMethod('pay_now')}/>
+      {hasDeposit&&<Button title={`Pay deposit · ${formatMoney(quote.depositAmountCents)}`} outline={method!=='pay_deposit'} disabled={busy||offline||!capability.enabled} onPress={()=>setMethod('pay_deposit')}/>}
+      <Button title={`Pay in-store · ${formatMoney(quote.totalCents)} due`} outline={method!=='pay_in_store'} disabled={busy||offline||!capability.enabled} onPress={()=>setMethod('pay_in_store')}/>
     </Card>
     {(method==='pay_now'||method==='pay_deposit')&&<Card>
       <Text style={styles.heading}>Choose a simulated test result</Text>
@@ -99,7 +99,7 @@ function PaymentChoice({route,navigation}) {
     </Card>}
     {method&&!recoveryId&&<ConfirmationButton
       palette={theme}
-      title={method==='pay_in_store'?'Confirm Pay In-Store and create booking':method==='pay_deposit'?'Confirm deposit and run simulation':'Confirm full payment and run simulation'}
+      title={method==='pay_in_store'?'Confirm Pay in-store and create booking':method==='pay_deposit'?'Confirm deposit and run simulation':'Confirm full payment and run simulation'}
       message={method==='pay_in_store'
         ? `Confirm that you intend to pay ${formatMoney(quote.totalCents)} at the shop? This creates an unpaid booking.`
         : `Create a test booking and simulate ${formatMoney(amountNow)} payable now, with ${formatMoney(remaining)} remaining if successful? Selected test outcome: ${outcome||'choose a result'}. No payment will be processed.`}

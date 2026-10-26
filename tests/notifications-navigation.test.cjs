@@ -35,8 +35,9 @@ test('both feed headers place the bell beside unchanged Messages with matching a
   try{
    const bell=button(tree,'Notifications'),messages=button(tree,'Messages');assert.ok(bell);assert.ok(messages);
    const title=tree.root.findAllByType('Text').find(node=>node.props.children===(role==='owner'?'Discover':'Find Jobs'));
-   assert.deepEqual(title.parent.parent.findAllByType('Pressable').map(node=>node.props.accessibilityLabel),['Notifications','Messages']);
-   assert.equal(title.parent.props.style.minWidth,0);assert.equal(title.parent.props.style.flex,1);
+   const copy=role==='owner'?title.parent.parent:title.parent;
+   assert.deepEqual(copy.parent.findAllByType('Pressable').map(node=>node.props.accessibilityLabel),['Notifications','Messages']);
+   assert.equal(copy.props.style.minWidth,0);assert.equal(copy.props.style.flex,1);
    assert.equal(bell.props.accessibilityRole,'button');assert.equal(bell.findByType('Icon').props.name,'notifications-outline');
    assert.equal(bell.findByType('Icon').props.color,messages.findByType('Icon').props.color);
    assert.deepEqual(bell.props.style({pressed:false}),messages.props.style({pressed:false}));assert.equal(bell.props.style({pressed:false})[0].width,44);
@@ -75,11 +76,11 @@ test('notification count discards late responses on account, focus, offline and 
  }
 });
 
-test('Account, generic navigation and tabs have no Notifications shortcut for either role',async()=>{
+test('Customer utility navigation exposes notifications while Workshop keeps its original shortcuts',async()=>{
  for(const role of ['owner','shop']){
   const s=setup(role),Account=s.load('src/features/auth/screens/AccountScreen.js').default,{Page}=s.load('src/features/marketplace/components/MarketplaceUI.js');
   for(const [Component,props] of [[Account,{navigation:s.navigation}],[Page,{title:'Bookings',navigation:s.navigation}]]){
-   const tree=await mount(Component,props);try{assert.equal(button(tree,'Notifications'),undefined);assert.equal(button(tree,'Notification history'),undefined);}finally{await close(tree);}
+   const tree=await mount(Component,props);try{assert.equal(!!button(tree,'Notifications'),role==='owner');assert.ok(!button(tree,'Notification history'));}finally{await close(tree);}
   }
  }
 });

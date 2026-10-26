@@ -59,7 +59,7 @@ export function FeedServicePill({title, icon, selected, onPress, disabled = fals
   );
 }
 
-export function FeedSourceSelector({options, storageKey, value, onChange}) {
+export function FeedSourceSelector({options, storageKey, value, onChange, interactionComponent:Interaction=Pressable}) {
   const {theme} = useTheme();
   const styles = makeStyles(theme);
   const [selected,setSelected]=useState(options[0]?.value||'all');
@@ -79,11 +79,11 @@ export function FeedSourceSelector({options, storageKey, value, onChange}) {
   }
   return <View>
     <View accessibilityRole="tablist" style={styles.segmented}>
-      {options.map(option=><Pressable key={option.value} accessibilityRole="tab" accessibilityLabel={option.label}
+      {options.map(option=><Interaction key={option.value} accessibilityRole="tab" accessibilityLabel={option.label}
           accessibilityState={{selected:active===option.value}} onPress={()=>void choose(option.value)}
           style={[styles.segment,active===option.value&&styles.segmentSelected]}>
           <Text style={[styles.segmentLabel,active===option.value&&styles.segmentLabelSelected]}>{option.label}</Text>
-      </Pressable>)}
+      </Interaction>)}
     </View>
     {!!error&&<Text accessibilityRole="alert" style={styles.preferenceError}>{error}</Text>}
   </View>;

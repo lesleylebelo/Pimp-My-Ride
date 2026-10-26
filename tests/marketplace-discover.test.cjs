@@ -23,6 +23,8 @@ function setup() {
   };
   const feedCalls = [];
   const screens = loadUI('src/features/customer/screens/OwnerHomeScreen.js', {
+    '../../marketplace/components/MessagesHeaderButton': () => null,
+    '../../marketplace/components/NotificationsHeaderButton': () => null,
     '../../../shared/components/landing/LandingUI': landing,
     '../../../shared/components/landing/FeedControls': {
       FeedSearchInput: props => React.createElement('TextInput', props),
@@ -49,7 +51,7 @@ function setup() {
 const button = (tree, title) => tree.root.findAllByType('Pressable').find(node => node.props.accessibilityLabel === title);
 const text = tree => tree.root.findAllByType('Text').map(node => String(node.props.children || '')).join('\n');
 const input = tree => tree.root.findAllByType('TextInput').find(node => node.props.accessibilityLabel === 'Search workshops or services');
-const scrollContainer = tree => tree.root.findAllByType('View').find(node => node.props.onScroll);
+const scrollContainer = tree => [...tree.root.findAllByType('ScrollView'),...tree.root.findAllByType('View')].find(node => node.props.onScroll);
 
 async function mount() {
   const setupResult = setup();

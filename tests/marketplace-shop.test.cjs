@@ -197,7 +197,7 @@ test('Find Jobs provides customer-style search, one selected category, More filt
   const {screens, navigation} = setup({data: {items: [first, second], cursor: null}});
   const tree = await mount(screens.ShopJobsScreen, {navigation});
   assert.equal(input(tree, 'Search requests, vehicles or services').props.placeholder, 'Search requests, vehicles or services');
-  assert.match(text(tree), /Browse open customer requests for work your shop can complete\./);
+  assert.match(text(tree), /Explore customer requests and workshop showcases\./);
   assert.match(text(tree), /Browse by service/);
   assert.equal(button(tree, 'All').props.accessibilityState.selected, true);
   assert.equal(button(tree, 'Tuning').props.accessibilityState.selected, false);
@@ -240,7 +240,7 @@ test('Find Jobs combines search and service filters against request data', async
 test('Find Jobs shows an empty state when no open requests are available', async () => {
   const {screens, navigation} = setup({data: {items: [], cursor: null}});
   const tree = await mount(screens.ShopJobsScreen, {navigation});
-  assert.match(text(tree), /No open requests are available/);
+  assert.match(text(tree), /No posts available/);
   await act(async () => tree.unmount());
 });
 

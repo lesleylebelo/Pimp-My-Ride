@@ -57,12 +57,14 @@ test('direct attachment retries keep the chosen file, attach only a confirmed ID
  const {state,Component,props}=requestFixture();let tree;
  try{
   await act(async()=>{tree=create(React.createElement(Component,props()));});
-  const add=()=>tree.root.findAllByType('Button').find(button=>button.props.title==='Upload request photo');
-  await act(async()=>add().props.onPress());assert.deepEqual(state.selected,[]);assert.equal(state.picks,1);
-  assert.match(tree.root.findByType('Text').props.children,/Unknown/);
+  await act(async()=>tree.root.findByType('Button').props.onPress());assert.deepEqual(state.selected,[]);assert.equal(state.picks,1);assert.equal(state.uploads,0);
+  assert.equal(tree.root.findByType('Image').props.accessibilityLabel,'Selected request attachment preview');
+  const add=()=>tree.root.findAllByType('Button').find(button=>button.props.title==='Upload attachment');
+  await act(async()=>add().props.onPress());
+  assert.ok(tree.root.findAllByType('Text').some(n=>String(n.props.children).includes('Unknown')));
   state.uncertain=false;await act(async()=>add().props.onPress());
   assert.deepEqual(state.selected,['request-photo']);assert.equal(state.picks,1);assert.equal(state.uploads,2);
-  assert.deepEqual(state.busy,[true,false,true,false]);
+  assert.deepEqual(state.busy,[true,false,true,false,true,false]);
  }finally{if(tree)await act(async()=>tree.unmount());}
 });
 
@@ -71,7 +73,17 @@ test('an attachment acknowledgement after account change cannot enter the new ac
  try{
   state.late=true;await act(async()=>{tree=create(React.createElement(Component,props()));});
   await act(async()=>tree.root.findByType('Button').props.onPress());
+  await act(async()=>tree.root.findAllByType('Button').find(n=>n.props.title==='Upload attachment').props.onPress());
   await act(async()=>{state.uid='other';tree.update(React.createElement(Component,props()));});
   await act(async()=>state.resolve({id:'old-account-photo'}));assert.deepEqual(state.selected,[]);
+ }finally{if(tree)await act(async()=>tree.unmount());}
+});
+
+test('request attachment preparation is cancellable and preserves the five-photo cap without any upload',async()=>{
+ const {state,Component,props}=requestFixture();let tree;
+ try{
+  await act(async()=>{tree=create(React.createElement(Component,props()));});await act(async()=>tree.root.findByType('Button').props.onPress());assert.equal(state.uploads,0);
+  await act(async()=>tree.root.findAllByType('Button').find(n=>n.props.title==='Cancel attachment').props.onPress());assert.equal(tree.root.findAllByType('Image').length,0);assert.deepEqual(state.selected,[]);
+  state.selected=['1','2','3','4','5'];await act(async()=>tree.update(React.createElement(Component,props())));assert.equal(tree.root.findByType('Button').props.disabled,true);await act(async()=>tree.root.findByType('Button').props.onPress());assert.equal(state.picks,1);assert.equal(state.uploads,0);
  }finally{if(tree)await act(async()=>tree.unmount());}
 });

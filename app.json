@@ -21,6 +21,7 @@
         "monochromeImage": "./assets/branding/adaptive-monochrome.png"
       },
       "permissions": [
+        "android.permission.CAMERA",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
       ]
@@ -63,8 +64,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow PimpMyRide to choose a profile image or showcase photo from your library.",
-          "cameraPermission": false,
+          "photosPermission": "Allow PimpMyRide to choose vehicle, service request, showcase and profile photos from your library.",
+          "cameraPermission": "PimpMyRide uses your camera to take photos of vehicles, service requests, showcases and profile pictures.",
           "microphonePermission": false
         }
       ]

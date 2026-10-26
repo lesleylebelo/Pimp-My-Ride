@@ -70,3 +70,31 @@ test('a reservation crossing UTC midnight cannot dispatch using the previous day
  clock=Date.parse('2026-10-23T00:00:00Z');await assert.rejects(()=>attempt.dispatch(),{reason:'reservation_expired'});
  assert.equal(db.attempts()[0].dispatchInitiatedAt,null);assert.equal(db.attempts()[0].state,'unknown');assert.equal(db.rows.get(DAILY_PREFIX+'/2026-10-22').attempts,1);
 });
+
+test('first and second generations succeed for new testers; exhaustion reports verified UTC reset, not personal credits',async()=>{
+ const db=store();let clock=Date.parse('2041-02-03T21:59:00Z'),calls=0;
+ const control=createAIReleaseControl({db,env,now:()=>clock});
+ const run=assist(db,{enabled:true,suggest:async()=>{calls++;return output;}},{releaseControl:control,now:()=>clock});
+ assert.equal((await run(identity('tester-a'))).title,output.title);
+ assert.equal((await run(identity('tester-a'))).title,output.title);assert.equal(calls,2);
+ assert.equal(db.rows.get(DAILY_PREFIX+'/2041-02-03').attempts,2);
+ for(let i=0;i<3;i++){clock+=60001;await run(identity('tester-b'));}
+ // New instance bypasses no durable quota, even when its per-process counters are empty.
+ await assert.rejects(()=>assist(db,{enabled:true,suggest:async()=>assert.fail('no sixth dispatch')},{releaseControl:control})(identity('tester-a')),
+  {code:'resource-exhausted',fields:{aiReason:'daily_allowance',resetAt:Date.parse('2041-02-04T00:00:00Z')}});
+ clock=Date.parse('2041-02-04T00:00:00Z');await run(identity('tester-a'));assert.equal(calls,6);
+ assert.equal(db.rows.get(DAILY_PREFIX+'/2041-02-03').attempts,5);assert.equal(db.rows.get(DAILY_PREFIX+'/2041-02-04').attempts,1);
+});
+
+test('a pending duplicate is rejected before reservation and no automatic provider retry occurs',async()=>{
+ const db=store();let resolve,calls=0;
+ const run=assist(db,{enabled:true,suggest:()=>{calls++;return new Promise(done=>{resolve=done;});}});
+ const first=run(identity('tester-a'));while(!resolve)await new Promise(done=>setImmediate(done));
+ await assert.rejects(()=>run(identity('tester-a')),{fields:{aiReason:'busy'}});
+ assert.equal(calls,1);assert.equal(db.attempts().length,1);
+ // Client dismissal cannot undo an already dispatched attempt; completion still counts.
+ resolve(output);await first;assert.equal(db.attempts()[0].state,'successful');
+ const other=store();let failures=0;
+ await assert.rejects(()=>assist(other,{enabled:true,suggest:async()=>{failures++;throw require('../ai-errors.cjs').failure('provider_network');}})(identity('tester-a')),{fields:{aiReason:'provider_network'}});
+ assert.equal(failures,1);assert.equal(other.attempts().length,1);
+});

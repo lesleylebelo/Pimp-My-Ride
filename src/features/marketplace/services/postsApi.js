@@ -37,7 +37,9 @@ export async function postsApi(op,data={},expectedUid){
    account(uid);if(key&&pending.get(key)===requestId)pending.delete(key);return result;
   }finally{account();}
  }
- const write=['create','update','remove','save'].includes(op),payload={...data,op};
+ // Save sets a desired boolean transactionally; its existing endpoint accepts
+ // only op/id/saved, not the request IDs used for other post mutations.
+ const write=['create','update','remove'].includes(op),payload={...data,op};
  let key,requestId;
  if(write){
   key=JSON.stringify([uid,op,canonical(data)]);
@@ -56,16 +58,16 @@ export async function viewPostPhoto(id,path,expectedUid){
  account(uid);return result;
 }
 export async function pickPostPhotos(maximum,{
+ selectAssets,
  loadImagePicker=()=>import('expo-image-picker'),
  loadImageManipulator=()=>import('expo-image-manipulator'),
 }={}){
  if(!Number.isInteger(maximum)||maximum<1)return [];
- const ImagePicker=await loadImagePicker();
- const picked=await ImagePicker.launchImageLibraryAsync({mediaTypes:['images'],allowsMultipleSelection:true,selectionLimit:maximum,quality:1});
+ const picked=selectAssets?await selectAssets({maximum}):await (await loadImagePicker()).launchImageLibraryAsync({mediaTypes:['images'],allowsMultipleSelection:true,selectionLimit:maximum,quality:1});
  if(picked.canceled||!picked.assets?.length)return [];
  const ImageManipulator=await loadImageManipulator();
  const compressed=[];
- for(const asset of picked.assets.slice(0,maximum)){
+ for(const asset of picked.assets.slice(0,picked.source==='camera'?1:maximum)){
   compressed.push(await preparePhoto(asset,ImageManipulator));
  }
  return compressed;

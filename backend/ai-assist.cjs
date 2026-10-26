@@ -1,7 +1,7 @@
 const D=require('./domain.cjs'),M=require('./marketplace-domain.cjs');
 const {createAIProvider,unavailable}=require('./ai-provider.cjs');
 const {ApiError}=require('./errors.cjs');
-const {AIFailure,failure}=require('./ai-errors.cjs');
+const {AIFailure,failure,rejection}=require('./ai-errors.cjs');
 const {createAIReleaseControl}=require('./ai-release-control.cjs');
 const showcaseCategories=['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
 const {validateGrounding,editorialWords}=require('./ai-grounding.cjs');
@@ -31,10 +31,15 @@ function validateSuggestion(value,draft){
 function createAIAssist({db,actor,provider=createAIProvider(),releaseControl=createAIReleaseControl({db}),now=Date.now,timeoutMs=15000}){
  const usage=new Map();let concurrent=0;
  return async request=>{
-  const account=await actor(request),p=account.profile,input=request.data;
-  if(!['owner','shop'].includes(p.role)||!D.active(p)||p.statusOperation||p.reviewOperation||p.provisioningOperation||p.role==='shop'&&p.verificationStatus!=='approved')D.fail('AI Assist requires an active customer or approved shop.','permission-denied');
+  let account;
+  try{account=await actor(request);}catch(error){
+   if(error instanceof ApiError&&error.code==='permission-denied')throw rejection('permission-denied','account_access','Account access is unavailable.');
+   throw error;
+  }
+  const p=account.profile,input=request.data;
+  if(!['owner','shop'].includes(p.role)||!D.active(p)||p.statusOperation||p.reviewOperation||p.provisioningOperation||p.role==='shop'&&p.verificationStatus!=='approved')throw rejection('permission-denied','account_eligibility','AI Assist requires an active customer or approved shop.');
   M.fields(input,['kind','title','description','categoryId']);
-  if(input.kind!==(p.role==='owner'?'request':'showcase'))D.fail('AI Assist is unavailable for this draft type.','permission-denied');
+  if(input.kind!==(p.role==='owner'?'request':'showcase'))throw rejection('permission-denied','draft_type','AI Assist is unavailable for this draft type.');
   if(Buffer.byteLength(JSON.stringify(input))>8192)D.fail('The AI draft is too large.');
   const limits={title:100,description:input.kind==='request'?300:2000};
   const title=M.optional(input.title,'Title',limits.title),description=M.optional(input.description,'Description',limits.description);
@@ -52,9 +57,10 @@ function createAIAssist({db,actor,provider=createAIProvider(),releaseControl=cre
   if(input.categoryId!==undefined&&input.categoryId!==''&&input.categoryId!==null&&!categories.some(category=>category.id===input.categoryId))D.fail('Choose an existing active category.');
   const clock=now();for(const [uid,value] of usage)if(!value.pending&&clock-value.hour>=3600000)usage.delete(uid);
   let quota=usage.get(account.uid);
-  if(!quota){if(usage.size>=5000)D.fail('AI Assist is busy. Try again later.','resource-exhausted');quota={hour:clock,hourCount:0,minute:clock,minuteCount:0,pending:false};usage.set(account.uid,quota);}
+  if(!quota){if(usage.size>=5000)throw rejection('resource-exhausted','busy','AI Assist is busy. Try again later.');quota={hour:clock,hourCount:0,minute:clock,minuteCount:0,pending:false};usage.set(account.uid,quota);}
   if(clock-quota.minute>=60000){quota.minute=clock;quota.minuteCount=0;}
-  if(quota.pending||quota.minuteCount>=3||quota.hourCount>=10||concurrent>=4)D.fail('AI usage limit reached. Please wait before trying again.','resource-exhausted');
+  if(quota.pending||concurrent>=4)throw rejection('resource-exhausted','busy','AI Assist is busy. Try again later.');
+  if(quota.minuteCount>=3||quota.hourCount>=10)throw rejection('resource-exhausted','rate_limit','AI usage limit reached. Please wait before trying again.');
   quota.pending=true;++quota.minuteCount;++quota.hourCount;++concurrent;
   const controller=new AbortController();let timer,validated=false,attempt;
   // Keep quota reservation errors separate from provider errors, retaining 429.
@@ -76,7 +82,7 @@ function createAIAssist({db,actor,provider=createAIProvider(),releaseControl=cre
    // Storage errors must never turn into a returned suggestion. A failed finish
    // may have committed; leave that outcome uncertain and do not retry it.
    if(safe.reason!=='diagnostic_storage')await attempt?.finish({error:safe,outputValidated:validated});
-   if(access)throw error;throw safe;
+   if(access){if(error.code==='permission-denied')throw rejection('permission-denied','account_changed','Account access changed.');throw error;}throw safe;
   }
   finally{clearTimeout(timer);controller.abort();quota.pending=false;--concurrent;}
  };

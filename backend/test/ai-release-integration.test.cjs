@@ -72,3 +72,41 @@ test('Gemini 3.5 mocked dispatch preserves real persistent quota and failure dia
  assert.ok(rows.every(row=>!JSON.stringify(row).includes('Invented turbo')&&!JSON.stringify(row).includes('What is your budget')));
  assert.ok(rows.every(row=>row.dispatchInitiatedAt&&row.responseReceivedAt));assert.equal(rows.find(row=>row.reasonCode==='model_unavailable').providerHttpStatus,404);
 });
+
+test('real Auth and Firestore profiles enforce current eligibility, account separation and first/second mocked generations',async()=>{
+ const {getAuth}=require('firebase-admin/auth'),auth=getAuth(app);
+ const {createServices}=require('../services.cjs'),{createApp}=require('../app.cjs'),http=require('supertest');
+ const ids=['ai-audit-owner','ai-audit-shop','ai-audit-admin','ai-audit-unlisted'],tokens={};
+ const clock=Date.parse('2040-01-04T12:00:00Z'),control=createAIReleaseControl({db,env:{PMR_AI_TEST_UIDS:ids.slice(0,3).join(',')},now:()=>clock});
+ let calls=0;
+ const provider={enabled:true,suggest:async draft=>{calls++;return {title:draft.title,description:draft.description,categoryId:null,missingDetails:[]};}};
+ const services=createServices({db,auth,storage:{},aiProvider:provider,aiReleaseControl:control}),server=createApp({services,auth});
+ const requestData={kind:'request',title:'Black wrap',description:'Wrap doors in black.',categoryId:''};
+ const call=uid=>http(server).post('/api/ai/assist').set('Authorization','Bearer '+tokens[uid]).send({...requestData,kind:uid==='ai-audit-shop'?'showcase':'request'});
+ try{
+  await db.doc('serviceCategories/ai-audit-paint').set({name:'Paint',archived:false});
+  for(const uid of ids){
+   await auth.createUser({uid,email:uid+'@example.invalid',emailVerified:true});
+   await db.doc('users/'+uid).set({role:uid.endsWith('shop')?'shop':uid.endsWith('admin')?'admin':'owner',accountStatus:'active',verificationStatus:'approved'});
+   const customToken=await auth.createCustomToken(uid),reply=await fetch('http://'+process.env.FIREBASE_AUTH_EMULATOR_HOST+'/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=synthetic-key',{
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:customToken,returnSecureToken:true})});
+   assert.equal(reply.status,200);tokens[uid]=(await reply.json()).idToken;
+  }
+  await call(ids[0]).expect(200);await call(ids[0]).expect(200);assert.equal(calls,2);
+  await call(ids[1]).expect(200);assert.equal(calls,3);
+  assert.equal((await call(ids[2]).expect(403)).body.error.fields.aiReason,'account_eligibility');
+  assert.equal((await call(ids[3]).expect(403)).body.error.fields.aiReason,'tester_required');
+  for(const changes of [{verificationStatus:'pending'},{verificationStatus:'rejected'},{accountStatus:'suspended'},{accountStatus:'archived'},{role:'admin'}]){
+   await db.doc('users/'+ids[1]).set({role:'shop',accountStatus:'active',verificationStatus:'approved',...changes});await call(ids[1]).expect(403);
+  }
+  await db.doc('users/'+ids[0]).update({role:'shop',verificationStatus:'approved'});await call(ids[0]).expect(403);
+  await db.doc('users/'+ids[0]).delete();await call(ids[0]).expect(403);
+  await auth.updateUser(ids[1],{disabled:true});await call(ids[1]).expect(401);
+  const decoded=await auth.verifyIdToken(tokens[ids[3]]);
+  await assert.rejects(()=>services.aiAssist({auth:{uid:ids[3],token:{...decoded,auth_time:1}},data:requestData}),{code:'unauthenticated'});
+  assert.equal(calls,3);assert.equal((await db.doc(DAILY_PREFIX+'/2040-01-04').get()).data().attempts,3);
+ }finally{
+  for(const uid of ids){await db.doc('users/'+uid).delete();await auth.deleteUser(uid).catch(()=>{});}
+  await db.doc('serviceCategories/ai-audit-paint').delete();await db.doc(DAILY_PREFIX+'/2040-01-04').delete();
+ }
+});

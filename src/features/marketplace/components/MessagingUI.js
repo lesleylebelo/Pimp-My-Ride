@@ -1,3 +1,4 @@
+import {CustomerFrame,CustomerAction,useCustomerExperience} from '../../customer/components/CustomerUI';
 import ProfileAvatar from '../../../shared/components/ProfileAvatar';
 import React, {useMemo, useRef, useEffect} from 'react';
 import {ActivityIndicator, Pressable, StyleSheet, View} from 'react-native';
@@ -29,6 +30,8 @@ export const activityTime = value => messageDate(value) === 'Today' ? messageTim
 export function MessagingFrame({navigation, role, title, subtitle, icon, avatar, avatarShop, children}) {
   const {styles, theme} = useMessagingStyles(), focused = useIsFocused(), leaving = useRef(false);
   useEffect(() => {if (focused) leaving.current = false;}, [focused]);
+  const customer=useCustomerExperience();
+  if(customer)return <CustomerFrame {...{title,subtitle,navigation}} activeRoute="Messages" back><View style={{flex:1,width:'100%',maxWidth:880,alignSelf:'center'}}>{children}</View></CustomerFrame>;
   return <SafeAreaView style={styles.safe} edges={['top', 'bottom', 'left', 'right']}><View style={styles.page}>
     <View style={styles.header}>
       <Pressable accessibilityRole="button" accessibilityLabel="Go back" style={({pressed}) => [styles.back, pressed && styles.pressed]} onPress={() => {
@@ -41,7 +44,8 @@ export function MessagingFrame({navigation, role, title, subtitle, icon, avatar,
   </View></SafeAreaView>;
 }
 export function MessageAction({title, onPress, disabled = false}) {
-  const {styles} = useMessagingStyles();
+  const {styles} = useMessagingStyles(),customer=useCustomerExperience();
+  if(customer)return <CustomerAction {...{title,onPress,disabled}}/>;
   return <Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{disabled}} disabled={disabled} onPress={onPress}
     style={({pressed}) => [styles.action, pressed && styles.pressed, disabled && styles.disabled]}><Text weight="semibold" style={styles.actionText}>{title}</Text></Pressable>;
 }

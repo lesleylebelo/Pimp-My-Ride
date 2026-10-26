@@ -5,11 +5,12 @@ import {useAuth} from '../../auth/context/AuthContext';
 import {LandingShell,LandingButton,ownerTabs,shopTabs,useLandingFeedback} from '../../../shared/components/landing/LandingUI';
 import AppTextInput from '../../../shared/components/AppTextInput';
 import {useTheme} from '../../../shared/theme/ThemeContext';
+import {CustomerPage,CustomerCard,CustomerAction,CustomerField,useCustomerExperience} from '../../customer/components/CustomerUI';
 
 export const ownerRoutes={Discover:'Discover',Garage:'Garage','My Requests':'OwnerRequests',Bookings:'Bookings',Profile:'OwnerAccount'};
 export const shopRoutes={'Find Jobs':'ShopJobs',Requests:'ShopRequests',Quotes:'ShopQuotes',Bookings:'Bookings','My Shop':'ShopPosts'};
 
-export function Page({title,subtitle,navigation,children,showTabs=true,onScroll,onLayout,onContentSizeChange,floatingAction,refreshControl,headerRight}){
+export function Page({title,subtitle,navigation,children,showTabs=true,onScroll,onLayout,onContentSizeChange,floatingAction,refreshControl,headerRight,feedLayout=false}){
   const {profile}=useAuth();
   const {theme}=useTheme();
   const styles=makeStyles(theme);
@@ -17,7 +18,9 @@ export function Page({title,subtitle,navigation,children,showTabs=true,onScroll,
   const state=navigation?.getState?.(),route=state?.routes?.[state.index]?.name;
   const activeTab=Object.keys(routes).find(k=>routes[k]===route)||(['BookingDetail','ReceiptDetail','Notifications'].includes(route)?'Bookings':shop?(route==='QuoteForm'?'Quotes':'Find Jobs'):['RequestForm','OwnerRequest','QuoteComparison','PaymentChoice'].includes(route)?'My Requests':'Garage');
   const showBack = navigation?.canGoBack?.();
-  return <LandingShell title={title} subtitle={subtitle} tabs={showTabs?(shop?shopTabs:ownerTabs):undefined} activeTab={activeTab} {...feedback} onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} floatingAction={floatingAction} refreshControl={refreshControl} headerRight={headerRight} onTabPress={label=>routes[label]?navigation?.navigate(routes[label]):feedback.showFeature(label)}>
+  const customer=useCustomerExperience();
+  if(customer)return <CustomerPage title={title} subtitle={subtitle} navigation={navigation} back={showBack&&!!route&&!Object.values(ownerRoutes).includes(route)} onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} refreshControl={refreshControl} headerRight={headerRight}>{children}{floatingAction}</CustomerPage>;
+  return <LandingShell title={title} subtitle={subtitle} tabs={showTabs?(shop?shopTabs:ownerTabs):undefined} activeTab={activeTab} {...feedback} feedLayout={shop&&feedLayout} onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} floatingAction={floatingAction} refreshControl={refreshControl} headerRight={headerRight} onTabPress={label=>routes[label]?navigation?.navigate(routes[label]):feedback.showFeature(label)}>
     {showBack && (
       <Pressable
         accessibilityRole="button"
@@ -50,6 +53,8 @@ const makeStyles = (colors) => ({
 
 export function Card({children,style,...props}){
   const {theme}=useTheme();
+  const customer=useCustomerExperience();
+  if(customer)return <CustomerCard {...props} style={style}>{children}</CustomerCard>;
   const s=makeCardStyles(theme);
   return <View {...props} style={[s.card,style]}>{children}</View>;
 }
@@ -57,8 +62,8 @@ const makeCardStyles = (colors) => ({
   card: { padding: 20, borderRadius: 24, backgroundColor: colors.surfaceCard, gap: 14, borderWidth: 1, borderColor: colors.border },
 });
 
-export const Field=AppTextInput;
-export const Button=LandingButton;
+export function Field(props){const customer=useCustomerExperience();return customer?<CustomerField {...props}/>:<AppTextInput {...props}/>;}
+export function Button(props){const customer=useCustomerExperience();return customer?<CustomerAction {...props}/>:<LandingButton {...props}/>;}
 
 export function Notice({busy,error}){
   const {theme}=useTheme();
