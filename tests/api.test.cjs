@@ -7,6 +7,23 @@ function setup(fetcher,{dev=false,base='https://api.example.test'}={}){
  return {...mod.exports,calls,auth,warnings,errors};
 }
 
+test('missing configuration fails before health or authentication requests and differs from connectivity errors',async()=>{
+ const s=setup(async()=>assert.fail('No fetch without configuration'),{base:''});
+ for(const request of [()=>s.apiRequest('admin',{}),()=>s.apiRequest('marketplace',{}),()=>s.apiMethodRequest('posts')]){
+  await assert.rejects(request,error=>{assert.match(error.message,/Backend setup is missing/);assert.equal(error.code,undefined);return true;});
+ }
+ assert.equal(s.calls.length,0);
+ const configured=setup(async()=>{throw new TypeError('Failed to fetch');});
+ await assert.rejects(()=>configured.apiRequest('admin',{}),error=>{assert.equal(error.code,'api/network-request-failed');assert.doesNotMatch(error.message,/setup is missing|CORS/i);return true;});
+});
+
+test('an unauthenticated configured client never probes health or requests tokens',async()=>{
+ const s=setup(async()=>assert.fail('No fetch without authentication'));s.auth.currentUser=null;
+ await assert.rejects(()=>s.apiRequest('admin',{}),/Please sign in again/);
+ await assert.rejects(()=>s.apiMethodRequest('posts'),/Please sign in again/);
+ assert.equal(s.calls.length,0);
+});
+
 test('health connection failures identify the stage without sending a token or exposing error contents',async()=>{
  const s=setup(async()=>{throw Error('private provider details and local file path');},{dev:true});
  await assert.rejects(()=>s.apiRequest('admin',{private:'request data'}),{code:'api/network-request-failed',connectionStage:'health'});

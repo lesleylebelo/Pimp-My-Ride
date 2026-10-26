@@ -10,6 +10,10 @@ import {Card,Button} from './MarketplaceUI';
 import {postsApi} from '../services/postsApi';
 import {useAuth} from '../../auth/context/AuthContext';
 import ShowcasePhoto,{hasPostImage} from './ShowcasePhoto';
+import {CustomerAction,useCustomerExperience} from '../../customer/components/CustomerUI';
+import CustomerPostPresentation from '../../customer/components/CustomerPostPresentation';
+import CustomerFeedPostPresentation from '../../customer/components/CustomerFeedPostPresentation';
+import {WorkshopShowcaseCard} from './WorkshopFeedCards';
 
 export function postTime(value){
  const timestamp=typeof value?.toMillis==='function'?value.toMillis():Number(value)||new Date(value).getTime();
@@ -23,9 +27,9 @@ function formatVehicle(value){
  const text=part=>typeof part==='string'?part.trim():typeof part==='number'&&Number.isFinite(part)?String(part):'';
  return [text(value.year),text(value.make),text(value.model)].filter(Boolean).join(' ');
 }
-export function PostCard({post,onOpen,onEdit,onRemoved,editable=false,onSaved}){
+export function PostCard({post,onOpen,onEdit,onRemoved,editable=false,onSaved,presentation='card',onProfile}){
  const {theme}=useTheme(),colors={...baseColors,primary:theme.accent,textPrimary:theme.textPrimary,textSecondary:theme.textSecondary,background:theme.surfaceMuted,brandGreenLight:theme.accentLight,border:theme.divider,error:theme.error,white:theme.textPrimary},styles=makeStyles(colors);
- const {user,offline}=useAuth(),[saved,setSaved]=useState(post.saved===true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[menu,setMenu]=useState(false);
+ const {user,profile,offline}=useAuth(),[saved,setSaved]=useState(post.saved===true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[menu,setMenu]=useState(false);
  async function toggleSaved(){
   if(busy||offline)return;setBusy(true);setError('');
   try{const next=!saved;await postsApi('save',{id:post.id,saved:next},user?.uid);setSaved(next);onSaved?.(post.id,next);}
@@ -36,6 +40,10 @@ export function PostCard({post,onOpen,onEdit,onRemoved,editable=false,onSaved}){
  const vehicle=formatVehicle(post.vehicle);
  const place=[post.city,post.province].filter(Boolean).join(' · ');
  const author=post.shop?.name||post.authorName||(post.type==='showcase'?'Workshop':'Customer');
+ const customer=useCustomerExperience();
+ const CustomerPresentation=presentation==='feed'?CustomerFeedPostPresentation:CustomerPostPresentation;
+ if(customer)return <CustomerPresentation {...{post,onOpen,photos,author,place,vehicle,saved,busy,offline,error}} time={postTime(post.createdAt)} onToggleSaved={toggleSaved}/>;
+ if(profile?.role==='shop'&&presentation==='feed')return <WorkshopShowcaseCard {...{post,onOpen,onProfile,photos,author,place,vehicle,saved,busy,offline,error}} time={post.createdAt==null?'':postTime(post.createdAt)} onToggleSaved={toggleSaved} management={editable?<View style={{gap:10}}><CustomerAction title="Edit post" onPress={()=>onEdit?.(post)}/><ConfirmationButton title="Delete post" message="Delete this post from public feeds? This cannot be undone." danger presentation="feed" onConfirm={async()=>{try{await postsApi('remove',{id:post.id,...(post.type==='showcase'?{showcase:true}:{})},user?.uid);onRemoved?.(post.id);}catch(e){setError(e.message||'Unable to delete post.');}}}/></View>:null}/>;
  return <Card style={styles.card}>
   <View style={styles.authorRow}>
    <ProfileAvatar context={post.authorRole==='shop'&&post.shop?.id?'shop':'post'} id={post.authorRole==='shop'&&post.shop?.id?post.shop.id:post.id} revision={post.authorPhotoRevision??post.shop?.profilePhotoRevision} shop={post.authorRole==='shop'} size={38}/>

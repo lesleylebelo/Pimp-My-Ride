@@ -39,6 +39,17 @@ async function fillRequest(tree){
   for(const [label,value] of [['Request title','Paint the doors'],['Description','Repair and paint both front doors.'],['City','Pretoria'],['Minimum budget (ZAR)','500.10'],['Maximum budget (ZAR)','1000.25']])await change(tree,label,value);
 }
 
+test('an approved-workshop profile starts the existing direct request form with that workshop selected',async()=>{
+ const c=setup({read:op=>({items:op==='vehicles'?[vehicle]:op==='categories'?[category]:op==='shops'?[shop]:[]})});
+ const tree=await mount(c,'RequestFormScreen',{shop});
+ try{assert.equal(button(tree,'One approved shop').props.accessibilityState.disabled,false);assert.ok(says(tree,'Only your selected shop can view this request'));assert.ok(says(tree,'Selected shop: '+shop.shopName));assert.equal(c.calls.length,0);}finally{await unmount(tree);}
+});
+
+test('a request draft without a chosen vehicle never renders an empty string as a native View child',async()=>{
+ const c=setup(),tree=await mount(c,'RequestFormScreen');
+ try{const page=tree.root.findAllByType('ScrollView').find(n=>n.props.scrollEventThrottle===16);assert.ok(page);assert.ok(![page.props.children].flat().some(child=>typeof child==='string'));}finally{await unmount(tree);}
+});
+
 test('AI Apply changes only request text and optional category while retaining photos, location and terms until normal save',async()=>{
  const original={...request,vehicleId:vehicle.id,categoryId:category.id,version:4,budgetMinCents:50000,budgetMaxCents:100000,photoIds:['attached-a','attached-b'],mandatoryServices:['Keep original finish'],serviceLocation:{latitude:-26.1,longitude:28.1}};
  const c=setup({aiComponent:props=>React.createElement('AIAssist',props),read:op=>({items:op==='vehicles'?[vehicle]:op==='categories'?[category]:[]})});

@@ -28,7 +28,7 @@ function setup(){
 const text=tree=>tree.root.findAllByType('Text').map(node=>String(node.props.children||'')).join('\n');
 
 test('checkout requires an explicit test outcome and fails closed when server simulation availability is disabled',async t=>{
- const s=setup();await s.mount();t.after(()=>s.unmount());await s.press('Pay in Full \u00b7 R84.50');
+ const s=setup();await s.mount();t.after(()=>s.unmount());await s.press('Pay in full \u00b7 R84.50');
  const confirm=()=>s.tree().root.findAllByType('Pressable').find(n=>n.props.accessibilityLabel==='Confirm full payment and run simulation');
  assert.equal(confirm().props.disabled,true);await s.press('Confirm full payment and run simulation');assert.equal(s.calls.length,0);
  await s.press('Simulate failed payment');assert.equal(confirm().props.disabled,false);
@@ -38,12 +38,12 @@ test('checkout requires an explicit test outcome and fails closed when server si
 });
 
 test('an explicitly selected failure never silently becomes a successful simulation',async t=>{
- const s=setup();await s.mount();t.after(()=>s.unmount());await s.press('Pay in Full \u00b7 R84.50');await s.press('Simulate failed payment');await s.press('Confirm full payment and run simulation');
+ const s=setup();await s.mount();t.after(()=>s.unmount());await s.press('Pay in full \u00b7 R84.50');await s.press('Simulate failed payment');await s.press('Confirm full payment and run simulation');
  assert.equal(s.calls[1][1].outcome,'failed');assert.deepEqual(s.moves,[['BookingDetail',{id:'booking-1'}]]);
 });
 
 test('same-frame double confirmation sends one acceptance and one result',async t=>{
- const s=setup();await s.mount();t.after(()=>s.unmount());await s.press('Pay in Full \u00b7 R84.50');await s.press('Simulate successful payment');
+ const s=setup();await s.mount();t.after(()=>s.unmount());await s.press('Pay in full \u00b7 R84.50');await s.press('Simulate successful payment');
  const confirm=s.tree().root.findAllByType('Pressable').find(n=>n.props.accessibilityLabel==='Confirm full payment and run simulation').props.onPress;
  await act(async()=>Promise.all([confirm(),confirm()]));assert.deepEqual(s.calls.map(c=>c[0]),['quoteAccept','paymentMockResult']);
 });
@@ -51,7 +51,7 @@ test('same-frame double confirmation sends one acceptance and one result',async 
 test('pay-in-full choice uses the server-selected quote and attempt; no card data is collected',async t=>{
  const s=setup();await s.mount();t.after(()=>s.unmount());
  assert.match(text(s.tree()),/SIMULATION ONLY/);assert.match(text(s.tree()),/R84.50/);
- await s.press('Pay in Full \u00b7 R84.50');
+ await s.press('Pay in full \u00b7 R84.50');
  await s.press('Simulate successful payment');await s.press('Confirm full payment and run simulation');
  assert.deepEqual(s.calls,[['quoteAccept',{id:'quote-42',paymentMethod:'pay_now'}],['paymentMockResult',{id:'booking-1',paymentAttemptId:'attempt-1',expectedBookingId:'booking-1',expectedAmountCents:8450,expectedCurrency:'ZAR',outcome:'successful'}]]);
  assert.deepEqual(s.moves,[['BookingDetail',{id:'booking-1'}]]);
@@ -60,9 +60,9 @@ test('pay-in-full choice uses the server-selected quote and attempt; no card dat
 
 test('pay-in-store choice requires explicit confirmation and starts unpaid without online payment',async t=>{
  const s=setup();await s.mount();t.after(()=>s.unmount());
- await s.press('Pay In-Store \u00b7 R84.50 due');
- assert.match(text(s.tree()),/Pay In-Store/);
- await s.press('Confirm Pay In-Store and create booking');
+ await s.press('Pay in-store \u00b7 R84.50 due');
+ assert.match(text(s.tree()),/Pay in-store/);
+ await s.press('Confirm Pay in-store and create booking');
  assert.deepEqual(s.calls,[['quoteAccept',{id:'quote-42',paymentMethod:'pay_in_store'}]]);
  assert.deepEqual(s.moves,[['BookingDetail',{id:'booking-1'}]]);
 });
@@ -70,7 +70,7 @@ test('pay-in-store choice requires explicit confirmation and starts unpaid witho
 test('deposit checkout shows the shop amount and remaining balance and submits no client amount',async t=>{
  const s=setup();s.quote.depositType='percentage';s.quote.depositValue=25;s.quote.depositAmountCents=2113;
  await s.mount();t.after(()=>s.unmount());
- await s.press('Pay Deposit \u00b7 R21.13');
+ await s.press('Pay deposit \u00b7 R21.13');
  assert.match(text(s.tree()),/Shop-required deposit.{0,20}R21.13/);
  assert.match(text(s.tree()),/Amount payable now:.{0,8}R21.13/);
  assert.match(text(s.tree()),/Remaining balance:.{0,8}R63.37/);
@@ -82,16 +82,16 @@ test('deposit checkout shows the shop amount and remaining balance and submits n
 test('legacy quotation without deposit offers only pay in full and pay in store',async t=>{
  const s=setup();await s.mount();t.after(()=>s.unmount());
  const titles=s.tree().root.findAllByType('Pressable').map(node=>node.props.accessibilityLabel);
- assert.ok(titles.includes('Pay in Full \u00b7 R84.50'));
- assert.ok(titles.includes('Pay In-Store \u00b7 R84.50 due'));
- assert.ok(!titles.some(title=>String(title).startsWith('Pay Deposit')));
+ assert.ok(titles.includes('Pay in full \u00b7 R84.50'));
+ assert.ok(titles.includes('Pay in-store \u00b7 R84.50 due'));
+ assert.ok(!titles.some(title=>String(title).startsWith('Pay deposit')));
 });
 
 
 test('R250 stale deposit checkout opens the existing R750 booking attempt without resolving it',async t=>{
  const s=setup();s.quote.totalCents=100000;s.quote.depositType='fixed';s.quote.depositAmountCents=25000;
  s.state.api=async()=>({id:'booking-1',existingBooking:true,paymentAttemptId:'balance-750',amountCents:75000,currency:'ZAR'});
- await s.mount();t.after(()=>s.unmount());await s.press('Pay Deposit \u00b7 R250.00');await s.press('Simulate successful payment');await s.press('Confirm deposit and run simulation');
+ await s.mount();t.after(()=>s.unmount());await s.press('Pay deposit \u00b7 R250.00');await s.press('Simulate successful payment');await s.press('Confirm deposit and run simulation');
  assert.deepEqual(s.calls,[['quoteAccept',{id:'quote-42',paymentMethod:'pay_deposit'}]]);assert.deepEqual(s.moves,[['BookingDetail',{id:'booking-1'}]]);
 });
 
@@ -99,19 +99,19 @@ test('unexpected amount or currency requires recovery and never posts a payment 
  for(const details of [{amountCents:75000,currency:'ZAR'},{amountCents:25000,currency:'USD'}]){
   const s=setup();s.quote.totalCents=100000;s.quote.depositType='fixed';s.quote.depositAmountCents=25000;
   s.state.api=async()=>({id:'booking-1',existingBooking:false,paymentAttemptId:'changed',...details});await s.mount();
-  await s.press('Pay Deposit \u00b7 R250.00');await s.press('Simulate successful payment');await s.press('Confirm deposit and run simulation');
+  await s.press('Pay deposit \u00b7 R250.00');await s.press('Simulate successful payment');await s.press('Confirm deposit and run simulation');
   assert.equal(s.calls.length,1);assert.deepEqual(s.moves,[]);await s.press('View existing booking');assert.deepEqual(s.moves,[['BookingDetail',{id:'booking-1'}]]);await s.unmount();
  }
 });
 
 test('lost acceptance acknowledgement has a request-scoped existing-booking recovery action',async t=>{
  const s=setup();s.quote.serviceRequestId='request-1';s.state.api=async op=>{if(op==='quoteAccept')throw Error('Connection interrupted');return {request:{bookingId:'durable-booking'}};};
- await s.mount();t.after(()=>s.unmount());await s.press('Pay in Full \u00b7 R84.50');await s.press('Simulate successful payment');await s.press('Confirm full payment and run simulation');await s.press('Check existing booking');
+ await s.mount();t.after(()=>s.unmount());await s.press('Pay in full \u00b7 R84.50');await s.press('Simulate successful payment');await s.press('Confirm full payment and run simulation');await s.press('Check existing booking');
  assert.deepEqual(s.calls,[['quoteAccept',{id:'quote-42',paymentMethod:'pay_now'}],['request',{id:'request-1'}]]);assert.deepEqual(s.moves,[['BookingDetail',{id:'durable-booking'}]]);
 });
 
 test('an interrupted result keeps a recovery action and never starts another checkout automatically',async t=>{
  const s=setup();s.state.api=async op=>{if(op==='paymentMockResult')throw Error('Result acknowledgement lost');return {id:'booking-1',existingBooking:false,paymentAttemptId:'attempt-1',amountCents:8450,currency:'ZAR'};};
- await s.mount();t.after(()=>s.unmount());await s.press('Pay in Full \u00b7 R84.50');await s.press('Simulate successful payment');await s.press('Confirm full payment and run simulation');
+ await s.mount();t.after(()=>s.unmount());await s.press('Pay in full \u00b7 R84.50');await s.press('Simulate successful payment');await s.press('Confirm full payment and run simulation');
  assert.equal(s.calls.length,2);await s.press('View existing booking');assert.equal(s.calls.length,2);assert.deepEqual(s.moves,[['BookingDetail',{id:'booking-1'}]]);
 });

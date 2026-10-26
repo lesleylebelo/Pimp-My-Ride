@@ -7,6 +7,9 @@ export async function aiAssist(draft,uid){
  catch(error){
   const presented=Error(pimpPilotErrorMessage(error));
   if(error?.code)presented.code=error.code;if(error?.status)presented.status=error.status;
+  // Retain the classification when the component presents this error again.
+  presented.aiReason=error?.responseBody?.fields?.aiReason||error?.aiReason;
+  presented.resetAt=error?.responseBody?.fields?.resetAt||error?.resetAt;
   throw presented;
  }
  const max=kind==='request'?300:2000;

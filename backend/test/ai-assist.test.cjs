@@ -284,3 +284,72 @@ test('format subcodes are allowlisted and persisted without private response con
  assert.match(row.correlationId,/^[a-f0-9-]{36}$/);assert.ok(!JSON.stringify(row).includes(output.description));assert.ok(!JSON.stringify(row).includes(geminiEnv.GEMINI_API_KEY));
  assert.equal(db.rows.get('aiAssistDaily/'+row.day).attempts,1);
 });
+
+test('authorisation classifications distinguish live account state, draft type and test allowlist',async()=>{
+ for(const [uid,changes,reason] of [
+  ['shop',{verificationStatus:'pending'},'account_eligibility'],['shop',{verificationStatus:'rejected'},'account_eligibility'],
+  ['shop',{accountStatus:'suspended'},'account_access'],['shop',{accountStatus:'archived'},'account_access'],
+  ['owner',{role:'admin'},'account_eligibility'],['owner',{role:'shop',verificationStatus:'approved'},'draft_type'],
+ ]){
+  const f=fixture();Object.assign(f.rows['users/'+uid],changes);
+  const data=uid==='shop'?{...input,kind:'showcase',categoryId:'Other'}:input;
+  const response=await http(f.app).post('/api/ai/assist').set('Authorization','Bearer '+uid).send(data).expect(403);
+  assert.equal(response.body.error.fields.aiReason,reason);assert.equal(f.calls.length,0);
+ }
+ const f=fixture();delete f.rows['users/owner'];await assert.rejects(()=>f.call(),{fields:{aiReason:'account_access'}});
+ const stale=fixture();await assert.rejects(()=>stale.services.aiAssist({...stale.request(),auth:{uid:'owner',token:{email_verified:true,auth_time:1}}}),{code:'unauthenticated'});
+ const unverified=fixture();await assert.rejects(()=>unverified.services.aiAssist({...unverified.request(),auth:{uid:'owner',token:{email_verified:false,auth_time:Date.now()/1000}}}),{fields:{aiReason:'account_access'}});
+ const disabled=fixture();disabled.users.owner={emailVerified:true,disabled:true};await assert.rejects(()=>disabled.call(),{fields:{aiReason:'account_access'}});
+ const restricted=fixture(undefined,{authorize(){throw require('../ai-errors.cjs').rejection('permission-denied','tester_required','Restricted');}});
+ const response=await http(restricted.app).post('/api/ai/assist').set('Authorization','Bearer owner').send(input).expect(403);
+ assert.equal(response.body.error.fields.aiReason,'tester_required');assert.equal(restricted.calls.length,0);
+});
+
+test('fresh role and UID checks reject late output after account changes',async()=>{
+ for(const change of ['role','uid']){
+  const f=fixture();let checks=0;
+  const assist=createAIAssist({db:f.db,releaseControl:testReleaseControl,provider:f.adapter,actor:async()=>({uid:++checks===2&&change==='uid'?'other':'owner',profile:{role:checks===2&&change==='role'?'shop':'owner',accountStatus:'active',verificationStatus:'approved'}})});
+  await assert.rejects(()=>assist(f.request()),{fields:{aiReason:'account_changed'}});
+ }
+});
+
+test('provider HTTP failures have safe distinct public classifications and never masquerade as account or app quota errors',async()=>{
+ for(const [status,aiReason] of [[400,'service_unavailable'],[401,'configuration'],[402,'provider_billing'],[403,'configuration'],[404,'configuration'],[429,'provider_limit'],[500,'service_unavailable'],[503,'service_unavailable']]){
+  let calls=0;const provider=createAIProvider({env:geminiEnv,fetcher:async()=>{calls++;return {status,ok:false,text:async()=>'{"secret":"do not expose"}'};}});
+  const f=fixture(provider),response=await http(f.app).post('/api/ai/assist').set('Authorization','Bearer owner').send(input).expect(503);
+  assert.equal(calls,1);assert.equal(response.body.error.fields.aiReason,aiReason);assert.doesNotMatch(JSON.stringify(response.body),/do not expose|synthetic-server-key/);
+ }
+});
+
+test('shared HTTP IP and user throttles classify AI rate limits without changing other endpoint envelopes',async()=>{
+ const services={aiAssist:async()=>({}),marketplace:async()=>({})};
+ const auth={verifyIdToken:async token=>({uid:token})};
+ for(const mode of ['ip','uid']){
+  const app=createApp({services,auth});let response;
+  const count=mode==='ip'?91:61;
+  for(let i=0;i<count;i++)response=await http(app).post('/api/ai/assist').set('Authorization','Bearer '+(mode==='ip'?'uid-'+i:'same')).send({});
+  assert.equal(response.status,429);assert.equal(response.body.error.fields.aiReason,'rate_limit');
+  const other=await http(app).post('/api/marketplace').set('Authorization','Bearer same').send({});
+  assert.equal(other.status,429);assert.equal(other.body.error.fields,undefined);
+ }
+});
+
+test('provider prompt offers question vocabulary that passes the unchanged grounding validator',async()=>{
+ const {validateSuggestion}=require('../ai-assist.cjs');let payload;
+ const provider=createAIProvider({env:geminiEnv,fetcher:async(_,options)=>{payload=JSON.parse(options.body);return {ok:true,status:200,text:async()=>JSON.stringify(geminiResponse(output))};}});
+ await fixture(provider).call();
+ const prompt=payload.systemInstruction.parts[0].text;
+ assert.match(prompt,/Retain every content fact from the original description/);assert.match(prompt,/copy the original non-empty field verbatim/);
+ const templates=[...prompt.matchAll(/"([^"]+\?)"/g)].map(match=>match[1]);assert.equal(templates.length,2);
+ // Both fallback questions satisfy the real validator without introducing any
+ // source-specific claims, and empty questions remain a valid response.
+ for(const missingDetails of [[],...templates.map(question=>[question])]){
+  const draft={...input,categories:[{id:'paint',name:'Paint'}],limits:{title:100,description:300}};
+  assert.deepEqual(validateSuggestion({title:input.title,description:input.description,categoryId:input.categoryId,missingDetails},draft).missingDetails,missingDetails);
+ }
+ for(const [bad,validationRule,rejectedField] of [
+  [{...output,description:'I would like black wrap.'},'source_fact_omitted','description'],
+  [{...output,description:'Wrap doors with new turbo in black.'},'new_content_term','description'],
+  [{...output,missingDetails:['What is your timeframe?']},'question_unprovided_term','missingDetails'],
+ ])assert.throws(()=>validateSuggestion(bad,{...input,categories:[{id:'paint',name:'Paint'}],limits:{title:100,description:300}}),{reason:'grounding_rejected',validationRule,rejectedField,fields:{aiReason:'suggestion_rejected'}});
+});

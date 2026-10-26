@@ -60,7 +60,7 @@ test('multiple booking cards adapt to desktop and keep Bookings selected for bot
   await mounted(s.screens.BookingsScreen,{navigation:s.navigation},async tree=>{
    assert.equal(tree.root.findAllByType('View').filter(n=>n.props.testID?.startsWith('booking-card-')).length,2);
    assert.equal(flatten(tree.root.findByProps({testID:'booking-card-fixture-booking'}).props.style).width,width>=850?'48%':'100%');
-   assert.equal(button(tree,'Bookings').props.accessibilityState.selected,true);assert.equal(button(tree,'Messages'),undefined);assert.equal(button(tree,'Notifications'),undefined);
+   assert.equal(button(tree,'Bookings').props.accessibilityState.selected,true);assert.equal(!!button(tree,'Messages'),role==='owner');assert.equal(!!button(tree,'Notifications'),role==='owner');
    assert.equal(s.state.calls.length,0);const buttons=tree.root.findAllByType('Pressable').filter(n=>n.props.accessibilityLabel==='View booking');await act(async()=>buttons[1].props.onPress());assert.deepEqual(s.state.moves,[['BookingDetail',{id:'other-booking'}]]);
   });
  }

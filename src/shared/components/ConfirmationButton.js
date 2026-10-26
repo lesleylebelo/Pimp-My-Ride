@@ -1,11 +1,14 @@
+import {CustomerModal as Modal,CustomerAction,useCustomerExperience} from '../../features/customer/components/CustomerUI';
+import {useTheme} from '../theme/ThemeContext';
 import React, {useRef, useState} from 'react';
-import {Modal, View, Text, StyleSheet} from 'react-native';
+import {View, Text, StyleSheet} from 'react-native';
 import PrimaryButton from './PrimaryButton';
 import OutlineButton from './OutlineButton';
 import colors from '../theme/colors';
 
-export default function ConfirmationButton({title, message, onConfirm, disabled, danger, palette}) {
-  const styles = makeStyles(palette || colors);
+export default function ConfirmationButton({title, message, onConfirm, disabled, danger, palette, presentation}) {
+  const {theme}=useTheme(),owner=useCustomerExperience(),customer=owner||presentation==='feed';
+  const styles = makeStyles(customer?theme:palette || colors);
   const normalText = palette ? {color: '#101208'} : undefined;
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -20,29 +23,31 @@ export default function ConfirmationButton({title, message, onConfirm, disabled,
     catch (e) { setError(e.message || 'Unable to complete this action. Please retry.'); }
     finally { lock.current = false; setBusy(false); }
   }
+  const Action=customer?CustomerAction:PrimaryButton;
+  const CancelAction=presentation==='feed'?CustomerAction:OutlineButton;
   return <>
-    <PrimaryButton
+    <Action primary danger={danger}
       title={title}
       disabled={disabled || busy}
-      style={danger ? styles.dangerButton : undefined}
+      style={danger&&!customer ? styles.dangerButton : undefined}
       textStyle={danger ? styles.dangerText : normalText}
       onPress={() => { setError(''); setVisible(true); }}
     />
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={cancel}>
+    <Modal visible={visible} transparent animationType={presentation==='feed'?'none':'fade'} onRequestClose={cancel}>
       <View style={styles.backdrop}>
         <View style={styles.card} accessibilityViewIsModal>
           <Text accessibilityRole="header" style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>
           {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
-          <PrimaryButton
+          <Action primary danger={danger}
             title="Confirm"
             onPress={confirm}
             loading={busy}
             disabled={disabled}
-            style={danger ? styles.dangerButton : undefined}
+            style={danger&&!customer ? styles.dangerButton : undefined}
             textStyle={danger ? styles.dangerText : normalText}
           />
-          <OutlineButton title="Cancel" onPress={cancel} disabled={busy} />
+          <CancelAction title="Cancel" onPress={cancel} disabled={busy} />
         </View>
       </View>
     </Modal>

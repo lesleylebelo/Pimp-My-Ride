@@ -1,3 +1,4 @@
+import {CustomerAction,useCustomerExperience} from '../../features/customer/components/CustomerUI';
 import React from "react";
 import { Pressable, Text, StyleSheet } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -18,6 +19,8 @@ export default function OutlineButton({
   const styles = makeStyles(theme);
   const IconComponent = iconSet === "material" ? MaterialCommunityIcons : Ionicons;
 
+  const customer=useCustomerExperience();
+  if(customer)return <CustomerAction {...{title,icon,onPress,style,disabled,accessibilityHint,testID}} outline/>;
   return (
     <Pressable
       accessibilityRole="button"

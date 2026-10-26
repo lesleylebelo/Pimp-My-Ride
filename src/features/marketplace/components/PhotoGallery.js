@@ -1,20 +1,23 @@
+import {useCustomerExperience,CustomerPressable} from '../../customer/components/CustomerUI';
 import React, {useCallback,useEffect,useRef,useState} from 'react';
 import {Image,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {useIsFocused} from '@react-navigation/native';
-import * as DocumentPicker from 'expo-document-picker';
+import {usePhotoSource} from '../../../shared/components/PhotoSourceChooser';
+import * as ImageManipulator from 'expo-image-manipulator';
 import {useAuth} from '../../auth/context/AuthContext';
 import ConfirmationButton from '../../../shared/components/ConfirmationButton';
 import {Button,Card,Notice} from './MarketplaceUI';
 import {listPhotos,viewPhoto,uploadVehiclePhoto,removeVehiclePhoto} from '../services/photoApi';
-import {PHOTO_LIMIT,PICKER_PHOTO_TYPES,preparePhoto,photoFileError} from '../utils/photos';
+import {PHOTO_LIMIT,preparePhoto,photoFileError} from '../utils/photos';
 import colors from '../../../shared/theme/colors';
 import {isMediaUrl} from '../../../shared/services/mediaUrl';
 import {useTheme} from '../../../shared/theme/ThemeContext';
 
 function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSelectionChange,disabled=false,presentation}) {
- const {theme}=useTheme(),garage=presentation==='garage',styles=makeStyles(garage?theme:colors,garage);
+ const {theme}=useTheme(),customer=useCustomerExperience(),garage=presentation==='garage',styles=makeStyles(customer||garage?theme:colors,garage),Interaction=customer?CustomerPressable:Pressable;
  const focused = useIsFocused();
+ const photoSource=usePhotoSource({scopeKey:JSON.stringify([uid,target,id]),enabled:!offline&&!disabled&&editable});
  const [items,setItems] = useState([]), [version,setVersion] = useState(null), [canManage,setCanManage] = useState(false);
  const [loading,setLoading] = useState(false), [fresh,setFresh] = useState(false), [error,setError] = useState('');
  const [files,setFiles] = useState({}), [messages,setMessages] = useState({}), [busy,setBusy] = useState(false);
@@ -66,10 +69,11 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
   const epoch = connectionEpoch.current, current = generation.current;
   pickerLock.current = true; setMessages(value => ({...value,[slot]:''}));
   try {
-   const picked = await DocumentPicker.getDocumentAsync({type:PICKER_PHOTO_TYPES,multiple:false,copyToCacheDirectory:true});
+   const picked = await photoSource.choose({maximum:1});
    let chosen=picked.assets?.[0];
-   if(!picked.canceled&&chosen&&(/image\/(heic|heif)/i.test(chosen.mimeType)||/\.(heic|heif)$/i.test(chosen.name||''))){
-    chosen=await preparePhoto(chosen,await import('expo-image-manipulator'));
+   if(chosen)chosen={...chosen,name:chosen.fileName||chosen.name,size:chosen.fileSize??chosen.size};
+   if(!picked.canceled&&chosen&&(picked.source==='camera'||!chosen.mimeType||!chosen.name||/image\/(heic|heif)/i.test(chosen.mimeType)||/\.(heic|heif)$/i.test(chosen.name||''))){
+    chosen=await preparePhoto(chosen,ImageManipulator);
    }
    const p = permission.current;
    if (!active.current || epoch !== connectionEpoch.current || current !== generation.current || p.offline || !p.focused || p.disabled || !p.editable || !p.canManage || !p.fresh || p.loading || mutationLock.current || picked.canceled) return;
@@ -230,6 +234,7 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
 
  return (
   <View style={styles.container}>
+    {photoSource.chooser}
     <View style={styles.intro}>
       <Text style={styles.heading}>{garage?'Private photo library':target === 'vehicle' ? 'Vehicle photos' : 'Request photos'}</Text>
       {editable && (
@@ -248,10 +253,10 @@ function GalleryForAccount({target,id,editable,uid,offline,selectedIds=[],onSele
         <Notice busy={loading || busy} error={error} />
         {garage&&<>
           {!!items.length&&<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbnails}>
-            {items.map(item=><Pressable key={item.id} accessibilityRole="button" accessibilityLabel={`Preview ${item.name||'saved photo'}`} accessibilityState={{selected:preview?.photoId===item.id,disabled:disabled||!connected||!fresh||loading||busy||!!viewing}} disabled={disabled||!connected||!fresh||loading||busy||!!viewing} onPress={()=>view(item.id)} style={[styles.thumbnail,preview?.photoId===item.id&&styles.selectedThumbnail]}>
+            {items.map(item=><Interaction key={item.id} accessibilityRole="button" accessibilityLabel={`Preview ${item.name||'saved photo'}`} accessibilityState={{selected:preview?.photoId===item.id,disabled:disabled||!connected||!fresh||loading||busy||!!viewing}} disabled={disabled||!connected||!fresh||loading||busy||!!viewing} onPress={()=>view(item.id)} style={[styles.thumbnail,preview?.photoId===item.id&&styles.selectedThumbnail]}>
               {preview?.photoId===item.id&&preview.url?<Image source={{uri:preview.url,cache:'reload'}} style={styles.thumbnailImage} resizeMode="cover" accessibilityLabel={`Thumbnail of ${item.name||'saved photo'}`}/>:<Ionicons name="image-outline" size={26} color={theme.textSecondary}/>}
               <Text style={styles.thumbnailLabel}>{item.slot?`Photo ${item.slot}`:'Photo'}</Text>
-            </Pressable>)}
+            </Interaction>)}
           </ScrollView>}
           {preview?.url?<Image accessibilityLabel="Large vehicle photo preview" source={{uri:preview.url,cache:'reload'}} resizeMode="contain" style={styles.largePreview} onError={()=>setPreview(value=>value?.photoId===preview.photoId&&value.url===preview.url?{...value,url:null,error:'Unable to load this preview. View the photo again.'}:value)}/>:<View style={styles.previewPlaceholder}><Ionicons name="images-outline" size={48} color={theme.textSecondary}/><Text style={styles.status}>{loading?'Loading your private library…':items.length?'Choose a thumbnail to open a private preview.':'Add your first vehicle photo below.'}</Text></View>}
           {!!preview?.error&&<Text accessibilityRole="alert" style={styles.error}>{preview.error}</Text>}

@@ -15,7 +15,9 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
 }));
  app.use((req,res,next)=>{res.set('Cache-Control','no-store');next();});
  app.get('/health',(_,res)=>res.json({ok:true}));
- const limits=rateLimit({windowMs:60000,limit:90,standardHeaders:'draft-8',legacyHeaders:false,message:{error:{code:'resource-exhausted',message:'Too many requests. Wait a minute.'}}});
+ const rateResponse=(req,res,next,options)=>res.status(options.statusCode).json(
+  req.path==='/ai/assist'?{error:{...options.message.error,fields:{aiReason:'rate_limit'}}}:options.message);
+ const limits=rateLimit({windowMs:60000,limit:90,standardHeaders:'draft-8',legacyHeaders:false,message:{error:{code:'resource-exhausted',message:'Too many requests. Wait a minute.'}},handler:rateResponse});
  // Separate generous pre-authentication IP budget for heartbeats; ordinary
  // shared-network presence does not consume the administrative/API IP budget.
  const sessionIps=rateLimit({windowMs:60000,limit:600,standardHeaders:'draft-8',legacyHeaders:false,message:{error:{code:'resource-exhausted',message:'Too many session requests. Wait a minute.'}}});
@@ -28,7 +30,7 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
   }catch{next(new ApiError('unauthenticated','Your session expired. Sign in again.'));}
  });
  const limitMessage={error:{code:'resource-exhausted',message:'Too many requests. Wait a minute.'}};
- const perUser=rateLimit({windowMs:60000,limit:60,keyGenerator:req=>req.identity.uid,standardHeaders:'draft-8',legacyHeaders:false,message:limitMessage});
+ const perUser=rateLimit({windowMs:60000,limit:60,keyGenerator:req=>req.identity.uid,standardHeaders:'draft-8',legacyHeaders:false,message:limitMessage,handler:rateResponse});
  const heartbeats=rateLimit({windowMs:60000,limit:12,keyGenerator:req=>req.identity.uid,standardHeaders:'draft-8',legacyHeaders:false,message:limitMessage});
  app.use('/api',(req,res,next)=>req.path==='/session'?heartbeats(req,res,next):perUser(req,res,next));
  app.use('/api',express.json({limit:'32kb'}));

@@ -1,3 +1,4 @@
+import {CustomerAction,useCustomerExperience} from '../../features/customer/components/CustomerUI';
 import React, { useRef } from "react";
 import { Pressable, Text, Animated, StyleSheet, ActivityIndicator, View } from "react-native";
 import { useTheme } from "../theme/ThemeContext";
@@ -19,6 +20,8 @@ export default function PrimaryButton({ title, onPress, style, textStyle, disabl
     outputRange: [-400, 400],
   });
 
+  const customer=useCustomerExperience();
+  if(customer)return <CustomerAction {...{title,onPress,style,disabled,loading,accessibilityHint,testID}} primary/>;
   return (
     <Pressable
       accessibilityRole="button"

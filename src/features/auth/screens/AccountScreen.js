@@ -12,6 +12,7 @@ import VerificationDocuments from '../components/VerificationDocuments';
 import BusinessLocation from '../components/BusinessLocation';
 import ProfilePhotoSettings from '../components/ProfilePhotoSettings';
 import { useTheme } from '../../../shared/theme/ThemeContext';
+import CustomerAccountScreen from '../../customer/screens/CustomerAccountScreen';
 
 export default function AccountScreen({ navigation }) {
  const {user,profile,error,refresh,logout,offline,requireConnection}=useAuth();
@@ -26,6 +27,8 @@ export default function AccountScreen({ navigation }) {
  const stage=accountStage(user,profile);
  const titles={restricted:'Account access restricted',verify:'Verify your email',pending:'Shop verification pending',rejected:'Shop registration not approved',ready:'You’re signed in',incomplete:'Profile unavailable',invalid:'Account role needs attention'};
  async function action(fn,success='') {if(actionLock.current||uploadLock.current)return;actionLock.current=true;setBusy(true);setMessage('');try {await fn();setMessage(success);}catch(e){setMessage(authError(e));}finally{actionLock.current=false;setBusy(false);}}
+
+ if(profile?.role==='owner'&&stage==='ready'&&!error)return <CustomerAccountScreen {...{navigation,user,profile,mode,toggleTheme,busy,photoBusy,error,message}} onPhotoBusy={setPhotoBusy} onLogout={()=>action(logout)}/>;
 
  return (
   <SafeAreaView style={styles.safeArea}>

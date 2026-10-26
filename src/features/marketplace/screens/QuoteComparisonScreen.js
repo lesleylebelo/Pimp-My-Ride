@@ -72,7 +72,7 @@ function QuoteComparison({route, navigation}) {
     return () => {clearInterval(timer); subscription.remove();};
   }, [focused, offline, cursor, refresh]);
 
-  return <QuotationPage title="Compare quotes" subtitle="Smart quotation comparison · review the work, terms and total" navigation={navigation} onScroll={quoteFeed.onScroll} onLayout={quoteFeed.onLayout} onContentSizeChange={quoteFeed.onContentSizeChange}>
+  return <QuotationPage title="Compare quotes" subtitle="Quotation comparison · review the work, terms and total" navigation={navigation} onScroll={quoteFeed.onScroll} onLayout={quoteFeed.onLayout} onContentSizeChange={quoteFeed.onContentSizeChange}>
     <QuotationSteps customer step={selection?1:0}/>
     <Notice busy={busy} error={error || (offline ? 'Connect to compare and accept quotations.' : '')}/>
     {request && <>

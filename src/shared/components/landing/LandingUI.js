@@ -13,6 +13,7 @@ import { spacing } from '../../theme/typography';
 import PrimaryButton from '../PrimaryButton';
 import LogoMark from '../LogoMark';
 import OutlineButton from '../OutlineButton';
+import ShopBottomNavigation from '../../../features/marketplace/components/ShopBottomNavigation';
 
 const FontContext = createContext(false);
 const fontNames = {
@@ -60,9 +61,10 @@ export const shopTabs = [
   { label: 'My Shop', icon: 'profile' },
 ];
 
-export function LandingShell({ title, subtitle, tabs, feature, showFeature, onClose, children, admin = false, activeTab, onTabPress, onScroll, onLayout, onContentSizeChange, floatingAction, refreshControl, headerRight }) {
+export function LandingShell({ title, subtitle, tabs, feature, showFeature, onClose, children, admin = false, activeTab, onTabPress, onScroll, onLayout, onContentSizeChange, floatingAction, refreshControl, headerRight, feedLayout=false }) {
   const [loaded, fontError] = useFonts({ SpaceGrotesk_500Medium, SpaceGrotesk_600SemiBold, SpaceGrotesk_700Bold, Manrope_400Regular, Manrope_500Medium, Manrope_600SemiBold });
-  const { logout, working, offline, cachedAt } = useAuth();
+  const { logout, working, offline, cachedAt, profile } = useAuth();
+  const shop=profile?.role==='shop';
   const {theme} = useTheme();
   const ui = makeStyles(theme);
   const [signOutError, setSignOutError] = useState('');
@@ -79,10 +81,10 @@ export function LandingShell({ title, subtitle, tabs, feature, showFeature, onCl
   return (
     <FontContext.Provider value={loaded}>
       <SafeAreaView style={ui.safeArea} edges={['top', 'left', 'right']}>
-        <View style={ui.page}>
+        <View style={[ui.page,shop&&{minHeight:0},shop&&feedLayout&&{maxWidth:1200}]}>
           {offline && <View style={ui.offlineBar}><LandingText style={ui.offlineText}>Offline · Read-only preview{cachedAt ? ` · Saved ${new Date(cachedAt).toLocaleString()}` : ''}. Connect for updates.</LandingText></View>}
 
-          <View style={ui.header}>
+          <View style={[ui.header,shop&&feedLayout&&{width:'100%',maxWidth:600,alignSelf:'center'}]}>
             <LogoMark size={40}/>
             <View style={ui.headerLeft}>
               <Text accessibilityRole="header" style={[ui.title, { fontFamily: loaded ? fontNames.displaySemi : undefined }]} numberOfLines={1}>{title}</Text>
@@ -91,13 +93,13 @@ export function LandingShell({ title, subtitle, tabs, feature, showFeature, onCl
             {!!headerRight && <View style={ui.headerActions}>{headerRight}</View>}
           </View>
 
-          <ScrollView refreshControl={refreshControl} style={ui.scroll} contentContainerStyle={[ui.content, !tabs && { paddingBottom: Math.max(insets.bottom, 24) }]} keyboardShouldPersistTaps="handled" onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} scrollEventThrottle={onScroll ? 16 : undefined}>
+          <ScrollView refreshControl={refreshControl} style={ui.scroll} contentContainerStyle={[ui.content,shop&&feedLayout&&{width:'100%',maxWidth:712,alignSelf:'center',paddingHorizontal:16,gap:18}, !tabs && { paddingBottom: Math.max(insets.bottom, 24) }]} keyboardShouldPersistTaps="handled" onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} scrollEventThrottle={onScroll ? 16 : undefined}>
             {!!signOutError && <LandingText style={ui.error}>{signOutError}</LandingText>}
             {children}
             {admin && <LandingButton title="Sign Out" outline onPress={signOut} disabled={working} />}
           </ScrollView>
 
-          {tabs && <View accessibilityRole="tablist" style={[ui.navigation, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+          {tabs && shop ? <ShopBottomNavigation tabs={tabs} active={activeTab||tabs[0]?.label} onTabPress={label=>onTabPress?onTabPress(label):showFeature?.(label)} bottomInset={insets.bottom}/> : tabs && <View accessibilityRole="tablist" style={[ui.navigation, { paddingBottom: Math.max(insets.bottom, 12) }]}>
             {tabs.map((tab, index) => {
               const isActive = activeTab ? tab.label === activeTab : index === 0;
               return <Pressable key={tab.label} accessibilityRole="tab" accessibilityLabel={tab.label} accessibilityState={{ selected: isActive }} onPress={() => onTabPress ? onTabPress(tab.label) : index > 0 && showFeature?.(tab.label)} style={ui.tab}>

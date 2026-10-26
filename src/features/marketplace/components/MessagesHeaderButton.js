@@ -1,3 +1,4 @@
+import {CustomerPressable,useCustomerExperience} from '../../customer/components/CustomerUI';
 import React,{useEffect,useState} from 'react';
 import {AppState,Pressable,StyleSheet,Text,View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
@@ -39,8 +40,8 @@ function useUnreadCount(){
 }
 
 export default function MessagesHeaderButton({navigation}){
- const unread=useUnreadCount(),{theme}=useTheme();
- return <Pressable accessibilityRole="button" accessibilityLabel="Messages" accessibilityHint="Open your messages inbox"
+ const unread=useUnreadCount(),{theme}=useTheme(),customer=useCustomerExperience(),Interaction=customer?CustomerPressable:Pressable;
+ return <Interaction accessibilityRole="button" accessibilityLabel="Messages" accessibilityHint="Open your messages inbox"
   accessibilityValue={{text:unread===null?'Unread status unavailable':unread?`${unread} unread messages`:'No unread messages'}}
   hitSlop={6} onPress={()=>navigation.navigate('Messages')}
   style={({pressed})=>[styles.button,{backgroundColor:theme.surfaceCard,borderColor:theme.border,opacity:pressed?0.7:1}]}>
@@ -48,7 +49,7 @@ export default function MessagesHeaderButton({navigation}){
   {unread>0&&<View testID="messages-unread-badge" accessible={false} style={[styles.badge,{backgroundColor:theme.accent}]}>
    <Text style={[styles.badgeText,{color:theme.primaryText}]}>{unread>99?'99+':String(unread)}</Text>
   </View>}
- </Pressable>;
+ </Interaction>;
 }
 
 const styles=StyleSheet.create({

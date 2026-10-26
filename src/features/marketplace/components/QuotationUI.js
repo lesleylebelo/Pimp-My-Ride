@@ -1,28 +1,34 @@
+import ShopBottomNavigation from './ShopBottomNavigation';
 import ProfileAvatar from '../../../shared/components/ProfileAvatar';
 import React, {useState} from 'react';
-import {KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, View} from 'react-native';
+import {KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Ionicons} from '@expo/vector-icons';
 import {LandingText as Text, ownerTabs, shopTabs} from '../../../shared/components/landing/LandingUI';
 import {useAuth} from '../../auth/context/AuthContext';
 import {useTheme} from '../../../shared/theme/ThemeContext';
 import {formatMoney, ownerRoutes, shopRoutes} from './MarketplaceUI';
+import {CustomerModal as Modal,CustomerPage,CustomerAction,CustomerCard,useCustomerExperience} from '../../customer/components/CustomerUI';
 
 export function QuotationPage({title, subtitle, navigation, children, keyboard=false, maxWidth, onScroll, onLayout, onContentSizeChange, activeTab, refreshControl}) {
  const {profile}=useAuth(),{theme}=useTheme(),s=quotationStyles(theme),shop=profile?.role==='shop',routes=shop?shopRoutes:ownerRoutes;
  const state=navigation.getState?.(),route=state?.routes?.[state.index]?.name;
  const active=activeTab||Object.keys(routes).find(label=>routes[label]===route)||(shop?'Quotes':'My Requests');
+ const customer=useCustomerExperience();
+ if(customer)return <CustomerPage title={title} subtitle={subtitle} navigation={navigation} activeRoute={activeTab==='Bookings'?'Bookings':route||'OwnerRequests'} back={!['OwnerRequests','Bookings'].includes(route)} keyboard={keyboard} maxWidth={maxWidth} onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} refreshControl={refreshControl}>{children}</CustomerPage>;
  return <SafeAreaView style={s.safe} edges={['top','bottom','left','right']}><KeyboardAvoidingView style={s.flex} enabled={keyboard} behavior={Platform.OS==='ios'?'padding':Platform.OS==='android'?'height':undefined}><View style={[s.page,maxWidth&&{maxWidth}]}>
   <View style={s.header}><Pressable accessibilityRole="button" accessibilityLabel="Go back" style={s.back} onPress={()=>navigation.canGoBack?.()===false?navigation.navigate(shop?'ShopQuotes':'OwnerRequests'):navigation.goBack?.()}><Ionicons name="arrow-back" size={22} color={theme.textPrimary}/></Pressable><View style={s.copy}><Text accessibilityRole="header" weight="displaySemi" style={s.title}>{title}</Text>{!!subtitle&&<Text style={s.muted}>{subtitle}</Text>}</View></View>
   <ScrollView style={s.flex} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS==='ios'?'interactive':'on-drag'} onScroll={onScroll} onLayout={onLayout} onContentSizeChange={onContentSizeChange} scrollEventThrottle={16} refreshControl={refreshControl}>{children}</ScrollView>
-  <View accessibilityRole="tablist" style={s.tabs}>{(shop?shopTabs:ownerTabs).map(tab=><Pressable key={tab.label} accessibilityRole="tab" accessibilityLabel={tab.label} accessibilityState={{selected:active===tab.label}} style={s.tab} onPress={()=>navigation.navigate(routes[tab.label])}><Ionicons name={({Discover:'compass-outline',Garage:'car-outline','My Requests':'document-text-outline',Bookings:'calendar-outline',Profile:'person-outline','Find Jobs':'compass-outline',Requests:'document-text-outline',Quotes:'receipt-outline','My Shop':'storefront-outline'})[tab.label]} size={22} color={active===tab.label?theme.accent:theme.textSecondary}/><Text style={s.tabText}>{tab.label}</Text></Pressable>)}</View>
+  {shop?<ShopBottomNavigation tabs={shopTabs} active={active} onTabPress={label=>navigation.navigate(routes[label])}/>:<View accessibilityRole="tablist" style={s.tabs}>{(shop?shopTabs:ownerTabs).map(tab=><Pressable key={tab.label} accessibilityRole="tab" accessibilityLabel={tab.label} accessibilityState={{selected:active===tab.label}} style={s.tab} onPress={()=>navigation.navigate(routes[tab.label])}><Ionicons name={({Discover:'compass-outline',Garage:'car-outline','My Requests':'document-text-outline',Bookings:'calendar-outline',Profile:'person-outline','Find Jobs':'compass-outline',Requests:'document-text-outline',Quotes:'receipt-outline','My Shop':'storefront-outline'})[tab.label]} size={22} color={active===tab.label?theme.accent:theme.textSecondary}/><Text style={s.tabText}>{tab.label}</Text></Pressable>)}</View>}
  </View></KeyboardAvoidingView></SafeAreaView>;
 }
-export function QuotationAction({title,onPress,disabled=false,outline=false}) {
+export function QuotationAction({title,onPress,disabled=false,outline}) {
  const {theme}=useTheme(),s=quotationStyles(theme);
+ const customer=useCustomerExperience();
+ if(customer)return <CustomerAction {...{title,onPress,disabled,outline}} primary={outline===false||/^(Continue|Submit|Confirm|Save)/.test(title)}/>;
  return <Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityState={{disabled}} disabled={disabled} onPress={onPress} style={({pressed})=>[s.action,!outline&&s.primary,disabled&&s.disabled,pressed&&s.pressed]}><Text weight="semibold" style={[s.actionText,!outline&&s.primaryText]}>{title}</Text></Pressable>;
 }
-export function QuotationSection({children,style,...props}) {const {theme}=useTheme();return <View {...props} style={[quotationStyles(theme).section,style]}>{children}</View>;}
+export function QuotationSection({children,style,...props}) {const {theme}=useTheme(),customer=useCustomerExperience();return customer?<CustomerCard {...props} style={style}>{children}</CustomerCard>:<View {...props} style={[quotationStyles(theme).section,style]}>{children}</View>;}
 export function QuotationSteps({step=0,customer=false}) {
  const {theme}=useTheme(),s=quotationStyles(theme),labels=customer?['Compare offers','Choose quotation','Confirm next step']:['Build quotation','Review offer','Submitted'];
  return <View style={s.steps}>{labels.map((label,index)=><View key={label} style={[s.step,index===step&&s.currentStep]}><Text style={s.stepText}>{index+1}. {label}</Text></View>)}</View>;
@@ -35,7 +41,7 @@ export function quoteStatus(quote) {
 export const quotationDate=value=>typeof value==='number'&&Number.isFinite(value)&&Number.isFinite(new Date(value).getTime())?new Date(value).toLocaleString('en-ZA',{timeZone:'Africa/Johannesburg'})+' SAST':null;
 
 export function QuotationCard({quote,request,children,compact=false,draft=false}) {
- const {theme}=useTheme(),s=quotationStyles(theme),[details,setDetails]=useState(false);
+ const {theme}=useTheme(),s=quotationStyles(theme),[details,setDetails]=useState(false),customer=useCustomerExperience();
  const context=request||{title:quote.requestTitle,vehicle:quote.vehicle};
  const terms=(full=false)=><>
   {!!quote.scope&&<Text numberOfLines={compact&&!full?3:undefined} style={s.body}>{quote.scope}</Text>}
@@ -48,7 +54,7 @@ export function QuotationCard({quote,request,children,compact=false,draft=false}
   </View>
   {full&&<><Text style={s.muted}>Scope coverage: {quote.scopeConfirmed===true?'Full scope confirmed by shop':'Full scope not confirmed'}</Text><Text style={s.muted}>Fees and taxes: {quote.allChargesIncluded===true?'All required charges confirmed':'Not confirmed'}</Text>{(quote.coveredServices||[]).map(service=><Text key={service} style={s.body}>Included: {service}</Text>)}</>}
  </>;
- return <View testID={`quotation-${quote.id||'review'}`} style={s.offer}>
+ return <View testID={`quotation-${quote.id||'review'}`} style={[s.offer,customer&&{borderRadius:12,borderWidth:1,borderColor:theme.border}]}>
   <View style={s.offerHeader}><ProfileAvatar context="shop" id={quote.shopId} enabled={!!quote.shopId&&!!quote.shopName} shop size={44}/><View style={s.copy}><Text weight="semibold" style={s.heading}>{quote.shopName||'Your quotation'}</Text>{!draft&&<Text style={s.status}>{quoteStatus(quote)}</Text>}</View></View>
   <View style={s.priceHeader}><Text style={s.muted}>Total quotation · ZAR</Text><Text weight="semibold" style={s.total}>{formatMoney(quote.totalCents)}</Text></View>
   {quotationDate(quote.updatedAt)&&<Text style={s.small}>Updated: {quotationDate(quote.updatedAt)}</Text>}

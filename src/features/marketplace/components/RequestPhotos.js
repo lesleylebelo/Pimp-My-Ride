@@ -6,18 +6,23 @@ import {viewPhoto} from '../services/photoApi';
 import {isMediaUrl} from '../../../shared/services/mediaUrl';
 import {Button} from './MarketplaceUI';
 import colors from '../../../shared/theme/colors';
+import {useTheme} from '../../../shared/theme/ThemeContext';
+import {CustomerAction,CustomerPressable,CustomerText} from '../../customer/components/CustomerUI';
 
 // Only the request's explicit asset IDs are eligible. Never enumerate its Garage.
-export default function RequestPhotos({request}){
+export default function RequestPhotos({request,presentation}){
  const ids=[...new Set((Array.isArray(request.photoIds)?request.photoIds:[]).filter(id=>typeof id==='string'&&/^[a-zA-Z0-9_-]{1,128}$/.test(id)))].slice(0,5);
- if(!ids.length)return Array.isArray(request.photos)&&request.photos.length?<Text>Attached photos unavailable.</Text>:null;
+ if(!ids.length){const missing=Array.isArray(request.photos)&&request.photos.length;return presentation==='feed'?<CustomerText muted>{missing?'Attached photos unavailable.':'No attached photos'}</CustomerText>:missing?<Text>Attached photos unavailable.</Text>:null;}
+ if(presentation==='feed')return <View style={{gap:10}}><RequestPhoto requestId={request.id} photoId={ids[0]} index={0} feed large/>{ids.length>1&&<ScrollView horizontal showsHorizontalScrollIndicator accessibilityLabel="Request attachments">{ids.slice(1).map((id,index)=><RequestPhoto key={id} requestId={request.id} photoId={id} index={index+1} feed/>)}</ScrollView>}</View>;
  return <View><Text>{ids.length} attached {ids.length===1?'photo':'photos'}</Text>
   <ScrollView horizontal showsHorizontalScrollIndicator accessibilityLabel="Request attachments">
    {ids.map((id,index)=><RequestPhoto key={id} requestId={request.id} photoId={id} index={index}/>)}</ScrollView>
  </View>;
 }
 
-function RequestPhoto({requestId,photoId,index}){
+function RequestPhoto({requestId,photoId,index,feed=false,large=false}){
+ const {theme}=useTheme(),Interaction=feed?CustomerPressable:Pressable,Action=feed?CustomerAction:Button;
+ const imageStyle=feed?{width:large?'100%':120,aspectRatio:4/3,borderRadius:12}:styles.image;
  const {user,offline}=useAuth(),uid=user?.uid,focused=useIsFocused();
  const [access,setAccess]=useState(null),[error,setError]=useState(false),[retry,setRetry]=useState(0),[open,setOpen]=useState(false);
  const timer=useRef(null),current=useRef(null);
@@ -43,14 +48,14 @@ function RequestPhoto({requestId,photoId,index}){
   if(current.current?.key!==key||current.current?.url!==url)return;
   clearTimeout(timer.current);current.current=null;setAccess(null);setError(true);setOpen(false);
  }
- return <View style={styles.item}>
-  {url?<Pressable accessibilityRole="button" accessibilityLabel={`Preview attached photo ${index+1}`} onPress={()=>setOpen(true)}>
-   <Image accessibilityLabel={`Attached request photo ${index+1}`} source={{uri:url,cache:'reload'}} style={styles.image} resizeMode="cover" onError={unavailable}/>
-  </Pressable>:<View style={[styles.image,styles.placeholder]}><Text>{error||offline?'Photo unavailable':'Loading attached photo…'}</Text></View>}
-  {error&&uid&&focused&&!offline&&<Button title={`Retry attached photo ${index+1}`} outline onPress={()=>setRetry(value=>value+1)}/>}
+ return <View style={feed?{width:large?'100%':120,marginRight:large?0:8,gap:6}:styles.item}>
+  {url?<Interaction accessibilityRole="button" accessibilityLabel={`Preview attached photo ${index+1}`} onPress={()=>setOpen(true)}>
+   <Image accessibilityLabel={`Attached request photo ${index+1}`} source={{uri:url,cache:'reload'}} style={imageStyle} resizeMode="cover" onError={unavailable}/>
+  </Interaction>:<View style={[imageStyle,styles.placeholder,feed&&{backgroundColor:theme.surfaceMuted}]}><Text style={feed?{color:theme.textSecondary}:undefined}>{error||offline?'Photo unavailable':'Loading attached photo…'}</Text></View>}
+  {error&&uid&&focused&&!offline&&<Action title={`Retry attached photo ${index+1}`} outline onPress={()=>setRetry(value=>value+1)}/>}
   {open&&!!url&&<Modal visible transparent onRequestClose={()=>setOpen(false)}>
    <View style={styles.backdrop}><Image accessibilityLabel={`Attached photo ${index+1} preview`} source={{uri:url,cache:'reload'}} style={styles.preview} resizeMode="contain" onError={unavailable}/>
-    <Button title="Close photo" onPress={()=>setOpen(false)}/></View>
+    <Action title="Close photo" onPress={()=>setOpen(false)}/></View>
   </Modal>}
  </View>;
 }

@@ -52,7 +52,7 @@ test('both role quotation pages preserve existing tabs and provide keyboard-awar
    assert.deepEqual(tree.root.findByType('SafeAreaView').props.edges,['top','bottom','left','right']);
    assert.equal(tree.root.findByType('KeyboardAvoidingView').props.behavior,platform==='ios'?'padding':platform==='android'?'height':undefined);
    assert.equal(tree.root.findByType('ScrollView').props.keyboardShouldPersistTaps,'handled');
-   assert.equal(label(tree,'Messages'),undefined);assert.equal(label(tree,'Notifications'),undefined);
+   assert.equal(!!label(tree,'Messages'),role==='owner');assert.equal(!!label(tree,'Notifications'),role==='owner');
    assert.deepEqual(tree.root.findAllByType('Pressable').filter(n=>n.props.accessibilityRole==='tab').map(n=>n.props.accessibilityLabel),role==='owner'?['Discover','Garage','My Requests','Bookings','Profile']:['Find Jobs','Requests','Quotes','Bookings','My Shop']);
    await act(async()=>label(tree,'Go back').props.onPress());assert.deepEqual(moves,[[role==='shop'?'ShopQuotes':'OwnerRequests']]);
   });

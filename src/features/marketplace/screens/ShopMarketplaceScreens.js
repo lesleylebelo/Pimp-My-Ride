@@ -1,8 +1,8 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {Keyboard, Modal, Pressable, ScrollView, StyleSheet, useWindowDimensions, View} from 'react-native';
+import {Keyboard, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
-import {FeedSearchInput, FeedServicePill, FeedSourceSelector} from '../../../shared/components/landing/FeedControls';
+import {FeedSearchInput, FeedSourceSelector} from '../../../shared/components/landing/FeedControls';
 import {useAuth} from '../../auth/context/AuthContext';
 import {ConversationAction} from '../components/ConversationAction';
 import ConfirmationButton from '../../../shared/components/ConfirmationButton';
@@ -20,6 +20,9 @@ import {usePostsFeed} from '../hooks/usePostsFeed';
 import {PostCard,postTime} from '../components/PostCard';
 import {useTheme} from '../../../shared/theme/ThemeContext';
 import {QuotationPage, QuotationSection, QuotationAction, QuotationCard, QuotationSteps, QuotationEmpty, quotationStyles} from '../components/QuotationUI';
+
+import {WorkshopFeedColumn,WorkshopRequestCard} from '../components/WorkshopFeedCards';
+import {CustomerPressable,CustomerAction,CustomerChip as FeedServicePill} from '../../customer/components/CustomerUI';
 
 const offlineMessage = 'Connect to the internet to view requests and manage quotations.';
 const errorMessage = error => error?.message || 'Unable to complete this action. Please retry.';
@@ -92,6 +95,12 @@ function RequestsFeed({navigation, feed}) {
   const feedRequests=requestFeed.items;
   const posts=usePostsFeed({view:'feed',source:'shops'});
   const {user,profile}=useAuth();
+  const {theme}=useTheme();
+  const Button=CustomerAction;
+  const feedStyles={...styles,
+    muted:{...styles.muted,color:theme.textSecondary},feedIntro:{...styles.feedIntro,color:theme.textSecondary},filterHeading:{...styles.filterHeading,color:theme.textPrimary},emptyTitle:{...styles.emptyTitle,color:theme.textPrimary},loadMore:{...styles.loadMore,color:theme.textSecondary},
+    modalCard:{...styles.modalCard,backgroundColor:theme.surfaceCard},modalTitle:{...styles.modalTitle,color:theme.textPrimary},filterLabel:{...styles.filterLabel,color:theme.textPrimary},filterError:{...styles.filterError,color:theme.error}
+  };
   const categories = [
   { label: 'Tuning', icon: 'speedometer-outline' },
   { label: 'Performance', icon: 'flash-outline' },
@@ -111,9 +120,9 @@ function RequestsFeed({navigation, feed}) {
   const maximumCents = maximumBudget.trim() ? parseMoney(maximumBudget) : null;
   const matchingRequests = filterJobRequests(feedRequests, {query: debouncedSearch, category, location, minimumCents, maximumCents, notQuoted});
   const matchingPosts=posts.items.filter(post=>{
-   const haystack=[post.title,post.description,post.vehicle,post.category,post.city,post.province,post.authorName].join(' ').toLowerCase();
+   const haystack=[post.title,post.description,typeof post.vehicle==='object'?[post.vehicle?.year,post.vehicle?.make,post.vehicle?.model].filter(Boolean).join(' '):post.vehicle,post.category,post.city,post.province,post.authorName,post.shop?.name].join(' ').toLowerCase();
    return post.authorId!==user?.uid&&(source==='all'||source==='shops')&&(!debouncedSearch||haystack.includes(debouncedSearch))&&
-    (category==='All'||post.category?.toLowerCase()===category.toLowerCase())&&(!location||post.city?.toLowerCase()===location.toLowerCase());
+    (category==='All'||(post.serviceCategory||post.category)?.toLowerCase()===category.toLowerCase())&&(!location||post.city?.toLowerCase()===location.toLowerCase());
   });
   const feedItems=[
    ...(source==='all'||source==='customers'?matchingRequests.map(request=>({kind:'request',id:`request:${request.id}`,createdAt:request.createdAt,value:request})):[]),
@@ -140,87 +149,52 @@ function RequestsFeed({navigation, feed}) {
   const onScroll=event=>{requestFeed.onScroll(event);const {contentOffset,contentSize,layoutMeasurement}=event.nativeEvent;if(contentSize.height-contentOffset.y-layoutMeasurement.height<260)posts.loadNext();};
   const onContentSizeChange=(width,height)=>{requestFeed.onContentSizeChange(width,height);if(height<650)posts.loadNext();};
 
-  if (!isJobsFeed) return <Page title="Direct requests" navigation={navigation} onScroll={requestFeed.onScroll} onLayout={requestFeed.onLayout} onContentSizeChange={requestFeed.onContentSizeChange}>
-    <Text style={styles.muted}>Customers have invited your shop to quote on these requests.</Text>
+  if (!isJobsFeed) return <Page feedLayout title="Direct requests" navigation={navigation} onScroll={requestFeed.onScroll} onLayout={requestFeed.onLayout} onContentSizeChange={requestFeed.onContentSizeChange}>
+    <Text style={feedStyles.muted}>Customers have invited your shop to quote on these requests.</Text>
     <Notice busy={busy} error={offline ? offlineMessage : error}/>
-    {feedRequests.map(request => <Card key={request.id}>
-      <RequestSummary request={request}/>
-      <RequestPhotos request={request}/>
-      <Button title="View request" disabled={disabled} onPress={() => { if (!disabled) navigation.navigate('ShopRequest', {id: request.id}); }}/>
-    </Card>)}
+    <WorkshopFeedColumn>{feedRequests.map(request=><WorkshopRequestCard key={request.id} request={request} disabled={disabled} time={postedLabel(request.createdAt)} onOpen={()=>{if(!disabled)navigation.navigate('ShopRequest',{id:request.id});}}/>)}</WorkshopFeedColumn>
     {!busy && data && !data.items.length && <Text>No direct requests yet.</Text>}
     <Button title="Refresh requests" disabled={disabled} onPress={reload(refresh)}/>
-    {busy && !!feedRequests.length && <Text style={styles.loadMore}>Loading more requests...</Text>}
+    {busy && !!feedRequests.length && <Text style={feedStyles.loadMore}>Loading more requests...</Text>}
   </Page>;
 
-  return <Page title="Find Jobs" navigation={navigation} headerRight={<><NotificationsHeaderButton navigation={navigation}/><MessagesHeaderButton navigation={navigation}/></>} onScroll={onScroll} onLayout={requestFeed.onLayout} onContentSizeChange={onContentSizeChange}
-   floatingAction={<Pressable accessibilityRole="button" accessibilityLabel="New showcase" onPress={()=>navigation.navigate('PostForm',{type:'showcase'})} style={styles.floating}><Ionicons name="add" size={28} color={colors.white}/></Pressable>}>
+  return <Page feedLayout title="Find Jobs" navigation={navigation} headerRight={<><NotificationsHeaderButton navigation={navigation}/><MessagesHeaderButton navigation={navigation}/></>} onScroll={onScroll} onLayout={requestFeed.onLayout} onContentSizeChange={onContentSizeChange} refreshControl={<RefreshControl refreshing={busy||posts.refreshing} onRefresh={()=>{void refresh().catch(()=>{});void posts.refresh();}}/>}
+>
+    <CustomerAction title="New showcase" icon="add" onPress={()=>navigation.navigate('PostForm',{type:'showcase'})}/>
     <FeedSearchInput accessibilityLabel="Search requests, vehicles or services" placeholder="Search requests, vehicles or services" value={search} onChangeText={setSearch}/>
-    <FeedSourceSelector options={[{label:'All',value:'all'},{label:'Customers',value:'customers'},{label:'Shops',value:'shops'}]} storageKey="feed-source:shop" value={source} onChange={setSource}/>
-    <Text style={styles.feedIntro}>Browse open customer requests for work your shop can complete.</Text>
-    <Text style={styles.filterHeading}>Browse by service</Text>
-    <View style={styles.categories}>
+    <FeedSourceSelector interactionComponent={CustomerPressable} options={[{label:'All',value:'all'},{label:'Customers',value:'customers'},{label:'Shops',value:'shops'}]} storageKey="feed-source:shop" value={source} onChange={setSource}/>
+    <Text style={feedStyles.feedIntro}>Explore customer requests and workshop showcases.</Text>
+    <Text style={feedStyles.filterHeading}>Browse by service</Text>
+    <View style={feedStyles.categories}>
       <FeedServicePill title="All" icon="apps-outline" selected={category === 'All'} onPress={() => setCategory('All')}/>
 {categories.map(item => <FeedServicePill key={item.label} title={item.label} icon={item.icon} selected={category === item.label} onPress={() => setCategory(item.label)}/>)}
 <FeedServicePill title="More filters" icon="options-outline" selected={false} onPress={() => setFiltersOpen(true)}/>
     </View>
     <Notice busy={(busy&&!feedRequests.length||posts.busy&&!posts.items.length)} error={offline ? offlineMessage : error||posts.error}/>
     {!!(error||posts.error) && <Button title={error?'Retry loading requests':'Retry loading posts'} outline disabled={!!(error&&busy)||!!(posts.error&&posts.busy)} onPress={retry}/>}
-    {!busy && !posts.busy && !error && !posts.error && !feedItems.length && <View style={styles.emptyState}>
-      <Text style={styles.emptyTitle}>{hasFilters ? 'No requests match your search' : 'No open requests are available'}</Text>
+    {!busy && !posts.busy && !error && !posts.error && !feedItems.length && <View style={feedStyles.emptyState}>
+      <Text style={feedStyles.emptyTitle}>{hasFilters ? 'No posts match your search' : 'No posts available'}</Text>
       {hasFilters && <Button title="Clear filters" outline onPress={clearFilters}/>}
     </View>}
-    <View style={styles.requestCards}>
-    {feedItems.map(item=>item.kind==='post'?<View key={item.id} style={styles.feedCard}>
-      <Text style={styles.feedLabel}>Showcase</Text>
-      <PostCard post={item.value} onOpen={()=>navigation.navigate('PostDetail',{id:item.value.id})}/>
-    </View>:<View key={item.id} style={styles.feedCard}>
-    <Text style={styles.feedLabel}>Service request</Text>
-    <Card style={styles.jobCard}>
-      {(()=>{const request=item.value;return <>
-      <View style={styles.jobAuthor}>
-        <ProfileAvatar context="request" id={request.id} revision={request.customerAvatar?.revision} enabled={!!request.customerAvatar?.hasPhoto&&!!request.customerName&&request.customerName!=='Customer'} size={38} label="Customer profile photo"/>
-        <View style={styles.jobAuthorCopy}>
-          <Text style={styles.jobCustomer}>{request.customerName || 'Customer'}</Text>
-          <Text style={styles.muted}>{[request.city || 'Location not provided', request.createdAt ? postedLabel(request.createdAt) : null].filter(Boolean).join(' · ')}</Text>
-        </View>
-        <View style={styles.badges}>
-          <Text style={styles.openStatus}>Open</Text>
-          {request.quotedByMe && <Text style={styles.quotedStatus}>Quoted</Text>}
-        </View>
-      </View>
-      <Text style={styles.jobCategory}>{request.categoryName || 'Service request'}</Text>
-      <Text style={styles.jobTitle}>{request.title}</Text>
-      <Text style={styles.jobVehicle}>{[request.vehicle?.year, request.vehicle?.make, request.vehicle?.model].filter(Boolean).join(' ')}</Text>
-      {!!request.description && <Text style={styles.jobDescription}>{request.description}</Text>}
-      <RequestPhotos request={request}/>
-      <Text style={styles.jobBudget}>{request.budgetMinCents == null && request.budgetMaxCents == null ? 'Budget not specified' : `${request.budgetMinCents == null ? 'No minimum' : formatMoney(request.budgetMinCents)} – ${request.budgetMaxCents == null ? 'No maximum' : formatMoney(request.budgetMaxCents)}`}</Text>
-      <View style={styles.jobFooter}>
-        <Pressable accessibilityRole="button" accessibilityLabel={`${request.quotedByMe ? 'View your quote' : 'View request'}: ${request.title}`} disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('ShopRequest', {id: request.id});}} style={styles.viewJob}>
-          <Text style={styles.viewJobText}>{request.quotedByMe ? 'View your quote' : 'View request'} →</Text>
-        </Pressable>
-        <Text style={styles.quoteCount}>{request.quotationCount ? `${request.quotationCount} ${request.quotationCount === 1 ? 'quote' : 'quotes'}` : 'No quotes yet'}</Text>
-      </View>
-      </>;})()}
-    </Card>
-    </View>)}
-    </View>
-    {(busy||posts.busy)&&!!(feedRequests.length||posts.items.length)&&<Text accessibilityRole="status" style={styles.loadMore}>Loading more posts...</Text>}
-    <Modal visible={filtersOpen} transparent animationType="fade" onRequestClose={() => setFiltersOpen(false)}>
-      <View style={styles.modalBackdrop}>
-        <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent} keyboardShouldPersistTaps="handled">
-        <View style={styles.modalCard} accessibilityViewIsModal>
-          <Text accessibilityRole="header" style={styles.modalTitle}>More filters</Text>
-          <Text style={styles.filterLabel}>Location</Text>
-          <View style={styles.categories}>
+    <WorkshopFeedColumn>
+      {feedItems.map(item=>item.kind==='post'?<PostCard key={item.id} post={item.value} presentation="feed" onOpen={()=>navigation.navigate('PostDetail',{id:item.value.id})} onProfile={item.value.shop?.id?()=>navigation.navigate('ShopProfile',{shop:item.value.shop}):undefined}/>:<WorkshopRequestCard key={item.id} request={item.value} disabled={disabled} time={postedLabel(item.value.createdAt)} onOpen={()=>{if(!disabled)navigation.navigate('ShopRequest',{id:item.value.id});}}/>)}
+    </WorkshopFeedColumn>
+    {(busy||posts.busy)&&!!(feedRequests.length||posts.items.length)&&<Text accessibilityRole="status" style={feedStyles.loadMore}>Loading more posts...</Text>}
+    <Modal visible={filtersOpen} transparent animationType="none" onRequestClose={() => setFiltersOpen(false)}>
+      <View style={feedStyles.modalBackdrop}>
+        <ScrollView style={feedStyles.modalScroll} contentContainerStyle={feedStyles.modalScrollContent} keyboardShouldPersistTaps="handled">
+        <View style={feedStyles.modalCard} accessibilityViewIsModal>
+          <Text accessibilityRole="header" style={feedStyles.modalTitle}>More filters</Text>
+          <Text style={feedStyles.filterLabel}>Location</Text>
+          <View style={feedStyles.categories}>
             <FeedServicePill title="All locations" selected={!location} onPress={() => setLocation('')}/>
             {locations.map(city => <FeedServicePill key={city} title={city} selected={location === city} onPress={() => setLocation(city)}/>)}
           </View>
-          <Text style={styles.filterLabel}>Budget range</Text>
+          <Text style={feedStyles.filterLabel}>Budget range</Text>
           <Field accessibilityLabel="Minimum budget" label="Minimum budget (R)" value={minimumBudget} onChangeText={setMinimumBudget} keyboardType="decimal-pad"/>
-          {!!minimumBudget && minimumCents === null && <Text style={styles.filterError}>Enter a valid amount, such as 10000.00.</Text>}
+          {!!minimumBudget && minimumCents === null && <Text style={feedStyles.filterError}>Enter a valid amount, such as 10000.00.</Text>}
           <Field accessibilityLabel="Maximum budget" label="Maximum budget (R)" value={maximumBudget} onChangeText={setMaximumBudget} keyboardType="decimal-pad"/>
-          {!!maximumBudget && maximumCents === null && <Text style={styles.filterError}>Enter a valid amount, such as 20000.00.</Text>}
+          {!!maximumBudget && maximumCents === null && <Text style={feedStyles.filterError}>Enter a valid amount, such as 20000.00.</Text>}
           <FeedServicePill title={notQuoted ? 'Not yet quoted by me · On' : 'Not yet quoted by me'} selected={notQuoted} onPress={() => setNotQuoted(value => !value)}/>
           <Button title="Close" outline onPress={() => setFiltersOpen(false)}/>
         </View>
@@ -241,6 +215,7 @@ function timestamp(value) {
 }
 
 function postedLabel(value) {
+  if(value==null)return '';
   const timestamp = typeof value?.toMillis === 'function' ? value.toMillis() : new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return '';
   const hours = Math.max(0, Math.floor((Date.now() - timestamp) / 3600000));

@@ -70,10 +70,10 @@ test('bookmark feedback waits for the server and preserves retry after failure',
   assert.deepEqual(f.calls.map(c=>c.data),[{id:'post',saved:true},{id:'post',saved:true}]);
  }finally{await act(async()=>tree.unmount());}
 });
-test('responsive portfolio uses two columns on desktop and one with larger accessibility fonts',async()=>{
+test('Customer portfolio uses compact desktop columns and one with larger accessibility fonts',async()=>{
  for(const fontScale of [1,1.8]){const f=fixture({items:[{id:'one'},{id:'two'}]}),screens=loadUI('src/features/marketplace/screens/PostScreens.js',{...f.mocks,'react-native':{useWindowDimensions:()=>({width:1100,height:900,fontScale})}});let tree;
   await act(async()=>{tree=create(React.createElement(screens.ShopProfileScreen,{navigation:f.navigation,route:{params:{shop:{id:'shop'}}}}));});try{
-   const width=fontScale===1?'48%':'100%';assert.ok(tree.root.findAllByType('View').filter(n=>n.props.style?.width===width).length>=2);
+   const width=fontScale===1?338:'100%';assert.ok(tree.root.findAllByType('View').filter(n=>n.props.style?.width===width).length>=2);
   }finally{await act(async()=>tree.unmount());}
  }
 });

@@ -1,7 +1,13 @@
 const {ApiError}=require('./errors.cjs');
+// Public classifications contain no provider payload, credentials or account IDs.
+function rejection(code,aiReason,message,resetAt){
+ const error=new ApiError(code,message);error.fields={aiReason};
+ if(aiReason==='daily_allowance'&&Number.isFinite(resetAt))error.fields.resetAt=resetAt;
+ return error;
+}
 const reasons={
  configuration:'configuration',provider_auth:'provider',model_unavailable:'provider',provider_quota:'provider',
- provider_timeout:'provider',provider_http:'provider',provider_network:'provider',provider_blocked:'output',
+ provider_billing:'provider',provider_timeout:'provider',provider_http:'provider',provider_network:'provider',provider_blocked:'output',
  malformed_output:'output',grounding_rejected:'validation',quota_storage:'storage',diagnostic_storage:'storage',
  reservation_expired:'quota',account_changed:'access',category_changed:'validation',unknown:'backend',
 };
@@ -13,6 +19,7 @@ class AIFailure extends ApiError{
  constructor(reason='unknown',details={}){
   super('unavailable','AI Assist is unavailable. Your draft is unchanged; you can continue editing normally.');
   this.reason=Object.hasOwn(reasons,reason)?reason:'unknown';this.stage=reasons[this.reason];
+  this.fields={aiReason:({configuration:'configuration',provider_auth:'configuration',model_unavailable:'configuration',provider_quota:'provider_limit',provider_billing:'provider_billing',provider_timeout:'provider_timeout',provider_network:'provider_network',grounding_rejected:'suggestion_rejected',malformed_output:'suggestion_rejected'})[this.reason]||'service_unavailable'};
   this.rejectedField=validationFields.includes(details?.rejectedField)?details.rejectedField:null;
   this.validationRule=validationRules.includes(details?.validationRule)?details.validationRule:null;
   this.outputStage=outputStages.includes(details?.outputStage)?details.outputStage:null;
@@ -20,4 +27,4 @@ class AIFailure extends ApiError{
  }
 }
 const failure=(reason,details)=>new AIFailure(reason,details);
-module.exports={AIFailure,failure};
+module.exports={AIFailure,failure,rejection};

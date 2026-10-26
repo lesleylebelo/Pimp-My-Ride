@@ -1,5 +1,6 @@
+import {CustomerModal as Modal,CustomerPressable,useCustomerExperience} from '../../customer/components/CustomerUI';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
-import {AppState, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, TextInput, View} from 'react-native';
+import {AppState, FlatList, KeyboardAvoidingView, Platform, Pressable, ScrollView, TextInput, View} from 'react-native';
 import ProfileAvatar from '../../../shared/components/ProfileAvatar';
 import {Ionicons} from '@expo/vector-icons';
 import {useIsFocused} from '@react-navigation/native';
@@ -12,6 +13,7 @@ import {MessagingFrame, MessageAction, MessageEmpty, MessageFeedback, activityTi
 export function MessagesScreen(props) {const {user} = useAuth(); return <Inbox key={user?.uid} {...props}/>;}
 function Inbox({navigation}) {
   const {offline, profile} = useAuth(), feed = useMessages(), focused = useIsFocused(), {styles, theme} = useMessagingStyles();
+  const customer=useCustomerExperience(),Interaction=customer?CustomerPressable:Pressable;
   const opening = useRef(false);
   useEffect(() => {if (focused) opening.current = false;}, [focused]);
   const error = offline ? 'Connect to view messages.' : feed.error;
@@ -28,7 +30,7 @@ function Inbox({navigation}) {
       renderItem={({item}) => {
         const name = conversationLabel(item, profile?.role), unread = item.unreadCount > 0;
         const status = item.consent === 'pending' ? 'Awaiting customer approval' : item.canSend ? '' : 'Read-only history';
-        return <Pressable accessibilityRole="button" accessibilityLabel={`Open conversation: ${name}`}
+        return <Interaction accessibilityRole="button" accessibilityLabel={`Open conversation: ${name}`}
           accessibilityHint={[item.requestTitle, status].filter(Boolean).join('. ')} accessibilityValue={{text: `${item.unreadCount || 0} unread messages`}} disabled={offline}
           onPress={() => open(item)} style={({pressed}) => [styles.inboxRow, pressed && styles.pressed]}>
           <ProfileAvatar context="conversation" id={item.id} revision={item.avatar?.revision} enabled={!!item.avatar} shop={profile?.role!=='shop'} size={46}/>
@@ -40,7 +42,7 @@ function Inbox({navigation}) {
             {!!status && <Text style={styles.secondary}>{status}</Text>}
           </View>
           {unread && <View testID={`conversation-unread-${item.id}`} style={styles.unreadBadge}><Text style={styles.unreadCount}>{item.unreadCount > 99 ? '99+' : String(item.unreadCount)}</Text></View>}
-        </Pressable>;
+        </Interaction>;
       }}
       ListEmptyComponent={!feed.busy && !error ? <MessageEmpty inbox/> : null}
       ListFooterComponent={<View style={styles.footer}>
@@ -83,6 +85,7 @@ function Chat({navigation, route}) {
     if (offline || !focused || navigating.current) return;
     navigating.current = true; setDetails(false); navigation.navigate(name, {id});
   }
+  const customer=useCustomerExperience(),Interaction=customer?CustomerPressable:Pressable;
   const readThrough = Math.max(0, ...feed.items.filter(item => item.senderId !== user?.uid).map(item => item.recipientOrdinal || 0));
   const rows = useMemo(() => [...feed.items].reverse(), [feed.items]);
   const error = offline ? 'Connect to view and send messages.' : feed.error || failure;
@@ -114,13 +117,13 @@ function Chat({navigation, route}) {
   return <MessagingFrame navigation={navigation} role={profile?.role} title={conversation ? conversationLabel(conversation, profile?.role) : 'Private conversation'} subtitle={conversation ? status : undefined} icon="chatbubble-ellipses-outline" avatar={conversation?.avatar} avatarShop={profile?.role!=='shop'}>
     <KeyboardAvoidingView testID="chat-keyboard-layout" style={styles.keyboard} behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}>
       {conversation && <View style={styles.context}>
-        <Pressable accessibilityRole="button" accessibilityLabel="View related request" accessibilityHint={conversation.requestTitle}
+        <Interaction accessibilityRole="button" accessibilityLabel="View related request" accessibilityHint={conversation.requestTitle}
           disabled={offline} onPress={() => navigate(profile?.role === 'shop' ? 'ShopRequest' : 'OwnerRequest', conversation.serviceRequestId)}
           style={({pressed}) => [styles.contextLink, pressed && styles.pressed]}>
           <Ionicons name="construct-outline" size={18} color={theme.textSecondary}/>
           <View style={styles.contextCopy}><Text weight="semibold" style={styles.contextTitle}>{conversation.requestTitle}</Text><Text style={styles.hint}>Request: {conversation.serviceRequestId}</Text></View>
           <Ionicons name="chevron-forward" size={16} color={theme.textSecondary}/>
-        </Pressable>
+        </Interaction>
         <View style={styles.actions}><MessageAction title="Conversation details" onPress={() => setDetails(true)}/>
           {!!conversation.unreadCount && <Text style={styles.secondary}>{conversation.unreadCount} unread</Text>}</View>
       </View>}
@@ -150,10 +153,10 @@ function Chat({navigation, route}) {
               onFocus={() => setInputFocused(true)} onBlur={() => setInputFocused(false)}
               onKeyPress={event => {const key = event.nativeEvent; if (Platform.OS === 'web' && key.key === 'Enter' && !key.shiftKey && !key.isComposing && key.keyCode !== 229 && !event.isComposing) {event.preventDefault?.(); void send();}}}
               style={[styles.input, inputFocused && styles.inputFocused]}/>
-            <Pressable accessibilityRole="button" accessibilityLabel={sendLabel} accessibilityState={{disabled: blocked || !draft.trim(), busy: sending}}
+            <Interaction accessibilityRole="button" accessibilityLabel={sendLabel} accessibilityState={{disabled: blocked || !draft.trim(), busy: sending}}
               disabled={blocked || !draft.trim()} onPress={send} style={({pressed}) => [styles.send, (blocked || !draft.trim()) && styles.sendDisabled, pressed && styles.pressed]}>
               <Ionicons name={failure && draft ? 'refresh-outline' : 'send'} size={21} color={blocked || !draft.trim() ? theme.textSecondary : '#101208'}/>
-            </Pressable>
+            </Interaction>
           </View>
           <Text style={styles.hint}>{draft.length}/2000 characters. Chat does not change quotations, bookings or payments.</Text>
         </>}

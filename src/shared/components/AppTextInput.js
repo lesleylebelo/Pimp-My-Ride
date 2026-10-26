@@ -8,6 +8,7 @@ export default function AppTextInput({
   value,
   onChangeText,
   placeholder,
+  placeholderTextColor,
   secureTextEntry,
   showPasswordToggle = false,
   icon,
@@ -48,7 +49,7 @@ export default function AppTextInput({
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
-          placeholderTextColor={theme.textMuted}
+          placeholderTextColor={placeholderTextColor || theme.textMuted}
           secureTextEntry={isSecure}
           keyboardType={keyboardType}
           autoCapitalize={secureTextEntry ? "none" : autoCapitalize}
