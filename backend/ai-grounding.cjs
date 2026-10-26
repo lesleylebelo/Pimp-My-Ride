@@ -2,7 +2,13 @@ const {failure}=require('./ai-errors.cjs');
 // Closed grammatical vocabulary: no specifications, service names, prices or claims.
 const editorial=new Set(('a an the i we you your our my me mine us their its it this that these those to for of and or in on at by with from as is are be been was were have has had would could can please request requested requesting work project showcase description title details information clarify explain provide consider prefer preferred which what when how any about want wants like need needs clearly accurately regarding also so into onto them they there do does did am being').split(' '));
 const questions=new Set(('scope timing condition preferences constraints budget vehicle vehicles make model year colour color finish areas parts existing issues additional requirements intended desired schedule start date completion detail specific choice available options other should done more further').split(' '));
-const forms=[['wrap','wraps','wrapped','wrapping'],['paint','paints','painted','painting'],['install','installs','installed','installing'],['repair','repairs','repaired','repairing'],['replace','replaces','replaced','replacing'],['fit','fits','fitted','fitting'],['tint','tints','tinted','tinting'],['tune','tunes','tuned','tuning'],['service','services','serviced','servicing']];
+// Grammatical framing and general clarification are not automotive facts.
+// Technical nouns still have to come from the draft; synonyms below retain a
+// closed meaning rather than accepting arbitrary newly generated content.
+for(const word of 'looking seeking wish wishing kindly help assistance get getting would like'.split(' '))editorial.add(word);
+for(const word of 'timeframe timeline deadline duration spending spend expectations expectation priorities priority reference references photo photos photograph photographs image images picture pictures share tell describe explain outcome outcomes result results final look anything else important information about regarding roughly approximate estimated estimate limitations limits concerns concern requirements preferences details desired preferred particular specify clarify elaboration elaborate suitable convenient availability flexible flexibility'.split(' '))questions.add(word);
+questions.add('much');
+const forms=[['wrap','wraps','wrapped','wrapping'],['paint','paints','painted','painting'],['install','installs','installed','installing'],['repair','repairs','repaired','repairing'],['fix','fixes','fixed','fixing'],['replace','replaces','replaced','replacing'],['fit','fits','fitted','fitting'],['tint','tints','tinted','tinting'],['tune','tunes','tuned','tuning'],['service','services','serviced','servicing']];
 const inflections=new Map(forms.flatMap(group=>group.map(word=>[word,group[0]])));
 const past=new Set(forms.map(group=>group[2]));
 const negators=new Set(['no','not','never','without','neither','nor','avoid','excluding']);
@@ -14,7 +20,8 @@ function normal(value){return String(value).normalize('NFKC').toLowerCase().repl
  .replace(/\b(\p{L}+)'s\b/gu,'$1').replace(/\br\s+(?=\d)/g,'r');}
 const words=value=>normal(value).match(/[\p{L}\p{N}]+/gu)||[];
 const spellings=new Map([['color','colour'],['gray','grey'],['tire','tyre'],['tires','tyres'],['optimize','optimise']]);
-const canonical=word=>spellings.get(word)||inflections.get(word)||word;
+const equivalent=new Map([['fix','repair'],['matte','matt']]);
+const canonical=word=>{const root=inflections.get(word)||word;return equivalent.get(root)||spellings.get(root)||root;};
 const numbers=value=>normal(value).match(/[-+]?\d+(?:[.,:/-]\d+)*/g)||[];
 const money=value=>normal(value).match(/[\u00a3$\u20ac%]|\br(?=\d)/g)||[];
 const same=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
@@ -70,7 +77,7 @@ function validateGrounding(value,draft){
  for(const text of value.missingDetails){
   if(numbers(text).length||money(text).length)reject('missingDetails','question_numeric_reference');
   const list=words(text),open=/^(what|which|when|how)\b/.test(normal(text));
-  const neutralFrame=/^(could|can) you (please )?(provide|clarify|describe)\b/.test(normal(text))||/^(do you have|are there) any\b/.test(normal(text));
+  const neutralFrame=/^(could|can|would) you (please )?(provide|clarify|describe|share|tell|explain|specify)\b/.test(normal(text))||/^(do you have|are there|is there) (any|a|an)\b/.test(normal(text));
   if(!open&&!neutralFrame)reject('missingDetails','question_assumption');
   // Questions may introduce general missing-information topics, never new
   // services/specifications. No completed-work assumptions or source negation
@@ -81,4 +88,4 @@ function validateGrounding(value,draft){
   if(domain.length&&(negative(source).length||/\b(is|are|has|have|was|were)\b/.test(normal(text))))reject('missingDetails','question_assumption');
  }
 }
-module.exports={validateGrounding,editorialWords};
+module.exports={validateGrounding,editorialWords,questionWords:()=>[...questions]};

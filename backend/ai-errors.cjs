@@ -1,15 +1,13 @@
 const {ApiError}=require('./errors.cjs');
 // Public classifications contain no provider payload, credentials or account IDs.
-function rejection(code,aiReason,message,resetAt){
+function rejection(code,aiReason,message){
  const error=new ApiError(code,message);error.fields={aiReason};
- if(aiReason==='daily_allowance'&&Number.isFinite(resetAt))error.fields.resetAt=resetAt;
  return error;
 }
 const reasons={
  configuration:'configuration',provider_auth:'provider',model_unavailable:'provider',provider_quota:'provider',
  provider_billing:'provider',provider_timeout:'provider',provider_http:'provider',provider_network:'provider',provider_blocked:'output',
- malformed_output:'output',grounding_rejected:'validation',quota_storage:'storage',diagnostic_storage:'storage',
- reservation_expired:'quota',account_changed:'access',category_changed:'validation',unknown:'backend',
+ malformed_output:'output',grounding_rejected:'validation',account_changed:'access',account_lookup:'backend',category_changed:'validation',category_unavailable:'configuration',unknown:'backend',
 };
 const validationFields=['title','description','missingDetails','categoryId'];
 const validationRules=['negation_changed','number_changed','currency_changed','work_status_changed','new_content_term','sensitive_structure_changed','source_fact_omitted','question_numeric_reference','question_assumption','question_unprovided_term','category_unsupported'];

@@ -1,26 +1,17 @@
-const {test,after}=require('node:test'),assert=require('node:assert/strict');
+const {test,before,after}=require('node:test'),assert=require('node:assert/strict');
 require('../../scripts/assert-emulators.cjs').assertEmulators({auth:true});
 const {initializeApp,deleteApp}=require('firebase-admin/app');
 const {getFirestore}=require('firebase-admin/firestore');
-const {createAIReleaseControl,CONTROL_PATH,DAILY_PREFIX,ATTEMPT_PREFIX}=require('../ai-release-control.cjs');
-const app=initializeApp({projectId:'demo-pmr-security'},'ai-release-tests'),db=getFirestore(app);
+const {CONTROL_PATH,DAILY_PREFIX,ATTEMPT_PREFIX}=require('../ai-release-control.cjs');
+const app=initializeApp({projectId:'demo-pmr-security'},'ai-production-tests'),db=getFirestore(app);
 const day='2040-01-02';
-after(async()=>{await db.doc(DAILY_PREFIX+'/'+day).delete();await db.doc(DAILY_PREFIX+'/2040-01-03').delete();const rows=await db.collection(ATTEMPT_PREFIX).get();for(const row of rows.docs)await row.ref.delete();await db.terminate();await deleteApp(app);});
-test('real transactions allow five globally across instances and preserve historical allowance',async()=>{
- const history=db.doc(CONTROL_PATH);if(!(await history.get()).exists)await history.create({version:1,attempts:1});
- const before=await history.get();
- const reserve=async()=>{const control=createAIReleaseControl({db,env:{PMR_AI_TEST_UIDS:'synthetic-tester,another-tester'},now:()=>Date.parse(day+'T12:00:00Z')});control.authorize('synthetic-tester');return control.reserve();};
- const results=await Promise.allSettled(Array.from({length:12},reserve));
- assert.equal(results.filter(value=>value.status==='fulfilled').length,5);
- assert.equal(results.filter(value=>value.status==='rejected'&&value.reason.code==='resource-exhausted').length,7);
- await assert.rejects(reserve,{code:'resource-exhausted'});
- assert.deepEqual((await db.doc(DAILY_PREFIX+'/'+day).get()).data(),{version:1,day,attempts:5});
- const attempt=results.find(value=>value.status==='fulfilled').value;
- const ref=db.doc(ATTEMPT_PREFIX+'/'+attempt.correlationId);assert.equal((await ref.get()).data().state,'unknown');
- await attempt.dispatch();await attempt.response(200);await attempt.finish({outputValidated:true});
- const data=(await ref.get()).data();assert.equal(data.state,'successful');assert.ok(data.reservedAt.toDate() instanceof Date);assert.equal(data.providerHttpStatus,200);
- const after=await history.get();assert.deepEqual(after.data(),before.data());assert.ok(after.updateTime.isEqual(before.updateTime));
+before(async()=>{
+ await db.doc(CONTROL_PATH).set({version:1,attempts:1});
+ await db.doc(DAILY_PREFIX+'/'+day).set({version:1,day,attempts:5});
+ await db.doc(ATTEMPT_PREFIX+'/synthetic-history').set({version:1,state:'failed',reasonCode:'grounding_rejected'});
 });
+after(async()=>{for(const path of [CONTROL_PATH,DAILY_PREFIX+'/'+day,ATTEMPT_PREFIX+'/synthetic-history'])await db.doc(path).delete();await db.terminate();await deleteApp(app);});
+
 test('existing rules deny direct-client history, daily quota and diagnostic access',async()=>{
  const fs=require('node:fs'),path=require('node:path');
  const {initializeTestEnvironment,assertFails}=require('@firebase/rules-unit-testing');
@@ -37,50 +28,13 @@ test('existing rules deny direct-client history, daily quota and diagnostic acce
  }finally{await environment.cleanup();}
 });
 
-test('Gemini 3.5 mocked dispatch preserves real persistent quota and failure diagnostics',async()=>{
- const {createAIProvider}=require('../ai-provider.cjs'),{createAIAssist}=require('../ai-assist.cjs');
- const env={PMR_AI_ASSIST_ENABLED:'true',PMR_AI_PROVIDER:'gemini',PMR_AI_MODEL:'gemini-3.5-flash-lite',GEMINI_API_KEY:'synthetic-key',PMR_AI_TEST_UIDS:'synthetic-tester,another-tester'};
- const control=createAIReleaseControl({db,env,now:()=>Date.parse('2040-01-03T12:00:00Z')});
- const input={kind:'showcase',title:'Black wrap',description:'Wrap doors in black.',categoryId:'Wrap & Paint'};
- const output={title:input.title,description:input.description,categoryId:input.categoryId,missingDetails:[]};
- const response=value=>JSON.stringify({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:'synthetic reasoning',thought:true},{text:JSON.stringify(value),thought:false,thoughtSignature:'synthetic-opaque-signature'}]}}]});
- const replies=[{status:200,text:response({...output,description:'I would like my doors wrapped in black.',missingDetails:['What is your budget?']})},{status:404,text:''},{status:200,text:'not JSON'},
-  {status:200,text:response({...output,description:'Invented turbo gains.'})},{status:200,text:response(output)}];let calls=0;
- const provider=createAIProvider({env,fetcher:async(url,options)=>{
-  assert.equal(url,'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent');
-  assert.equal(Object.hasOwn(JSON.parse(options.body).generationConfig,'candidateCount'),false);
-  const reply=replies[calls++];assert.ok(reply,'no sixth dispatch');return {status:reply.status,ok:reply.status===200,text:async()=>reply.text};
- }});
- const actor=async request=>({uid:request.auth.uid,profile:{role:'shop',accountStatus:'active',verificationStatus:'approved'}});
- const assist=createAIAssist({db,actor,provider,releaseControl:control});
- const request=uid=>({auth:{uid},data:input});
- await assert.rejects(()=>assist(request('unlisted')),{code:'permission-denied'});assert.equal(calls,0);
- for(const [index,reason] of [null,'model_unavailable','malformed_output','grounding_rejected',null].entries()){
-  const run=()=>assist(request(index%2?'another-tester':'synthetic-tester'));
-  if(reason)await assert.rejects(run,{reason});else assert.equal((await run()).title,input.title);
- }
- // Another process has fresh minute counters but shares the exhausted daily quota.
- const restarted=createAIAssist({db,actor,provider,releaseControl:createAIReleaseControl({db,env,now:()=>Date.parse('2040-01-03T12:00:00Z')})});
- await assert.rejects(()=>restarted(request('synthetic-tester')),{code:'resource-exhausted'});assert.equal(calls,5);
- const counter=(await db.doc(DAILY_PREFIX+'/2040-01-03').get()).data();assert.equal(counter.attempts,5);
- const rows=(await db.collection(ATTEMPT_PREFIX).where('day','==','2040-01-03').get()).docs.map(doc=>doc.data());
- assert.equal(rows.length,5);assert.equal(rows.filter(row=>row.state==='successful'&&row.outputValidated===true).length,2);
- assert.deepEqual(rows.filter(row=>row.state==='failed').map(row=>row.reasonCode).sort(),['grounding_rejected','malformed_output','model_unavailable']);
- const rejected=rows.find(row=>row.reasonCode==='grounding_rejected');assert.equal(rejected.rejectedField,'description');assert.equal(rejected.validationRule,'new_content_term');
- const malformed=rows.find(row=>row.reasonCode==='malformed_output');assert.equal(malformed.outputStage,'envelope');assert.equal(malformed.outputRule,'envelope_json');
- assert.ok(rows.every(row=>!JSON.stringify(row).includes('synthetic reasoning')));
- assert.ok(rows.every(row=>!JSON.stringify(row).includes('Invented turbo')&&!JSON.stringify(row).includes('What is your budget')));
- assert.ok(rows.every(row=>row.dispatchInitiatedAt&&row.responseReceivedAt));assert.equal(rows.find(row=>row.reasonCode==='model_unavailable').providerHttpStatus,404);
-});
-
-test('real Auth and Firestore profiles enforce current eligibility, account separation and first/second mocked generations',async()=>{
+test('real Auth and Firestore profiles enforce current eligibility, account separation and unlimited mocked generations',async()=>{
  const {getAuth}=require('firebase-admin/auth'),auth=getAuth(app);
  const {createServices}=require('../services.cjs'),{createApp}=require('../app.cjs'),http=require('supertest');
  const ids=['ai-audit-owner','ai-audit-shop','ai-audit-admin','ai-audit-unlisted'],tokens={};
- const clock=Date.parse('2040-01-04T12:00:00Z'),control=createAIReleaseControl({db,env:{PMR_AI_TEST_UIDS:ids.slice(0,3).join(',')},now:()=>clock});
  let calls=0;
  const provider={enabled:true,suggest:async draft=>{calls++;return {title:draft.title,description:draft.description,categoryId:null,missingDetails:[]};}};
- const services=createServices({db,auth,storage:{},aiProvider:provider,aiReleaseControl:control}),server=createApp({services,auth});
+ const services=createServices({db,auth,storage:{},aiProvider:provider,aiDiagnostic:()=>{}}),server=createApp({services,auth});
  const requestData={kind:'request',title:'Black wrap',description:'Wrap doors in black.',categoryId:''};
  const call=uid=>http(server).post('/api/ai/assist').set('Authorization','Bearer '+tokens[uid]).send({...requestData,kind:uid==='ai-audit-shop'?'showcase':'request'});
  try{
@@ -92,10 +46,16 @@ test('real Auth and Firestore profiles enforce current eligibility, account sepa
     method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:customToken,returnSecureToken:true})});
    assert.equal(reply.status,200);tokens[uid]=(await reply.json()).idToken;
   }
-  await call(ids[0]).expect(200);await call(ids[0]).expect(200);assert.equal(calls,2);
-  await call(ids[1]).expect(200);assert.equal(calls,3);
+  const historyPaths=[CONTROL_PATH,DAILY_PREFIX+'/'+day,ATTEMPT_PREFIX+'/synthetic-history'];
+  const before=await Promise.all(historyPaths.map(path=>db.doc(path).get()));
+  for(const uid of [ids[0],ids[1],ids[3]])for(let i=0;i<10;i++)await call(uid).expect(200);
+  assert.equal(calls,30);
+  for(let i=0;i<historyPaths.length;i++){const after=await db.doc(historyPaths[i]).get();assert.deepEqual(after.data(),before[i].data());assert.ok(after.updateTime.isEqual(before[i].updateTime));}
+  assert.equal((await db.collection(ATTEMPT_PREFIX).get()).size,1);
   assert.equal((await call(ids[2]).expect(403)).body.error.fields.aiReason,'account_eligibility');
-  assert.equal((await call(ids[3]).expect(403)).body.error.fields.aiReason,'tester_required');
+  const pieces=tokens[ids[3]].split('.'),expired={...JSON.parse(Buffer.from(pieces[1],'base64url').toString()),exp:1};
+  const expiredToken=[pieces[0],Buffer.from(JSON.stringify(expired)).toString('base64url'),pieces[2]].join('.');
+  await http(server).post('/api/ai/assist').set('Authorization','Bearer '+expiredToken).send(requestData).expect(401);
   for(const changes of [{verificationStatus:'pending'},{verificationStatus:'rejected'},{accountStatus:'suspended'},{accountStatus:'archived'},{role:'admin'}]){
    await db.doc('users/'+ids[1]).set({role:'shop',accountStatus:'active',verificationStatus:'approved',...changes});await call(ids[1]).expect(403);
   }
@@ -104,9 +64,9 @@ test('real Auth and Firestore profiles enforce current eligibility, account sepa
   await auth.updateUser(ids[1],{disabled:true});await call(ids[1]).expect(401);
   const decoded=await auth.verifyIdToken(tokens[ids[3]]);
   await assert.rejects(()=>services.aiAssist({auth:{uid:ids[3],token:{...decoded,auth_time:1}},data:requestData}),{code:'unauthenticated'});
-  assert.equal(calls,3);assert.equal((await db.doc(DAILY_PREFIX+'/2040-01-04').get()).data().attempts,3);
+  assert.equal(calls,30);
  }finally{
   for(const uid of ids){await db.doc('users/'+uid).delete();await auth.deleteUser(uid).catch(()=>{});}
-  await db.doc('serviceCategories/ai-audit-paint').delete();await db.doc(DAILY_PREFIX+'/2040-01-04').delete();
+  await db.doc('serviceCategories/ai-audit-paint').delete();
  }
 });

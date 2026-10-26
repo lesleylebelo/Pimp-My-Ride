@@ -1,3 +1,5 @@
+> Historical record ? superseded by [PimpPilot production service](PIMPPILOT_PRODUCTION.md). Tester allowlists, generation allowances and old release patches below are obsolete and must not be used for the new service. Historical evidence is retained.
+
 # Controlled Gemini daily testing
 
 Prepared 2026-10-23 in the original lesley checkout. No commits, pushes,

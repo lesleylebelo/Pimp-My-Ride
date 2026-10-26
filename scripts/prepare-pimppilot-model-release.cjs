@@ -1,3 +1,4 @@
+throw Error('Retired experimental release generator. Use docs/PIMPPILOT_PRODUCTION.md and the reviewed current backend/frontend sources.');
 // Produces a backend-only review patch; no checkout, real-index changes or network.
 const fs=require('node:fs'),path=require('node:path'),{execFileSync}=require('node:child_process');
 const root=path.resolve(__dirname,'..'),base='0ef47b54a4083bf1a29deab96c383ddb08b98e6c';

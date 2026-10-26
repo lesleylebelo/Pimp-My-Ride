@@ -1,3 +1,5 @@
+> Historical record ? superseded by [PimpPilot production service](PIMPPILOT_PRODUCTION.md). Tester allowlists, generation allowances and old release patches below are obsolete and must not be used for the new service. Historical evidence is retained.
+
 # PimpPilot grounding correction
 
 Production baseline: `9fa8c2731d5a4be81eeb53f43a6f781229b6d775` (main, Render revision supplied by the owner). Prepared only in the original `lesley` checkout. No provider request, production write, reset or deployment is part of this work.

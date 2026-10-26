@@ -2,9 +2,9 @@ const D=require('./domain.cjs'),M=require('./marketplace-domain.cjs');
 const {createAIProvider,unavailable}=require('./ai-provider.cjs');
 const {ApiError}=require('./errors.cjs');
 const {AIFailure,failure,rejection}=require('./ai-errors.cjs');
-const {createAIReleaseControl}=require('./ai-release-control.cjs');
+const {randomUUID,createHash}=require('node:crypto');
 const showcaseCategories=['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
-const {validateGrounding,editorialWords}=require('./ai-grounding.cjs');
+const {validateGrounding,editorialWords,questionWords}=require('./ai-grounding.cjs');
 function validateSuggestion(value,draft){
  try{
   const bad=outputRule=>failure('malformed_output',{outputStage:'suggestion',outputRule});
@@ -28,63 +28,77 @@ function validateSuggestion(value,draft){
   return {title,description,category:value.categoryId===null?null:draft.categories.find(category=>category.id===value.categoryId),missingDetails};
  }catch(error){if(error instanceof AIFailure)throw error;throw failure('malformed_output',{outputStage:'suggestion',outputRule:'unexpected_validation'});}
 }
-function createAIAssist({db,actor,provider=createAIProvider(),releaseControl=createAIReleaseControl({db}),now=Date.now,timeoutMs=15000}){
- const usage=new Map();let concurrent=0;
- return async request=>{
-  let account;
-  try{account=await actor(request);}catch(error){
+// Active entries are leases for work currently running, never generation counts.
+const MAX_CONCURRENT=4;
+function createAIAssist({db,actor,provider=createAIProvider(),now=Date.now,timeoutMs=15000,
+ onDiagnostic=entry=>console.info('PimpPilot operation',entry)}={}){
+ const inFlight=new Map();
+ async function accountFor(request){
+  try{return await actor(request);}catch(error){
    if(error instanceof ApiError&&error.code==='permission-denied')throw rejection('permission-denied','account_access','Account access is unavailable.');
-   throw error;
+   if(error instanceof ApiError&&error.code==='unauthenticated')throw error;
+   throw failure('account_lookup');
   }
-  const p=account.profile,input=request.data;
+ }
+ async function currentAccess(request,account){
+  const fresh=await accountFor(request),p=account.profile;
+  if(fresh.uid!==account.uid||fresh.profile.role!==p.role||!D.active(fresh.profile)||fresh.profile.statusOperation||fresh.profile.reviewOperation||fresh.profile.provisioningOperation||p.role==='shop'&&fresh.profile.verificationStatus!=='approved')throw rejection('permission-denied','account_changed','Account access changed.');
+ }
+ return async request=>{
+  const account=await accountFor(request),p=account.profile,input=request.data;
   if(!['owner','shop'].includes(p.role)||!D.active(p)||p.statusOperation||p.reviewOperation||p.provisioningOperation||p.role==='shop'&&p.verificationStatus!=='approved')throw rejection('permission-denied','account_eligibility','AI Assist requires an active customer or approved shop.');
-  M.fields(input,['kind','title','description','categoryId']);
+  M.fields(input,['kind','title','description','categoryId','requestId']);
   if(input.kind!==(p.role==='owner'?'request':'showcase'))throw rejection('permission-denied','draft_type','AI Assist is unavailable for this draft type.');
   if(Buffer.byteLength(JSON.stringify(input))>8192)D.fail('The AI draft is too large.');
+  if(input.requestId!==undefined&&(typeof input.requestId!=='string'||!/^[A-Za-z0-9_-]{12,100}$/.test(input.requestId)))D.fail('Invalid generation request identifier.');
   const limits={title:100,description:input.kind==='request'?300:2000};
   const title=M.optional(input.title,'Title',limits.title),description=M.optional(input.description,'Description',limits.description);
-  if(`${title}${description}`.trim().length<3)D.fail('Enter a title or description before using AI Assist.');
+  if((title+description).trim().length<3)D.fail('Enter a title or description before using AI Assist.');
   if(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(title+description))D.fail('Remove unsupported control characters.');
   if(!provider.enabled)throw unavailable();
-  releaseControl.authorize(account.uid);
   let categories=showcaseCategories.map(name=>({id:name,name}));
   if(input.kind==='request'){
-   const snapshot=await db.collection('serviceCategories').where('archived','==',false).limit(101).get();
-   if(snapshot.docs.length>100)throw unavailable();
-   categories=snapshot.docs.map(doc=>({id:doc.id,name:D.text(doc.data().name,'Category',100)}));
+   try{
+    const snapshot=await db.collection('serviceCategories').where('archived','==',false).limit(101).get();
+    if(snapshot.docs.length>100)throw failure('category_unavailable');
+    categories=snapshot.docs.map(doc=>({id:doc.id,name:D.text(doc.data().name,'Category',100)}));
+   }catch{throw failure('category_unavailable');}
   }
-  if(!categories.length)throw unavailable();
+  if(!categories.length)throw failure('category_unavailable');
   if(input.categoryId!==undefined&&input.categoryId!==''&&input.categoryId!==null&&!categories.some(category=>category.id===input.categoryId))D.fail('Choose an existing active category.');
-  const clock=now();for(const [uid,value] of usage)if(!value.pending&&clock-value.hour>=3600000)usage.delete(uid);
-  let quota=usage.get(account.uid);
-  if(!quota){if(usage.size>=5000)throw rejection('resource-exhausted','busy','AI Assist is busy. Try again later.');quota={hour:clock,hourCount:0,minute:clock,minuteCount:0,pending:false};usage.set(account.uid,quota);}
-  if(clock-quota.minute>=60000){quota.minute=clock;quota.minuteCount=0;}
-  if(quota.pending||concurrent>=4)throw rejection('resource-exhausted','busy','AI Assist is busy. Try again later.');
-  if(quota.minuteCount>=3||quota.hourCount>=10)throw rejection('resource-exhausted','rate_limit','AI usage limit reached. Please wait before trying again.');
-  quota.pending=true;++quota.minuteCount;++quota.hourCount;++concurrent;
-  const controller=new AbortController();let timer,validated=false,attempt;
-  // Keep quota reservation errors separate from provider errors, retaining 429.
-  try{attempt=await releaseControl.reserve();}
-  catch(error){quota.pending=false;--concurrent;throw error;}
-  try{
-   await attempt?.dispatch();
-   const draft={kind:input.kind,title,description,categoryId:input.categoryId||null,categories,limits,editorialWords:editorialWords(title+'\n'+description)};
-   const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(failure('provider_timeout'));},timeoutMs);});
-   const raw=await Promise.race([Promise.resolve().then(()=>provider.suggest(draft,{signal:controller.signal,onResponse:status=>attempt?.response(status)})),deadline]);
-   const suggestion=validateSuggestion(raw,draft);validated=true;const fresh=await actor(request);
-   if(fresh.uid!==account.uid||fresh.profile.role!==p.role||!D.active(fresh.profile)||fresh.profile.statusOperation||fresh.profile.reviewOperation||fresh.profile.provisioningOperation||p.role==='shop'&&fresh.profile.verificationStatus!=='approved')D.fail('Account access changed.','permission-denied');
-   if(input.kind==='request'&&suggestion.category&&(await db.doc('serviceCategories/'+suggestion.category.id).get()).data()?.archived!==false)throw failure('category_changed');
-   await attempt?.finish({outputValidated:true});
-   return suggestion;
-  }catch(error){
-   const access=validated&&error instanceof ApiError&&(error.code==='permission-denied'||error.code==='unauthenticated');
-   const safe=error instanceof AIFailure?error:failure(access?'account_changed':'unknown');
-   // Storage errors must never turn into a returned suggestion. A failed finish
-   // may have committed; leave that outcome uncertain and do not retry it.
-   if(safe.reason!=='diagnostic_storage')await attempt?.finish({error:safe,outputValidated:validated});
-   if(access){if(error.code==='permission-denied')throw rejection('permission-denied','account_changed','Account access changed.');throw error;}throw safe;
+  const fingerprint=createHash('sha256').update(JSON.stringify([p.role,input.kind,title,description,input.categoryId||null])).digest('hex');
+  const pending=inFlight.get(account.uid);
+  if(pending){
+   if(input.requestId&&pending.requestId===input.requestId){
+    if(pending.fingerprint!==fingerprint)throw rejection('already-exists','request_conflict','This generation identifier belongs to another draft.');
+    const suggestion=await pending.promise;await currentAccess(request,account);return suggestion;
+   }
+   throw rejection('resource-exhausted','busy','A generation is already running. Please wait for it to finish.');
   }
-  finally{clearTimeout(timer);controller.abort();quota.pending=false;--concurrent;}
+  if(inFlight.size>=MAX_CONCURRENT)throw rejection('resource-exhausted','busy','AI Assist is busy. Try again shortly.');
+  const entry={requestId:input.requestId,fingerprint,promise:null};inFlight.set(account.uid,entry);
+  entry.promise=Promise.resolve().then(async()=>{
+   const correlationId=randomUUID(),started=now(),controller=new AbortController();let timer,status=null,safe=null,validated=false;
+   try{
+    const draft={kind:input.kind,title,description,categoryId:input.categoryId||null,categories,limits,editorialWords:editorialWords(title+'\n'+description),questionWords:questionWords()};
+    const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(failure('provider_timeout'));},timeoutMs);});
+    const raw=await Promise.race([Promise.resolve().then(()=>provider.suggest(draft,{signal:controller.signal,onResponse:value=>{status=Number.isInteger(value)&&value>=100&&value<=599?value:null;}})),deadline]);
+    const suggestion=validateSuggestion(raw,draft);validated=true;
+    await currentAccess(request,account);
+    if(input.kind==='request'&&suggestion.category&&(await db.doc('serviceCategories/'+suggestion.category.id).get()).data()?.archived!==false)throw failure('category_changed');
+    return suggestion;
+   }catch(error){
+    const access=validated&&error instanceof ApiError&&['permission-denied','unauthenticated'].includes(error.code);
+    safe=error instanceof AIFailure?error:failure(access?'account_changed':'unknown');
+    if(access)throw error;throw safe;
+   }finally{
+    clearTimeout(timer);controller.abort();
+    // Best-effort, content-free telemetry cannot gate access or consume a quota.
+    const diagnostic={correlationId,durationMs:Math.max(0,now()-started),providerHttpStatus:status,state:safe?'failed':'successful',reasonCode:safe?.reason??null,rejectedField:safe?.rejectedField??null,validationRule:safe?.validationRule??null,outputStage:safe?.outputStage??null,outputRule:safe?.outputRule??null};
+    try{Promise.resolve(onDiagnostic(diagnostic)).catch(()=>{});}catch{}
+   }
+  }).finally(()=>{if(inFlight.get(account.uid)===entry)inFlight.delete(account.uid);});
+  return entry.promise;
  };
 }
-module.exports={createAIAssist,validateSuggestion};
+module.exports={createAIAssist,validateSuggestion,MAX_CONCURRENT};
