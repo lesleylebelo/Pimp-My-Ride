@@ -102,7 +102,10 @@ function createAzureProvider({env=process.env,studio=false,loadSDK=loadAzureSDK,
     // IDs, agent mutations or executable tools. Refinement is bounded input data.
     context.stage='responses_request';
     const response=await openai.responses.create({
-     instructions,input:[{role:'user',content}],store:false,stream:false,
+     // The saved-agent endpoint rejects top-level instruction overrides. Keep
+     // its configured instructions; send static backend task guidance separately
+     // from customer text/images. Backend validation remains authoritative.
+     input:[{role:'developer',content:[{type:'input_text',text:instructions}]},{role:'user',content}],store:false,stream:false,
      tools:[],tool_choice:'none',max_output_tokens:studio?6000:4000,
      reasoning:{effort:'minimal'},
      text:{format:{type:'json_schema',name:studio?'pimppilot_studio':'pimppilot_draft',strict:true,schema}},
