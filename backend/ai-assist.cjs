@@ -2,6 +2,7 @@ const D=require('./domain.cjs'),M=require('./marketplace-domain.cjs');
 const {createAIProvider,unavailable}=require('./ai-provider-selection.cjs');
 const {ApiError}=require('./errors.cjs');
 const {AIFailure,failure,rejection}=require('./ai-errors.cjs');
+const {sanitizeDiagnostic}=require('./ai-azure-diagnostics.cjs');
 const {randomUUID,createHash}=require('node:crypto');
 const showcaseCategories=['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
 const {validateGrounding,editorialWords,questionWords}=require('./ai-grounding.cjs');
@@ -78,11 +79,11 @@ function createAIAssist({db,actor,provider=createAIProvider(),now=Date.now,timeo
   if(inFlight.size>=MAX_CONCURRENT)throw rejection('resource-exhausted','busy','AI Assist is busy. Try again shortly.');
   const entry={requestId:input.requestId,fingerprint,promise:null};inFlight.set(account.uid,entry);
   entry.promise=Promise.resolve().then(async()=>{
-   const correlationId=randomUUID(),started=now(),controller=new AbortController();let timer,status=null,safe=null,validated=false;
+   const correlationId=randomUUID(),started=now(),controller=new AbortController();let timer,status=null,safe=null,validated=false,providerDiagnostic=null;
    try{
     const draft={kind:input.kind,title,description,categoryId:input.categoryId||null,categories,limits,editorialWords:editorialWords(title+'\n'+description),questionWords:questionWords()};
     const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(failure('provider_timeout'));},timeoutMs);});
-    const raw=await Promise.race([Promise.resolve().then(()=>provider.suggest(draft,{signal:controller.signal,onResponse:value=>{status=Number.isInteger(value)&&value>=100&&value<=599?value:null;}})),deadline]);
+    const raw=await Promise.race([Promise.resolve().then(()=>provider.suggest(draft,{signal:controller.signal,onResponse:value=>{status=Number.isInteger(value)&&value>=100&&value<=599?value:null;},onProviderDiagnostic:value=>{providerDiagnostic=sanitizeDiagnostic(value);}})),deadline]);
     const suggestion=validateSuggestion(raw,draft);validated=true;
     await currentAccess(request,account);
     if(input.kind==='request'&&suggestion.category&&(await db.doc('serviceCategories/'+suggestion.category.id).get()).data()?.archived!==false)throw failure('category_changed');
@@ -94,7 +95,7 @@ function createAIAssist({db,actor,provider=createAIProvider(),now=Date.now,timeo
    }finally{
     clearTimeout(timer);controller.abort();
     // Best-effort, content-free telemetry cannot gate access or consume a quota.
-    const diagnostic={correlationId,durationMs:Math.max(0,now()-started),providerHttpStatus:status,state:safe?'failed':'successful',reasonCode:safe?.reason??null,rejectedField:safe?.rejectedField??null,validationRule:safe?.validationRule??null,outputStage:safe?.outputStage??null,outputRule:safe?.outputRule??null};
+    const diagnostic={correlationId,durationMs:Math.max(0,now()-started),providerHttpStatus:status,state:safe?'failed':'successful',reasonCode:safe?.reason??null,rejectedField:safe?.rejectedField??null,validationRule:safe?.validationRule??null,outputStage:safe?.outputStage??null,outputRule:safe?.outputRule??null,...(providerDiagnostic||{})};
     try{Promise.resolve(onDiagnostic(diagnostic)).catch(()=>{});}catch{}
    }
   }).finally(()=>{if(inFlight.get(account.uid)===entry)inFlight.delete(account.uid);});
