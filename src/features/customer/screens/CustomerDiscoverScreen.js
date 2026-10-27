@@ -30,6 +30,12 @@ export default function CustomerDiscoverScreen({navigation}){
   headerRight={<><NotificationsHeaderButton navigation={navigation}/><MessagesHeaderButton navigation={navigation}/></>}
   onScroll={onScroll} onContentSizeChange={(_,height)=>{if(view==='work'&&height<650)feed.loadNext();}}
   refreshControl={view==='work'?<RefreshControl refreshing={feed.refreshing} onRefresh={()=>void feed.refresh()} tintColor={theme.textPrimary}/>:undefined}>
+  <CustomerCard style={{borderColor:theme.accent,gap:12}}>
+   <Text style={{color:theme.accent,fontSize:11,fontWeight:'700',letterSpacing:2}}>PIMPPILOT STUDIO</Text>
+   <Text heading>Your next build starts with an idea.</Text>
+   <Text muted>Choose your car, explore a direction and shape a plan for your workshop.</Text>
+   <Action title="Open PimpPilot Studio" icon="sparkles-outline" onPress={()=>navigation.navigate('PimpPilotStudio')}/>
+  </CustomerCard>
   <View style={{flexDirection:'row',flexWrap:'wrap',alignItems:'center',gap:12}}>
    <View style={{flexGrow:1,flexBasis:300}}><CustomerField icon="search-outline" accessibilityLabel="Search workshops or services" placeholder="Search workshops or services" value={query} onChangeText={setQuery} maxLength={120}/></View>
    <Action title="Saved posts" icon="bookmark-outline" onPress={()=>navigation.navigate('SavedPosts')}/>
