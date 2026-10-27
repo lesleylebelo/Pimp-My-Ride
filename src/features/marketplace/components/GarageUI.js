@@ -1,8 +1,16 @@
-import React from 'react';
-import {StyleSheet} from 'react-native';
+import React,{useState} from 'react';
+import {StyleSheet,View,useWindowDimensions} from 'react-native';
 import {CustomerPage,CustomerAction} from '../../customer/components/CustomerUI';
-export function GaragePage({tabs=false,...props}){return <CustomerPage {...props} activeRoute="Garage" back={!tabs}/>;}
-export function GarageAction(props){const displayTitle=/^Photos for /.test(props.title)?'Photos':/^Edit /.test(props.title)&&props.title!=='Edit vehicle'?'Edit':/^View /.test(props.title)?'Details':/^Request service for /.test(props.title)?'Request service':props.title;return <CustomerAction {...props} displayTitle={displayTitle}/>;}
+export function GaragePage({tabs=false,...props}){return <CustomerPage maxWidth={1040} {...props} activeRoute="Garage" back={!tabs}/>;}
+export function GarageAction(props){const displayTitle=/^Photos for /.test(props.title)?'Manage photos':/^Edit /.test(props.title)&&props.title!=='Edit vehicle'?'Edit vehicle':/^View /.test(props.title)?'Details':/^Request service for /.test(props.title)?'Request a service':props.title;return <CustomerAction {...props} displayTitle={displayTitle} style={[{alignSelf:'stretch'},props.style]}/>;}
+
+// Garage cards need room for their actions, even on a wide desktop canvas.
+export function GarageGrid({children}){
+ const {width,fontScale}=useWindowDimensions(),[measured,setMeasured]=useState(0);
+ const available=measured||Math.min(width-(width>=768?48:32),992);
+ const cardWidth=fontScale<1.4&&available>=700?Math.floor((available-18)/2):'100%';
+ return <View testID="garage-grid" onLayout={event=>{const next=event.nativeEvent.layout.width;if(next>0)setMeasured(next);}} style={{width:'100%',flexDirection:'row',flexWrap:'wrap',gap:18,alignItems:'flex-start'}}>{React.Children.toArray(children).map(child=><View key={child.key} style={{width:cardWidth,minWidth:0}}>{child}</View>)}</View>;
+}
 export const garageStyles=theme=>StyleSheet.create({
   flex:{flex:1},safe:{flex:1,backgroundColor:theme.surfaceCanvas},page:{flex:1,width:'100%',maxWidth:1120,alignSelf:'center'},
   header:{flexDirection:'row',alignItems:'center',paddingHorizontal:20,paddingVertical:20,gap:14},headerCopy:{flex:1,minWidth:0,gap:5},title:{fontSize:28,lineHeight:36,color:theme.textPrimary},secondary:{fontSize:14,lineHeight:22,color:theme.textSecondary},
@@ -11,8 +19,8 @@ export const garageStyles=theme=>StyleSheet.create({
   action:{minHeight:48,paddingVertical:12,paddingHorizontal:14,borderRadius:14,flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,backgroundColor:theme.surfaceMuted},primary:{backgroundColor:theme.accent},actionText:{fontSize:14,lineHeight:22,flexShrink:1,textAlign:'center'},disabled:{opacity:.5},pressed:{opacity:.7},
   toolbar:{flexDirection:'row',flexWrap:'wrap',gap:12,alignItems:'center',justifyContent:'space-between'},intro:{flex:1,minWidth:180,gap:6},eyebrow:{fontSize:11,lineHeight:18,color:theme.textSecondary,letterSpacing:1.8},sectionTitle:{fontSize:20,lineHeight:28,color:theme.textPrimary},
   filters:{flexDirection:'row',flexWrap:'wrap',gap:8},filter:{minHeight:44,paddingVertical:10,paddingHorizontal:16,borderRadius:12,backgroundColor:theme.surfaceMuted},filterSelected:{backgroundColor:theme.accentLight},filterText:{fontSize:13,lineHeight:22,color:theme.textPrimary},
-  grid:{flexDirection:'row',flexWrap:'wrap',gap:20},vehicleCard:{width:'100%',backgroundColor:theme.surfaceCard,borderRadius:24,overflow:'hidden'},desktopCard:{width:'48%',flexGrow:1,maxWidth:'50%'},cover:{height:250,backgroundColor:theme.surfaceMuted,overflow:'hidden',justifyContent:'center'},coverPlaceholder:{position:'absolute',top:0,bottom:0,left:0,right:0,alignItems:'center',justifyContent:'center',gap:12},placeholderText:{fontSize:12,lineHeight:18,color:theme.textSecondary},coverImage:{height:250,borderRadius:0},
-  cardBody:{padding:20,gap:12},vehicleTitle:{fontSize:23,lineHeight:31,color:theme.textPrimary},specLine:{fontSize:14,lineHeight:22,color:theme.textSecondary},cardActions:{flexDirection:'row',flexWrap:'wrap',gap:10},actionCell:{flexGrow:1,flexBasis:150},
+  grid:{flexDirection:'row',flexWrap:'wrap',gap:20},vehicleCard:{width:'100%',backgroundColor:theme.surfaceCard,borderRadius:12,borderWidth:1,borderColor:theme.border,overflow:'hidden'},cover:{aspectRatio:16/9,backgroundColor:theme.surfaceMuted,overflow:'hidden',justifyContent:'center'},coverPlaceholder:{position:'absolute',top:0,bottom:0,left:0,right:0,alignItems:'center',justifyContent:'center',gap:8},placeholderText:{fontSize:13,lineHeight:20,color:theme.textSecondary},coverPhoto:{position:'absolute',top:0,bottom:0,left:0,right:0,justifyContent:'center'},coverImage:{height:'100%',borderRadius:0},
+  cardBody:{padding:16,gap:14},identity:{flexDirection:'row',alignItems:'center',gap:10,minHeight:48,borderRadius:8},vehicleTitle:{fontSize:22,lineHeight:30,color:theme.textPrimary},specLine:{fontSize:14,lineHeight:22,color:theme.textSecondary},cardActions:{flexDirection:'row',flexWrap:'wrap',gap:10},actionCell:{flexGrow:1,flexBasis:150,minWidth:0},cardFooter:{borderTopWidth:1,borderTopColor:theme.border,paddingTop:12},
   empty:{paddingVertical:44,paddingHorizontal:24,alignItems:'center',gap:16,borderRadius:24,backgroundColor:theme.surfaceCard},emptyTitle:{fontSize:22,lineHeight:30,color:theme.textPrimary,textAlign:'center'},emptyBody:{fontSize:14,lineHeight:22,color:theme.textSecondary,textAlign:'center',maxWidth:360},
   backdrop:{flex:1,padding:20,backgroundColor:'#000000AA',alignItems:'center',justifyContent:'center'},detailPanel:{width:'100%',maxWidth:680,maxHeight:'90%',backgroundColor:theme.surfaceCanvas,borderRadius:24,overflow:'hidden'},detailHeader:{paddingHorizontal:20,paddingTop:10,flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12},detailContent:{padding:20,gap:20},detailHeading:{flex:1,fontSize:18,lineHeight:26,color:theme.textPrimary},
   specGrid:{flexDirection:'row',flexWrap:'wrap',gap:16},spec:{flexBasis:'44%',flexGrow:1,gap:4,minWidth:120},specValue:{fontSize:16,lineHeight:24,color:theme.textPrimary},

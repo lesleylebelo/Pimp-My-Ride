@@ -14,7 +14,16 @@ test('format handling preserves grounding, non-AI runtime, dependencies, rules a
  for(const file of files.filter(file=>/^backend\/[^/]+\.cjs$/.test(file)&&!allowed.includes(file)))assert.equal(current(file),baseline(file),file);
  // AI presentation and its pending-request lock are deliberately changed by the
  // PimpPilot audit; their behavioural contracts live in tests/ai-assist.test.cjs.
- for(const file of ['backend/package-lock.json','firestore.rules','firestore.indexes.json','render.yaml'])assert.equal(current(file),baseline(file),file);
+ for(const file of ['firestore.rules','firestore.indexes.json','render.yaml'])assert.equal(current(file),baseline(file),file);
+ // The authorised Azure migration adds SDKs but does not upgrade any existing
+ // resolved package. Shared transitive dependencies may lose their dev-only flag.
+ const oldLock=JSON.parse(baseline('backend/package-lock.json')),newLock=JSON.parse(current('backend/package-lock.json'));
+ for(const [name,value] of Object.entries(oldLock.packages).filter(([name])=>name)){
+  for(const field of ['version','resolved','integrity'])assert.equal(newLock.packages[name]?.[field],value[field],`${name}: ${field}`);
+ }
+ for(const [name,version] of [['@azure/ai-projects','2.9.0'],['@azure/identity','4.14.0']]){
+  assert.equal(newLock.packages[''].dependencies[name],version);assert.equal(newLock.packages['node_modules/'+name].version,version);
+ }
  // Local connection recovery now explicitly permits changes to health readiness
  // and connection diagnostics, covered by tests/api.test.cjs. Keep configuration,
  // fetch deadlines, authenticated operations and uploads byte-for-byte protected.
@@ -23,7 +32,9 @@ test('format handling preserves grounding, non-AI runtime, dependencies, rules a
  for(const [start,end] of [['function baseURL()','function connectionError('],['async function fetchWithTimeout(','async function ready('],['export async function apiRequest(']]){
   assert.equal(section(nextAPI,start,end),section(previousAPI,start,end),`${apiFile}: ${start}`);
  }
- const old=JSON.parse(baseline('backend/package.json')),next=JSON.parse(current('backend/package.json'));delete old.scripts.test;delete next.scripts.test;assert.deepEqual(next,old);
+ const old=JSON.parse(baseline('backend/package.json')),next=JSON.parse(current('backend/package.json'));delete old.scripts.test;delete next.scripts.test;
+ assert.equal(next.scripts['check:ai-config'],'node check-ai-config.cjs');delete next.scripts['check:ai-config'];
+ for(const name of ['@azure/ai-projects','@azure/identity'])delete next.dependencies[name];assert.deepEqual(next,old);
 });
 test('no active experimental quota or allowlist dependencies remain',()=>{
  const service=current('backend/ai-assist.cjs'),services=current('backend/services.cjs');

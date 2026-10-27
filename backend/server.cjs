@@ -10,6 +10,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 let startupDb;
 async function start(){try{
+ await require('./ai-azure-provider.cjs').prepareAzureStartup(process.env);
  const {validateMockPaymentConfiguration}=require('./mock-payment-gate.cjs');
  validateMockPaymentConfiguration(process.env);
  const projectId=process.env.FIREBASE_PROJECT_ID?.trim();

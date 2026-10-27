@@ -7,11 +7,15 @@ import {listPhotos,uploadRequestPhoto} from '../services/photoApi';
 import {Button} from './MarketplaceUI';
 import PrivatePhoto from './PrivatePhoto';
 import {usePhotoSource} from '../../../shared/components/PhotoSourceChooser';
+import {useTheme} from '../../../shared/theme/ThemeContext';
 
-export default function RequestPhotoUploads({vehicleId,selectedIds,onSelectionChange,disabled,onBusyChange}){
+export default function RequestPhotoUploads({vehicleId,selectedIds,onSelectionChange,disabled,onBusyChange,onDraftChange}){
+ const {theme}=useTheme(),caption={color:theme.textSecondary,fontSize:13,lineHeight:20};
  const {user,offline}=useAuth(),uid=user?.uid,focused=useIsFocused();
  const photoSource=usePhotoSource({scopeKey:JSON.stringify([uid,vehicleId]),enabled:!offline&&!disabled});
  const [selection,setSelection]=useState(null);
+ useEffect(()=>{onDraftChange?.(!!selection);},[selection,onDraftChange]);
+ useEffect(()=>()=>onDraftChange?.(false),[onDraftChange]);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[uploaded,setUploaded]=useState([]);
  const generation=useRef(0),lock=useRef(false),pending=useRef(null),current=useRef({});
  current.current={uid,vehicleId,disabled,offline,focused,selectedIds,onSelectionChange,onBusyChange};
@@ -45,7 +49,7 @@ export default function RequestPhotoUploads({vehicleId,selectedIds,onSelectionCh
   }catch(e){if(valid())setError(e.message||'Attachment upload failed. Try again.');}
   finally{lock.current=false;setBusy(false);current.current.onBusyChange?.(false);}
  }
- return <View>{photoSource.chooser}{uploaded.filter(item=>selectedIds.includes(item.id)).map(item=><View key={item.id}><Text>{item.name}</Text><PrivatePhoto target="attachment" id={item.id}/><Button title="Detach uploaded attachment" outline disabled={busy||disabled||offline} onPress={()=>onSelectionChange(selectedIds.filter(id=>id!==item.id))}/></View>)}
-  {!!selection&&<View><Image accessibilityLabel="Selected request attachment preview" source={{uri:selection.uri}} resizeMode="contain" style={{width:'100%',height:180,borderRadius:12}}/><Text>{selection.name}</Text><Button title="Upload attachment" disabled={busy||disabled||offline||!focused||selectedIds.length>=5} onPress={()=>void add()}/><Button title="Cancel attachment" outline disabled={busy} onPress={()=>{pending.current=null;setSelection(null);setError('');}}/></View>}
-  <Button title={busy?'Preparing or uploading photo…':selection?'Choose another photo':'Upload request photo'} outline disabled={busy||disabled||offline||!focused||selectedIds.length>=5} onPress={()=>void choose()}/>{!!error&&<Text accessibilityRole="alert">{error}</Text>}</View>;
+ return <View style={{gap:12}}>{photoSource.chooser}{uploaded.filter(item=>selectedIds.includes(item.id)).map(item=><View key={item.id} style={{gap:10}}><Text style={caption}>{item.name}</Text><PrivatePhoto target="attachment" id={item.id}/><Button title="Detach uploaded attachment" outline disabled={busy||disabled||offline} onPress={()=>onSelectionChange(selectedIds.filter(id=>id!==item.id))}/></View>)}
+  {!!selection&&<View style={{gap:10}}><Image accessibilityLabel="Selected request attachment preview" source={{uri:selection.uri}} resizeMode="contain" style={{width:'100%',height:180,borderRadius:12}}/><Text style={caption}>{selection.name}</Text><Button title="Upload attachment" disabled={busy||disabled||offline||!focused||selectedIds.length>=5} onPress={()=>void add()}/><Button title="Cancel attachment" outline disabled={busy} onPress={()=>{pending.current=null;setSelection(null);setError('');}}/></View>}
+  <Button title={busy?'Preparing or uploading photo…':selection?'Choose another photo':'Upload request photo'} outline disabled={busy||disabled||offline||!focused||selectedIds.length>=5} onPress={()=>void choose()}/>{!!error&&<Text accessibilityRole="alert" style={{color:theme.error,fontSize:13,lineHeight:20}}>{error}</Text>}</View>;
 }

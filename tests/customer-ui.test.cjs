@@ -190,11 +190,11 @@ test('a showcase workshop snapshot without verification metadata can open a requ
  });
 });
 
-test('owner navigator registers all 19 audited destinations without exposing build publishing or duplicating auth screens',()=>{
+test('owner navigator registers all 20 audited destinations without exposing build publishing or duplicating auth screens',()=>{
  const source=fs.readFileSync('src/features/marketplace/OwnerNavigator.js','utf8');
  const routes=[...source.matchAll(/<Stack.Screen name="([^"]+)"/g)].map(m=>m[1]);
- assert.equal(routes.length,19);assert.equal(new Set(routes).size,19);
- for(const name of ['Discover','Garage','VehicleForm','VehiclePhotos','OwnerRequests','RequestForm','OwnerRequest','QuoteComparison','PaymentChoice','Bookings','BookingDetail','ReceiptDetail','Messages','Chat','OwnerAccount','PostDetail','ShopProfile','Notifications','SavedPosts'])assert.ok(routes.includes(name),name);
+ assert.equal(routes.length,20);assert.equal(new Set(routes).size,20);
+ for(const name of ['Discover','Garage','VehicleForm','VehiclePhotos','PimpPilotStudio','OwnerRequests','RequestForm','OwnerRequest','QuoteComparison','PaymentChoice','Bookings','BookingDetail','ReceiptDetail','Messages','Chat','OwnerAccount','PostDetail','ShopProfile','Notifications','SavedPosts'])assert.ok(routes.includes(name),name);
  assert.ok(!routes.includes('SignIn'));assert.ok(!routes.includes('PostForm'));
 });
 
