@@ -148,14 +148,14 @@ test('Azure errors are safely classified without Gemini fallback or hidden retri
  await assert.rejects(()=>createAzureProvider({env,timeoutMs:10,loadSDK:f.loadSDK}).suggest(draft),{reason:'provider_timeout'});assert.equal(signal.aborted,true);
  const controller=new AbortController(),g=fakeSDK();controller.abort();await assert.rejects(()=>createAzureProvider({env,loadSDK:g.loadSDK}).suggest(draft,{signal:controller.signal}),{reason:'provider_timeout'});assert.equal(g.calls.responses.length,0);
 });
-function servicesFixture(reply){
+function servicesFixture(reply,{defaultDiagnostic=false}={}){
  const rows={'users/owner':{role:'owner',accountStatus:'active'},'users/other':{role:'owner',accountStatus:'active'},'users/shop':{role:'shop',accountStatus:'active',verificationStatus:'approved'},
   'users/admin':{role:'admin',accountStatus:'active'},'serviceCategories/paint':{name:'Wrap & Paint',archived:false},'vehicles/car':{ownerId:'owner',make:'Toyota',model:'Corolla',year:2020,colour:'White',registration:'PRIVATE',archived:false}};
  const db={doc:path=>({get:async()=>({exists:!!rows[path],data:()=>rows[path]})}),collection:path=>{assert.equal(path,'serviceCategories');return {where:()=>({limit:()=>({get:async()=>({docs:[{id:'paint',data:()=>rows['serviceCategories/paint']}]})})})};},runTransaction:()=>assert.fail('No marketplace or generation accounting writes')};
  const auth={getUser:async()=>({emailVerified:true,metadata:{creationTime:'2020-01-01'}}),verifyIdToken:async uid=>({uid,email_verified:true,auth_time:Date.now()/1000})};
  const f=fakeSDK(reply||(async(body)=>envelope(JSON.parse(body.input[1].content[0].text).mode==='studio'?plan:{...suggestion,categoryId:JSON.parse(body.input[1].content[0].text).kind==='showcase'?'Wrap & Paint':'paint'})));
  const diagnostics=[];
- const services=createServices({db,auth,storage:{},aiProvider:createAIProvider({env,loadSDK:f.loadSDK}),aiStudioProvider:createAIStudioProvider({env,loadSDK:f.loadSDK}),aiDiagnostic:value=>diagnostics.push(value)});
+ const services=createServices({db,auth,storage:{},aiProvider:createAIProvider({env,loadSDK:f.loadSDK}),aiStudioProvider:createAIStudioProvider({env,loadSDK:f.loadSDK}),...(defaultDiagnostic?{}:{aiDiagnostic:value=>diagnostics.push(value)})});
  return {rows,calls:f.calls,diagnostics,app:createApp({services,auth})};
 }
 test('actual authenticated Express routes serve customer and workshop drafting repeatedly through Azure and keep existing validation and no-write contracts',async()=>{
@@ -290,4 +290,105 @@ test('diagnostics bound cause traversal, sanitise string/nested statuses, and re
  const f=fakeSDK(async()=>{throw {cause:{response:{status:404}},message:'PRIVATE'};});
  await assert.rejects(()=>createAzureProvider({env,loadSDK:f.loadSDK}).suggest(draft),{reason:'model_unavailable'});
  const g=fakeSDK();assert.deepEqual(await createAzureProvider({env,loadSDK:g.loadSDK}).suggest(draft,{onResponse:()=>{throw Error('telemetry');}}),suggestion);
+});
+
+test('invalid-value classifier uses bounded explicit provider evidence and never returns untrusted message text',()=>{
+ const {azureDiagnostic,sanitizeDiagnostic}=require('../ai-azure-diagnostics.cjs');
+ const context={stage:'responses_request',credentialState:'acquired'};
+ const cases=[
+  [{param:'input[0].role',message:"Invalid value: 'developer'. Supported values are: 'user'."},'input_role_developer'],
+  [{message:"Invalid value for 'tool_choice': 'none'. Supported values are: 'auto'. PRIVATE_SECRET"},'tool_choice_none'],
+  [{message:"Invalid value: 'none'. Supported values are: 'auto'."},'enum_none_field_unknown'],
+  [{target:'input.0.content.0.type',value:'input_text'},'input_content_type_input_text'],
+  [{param:'max_output_tokens',message:"Invalid 'max_output_tokens': must be less than 100."},'max_output_tokens_range'],
+  [{param:'max_output_tokens',value:4000},'max_output_tokens_positive_integer'],
+  [{param:'tools',value:[]},'tools_empty_array'],
+  [{param:'tool_choice',message:"Invalid value: 'PRIVATE_SECRET_none'."},'tool_choice_unknown'],
+  [{message:"PRIVATE_SECRET mentions tool_choice none input[0].role developer"},'unknown'],
+  [{param:'PRIVATE_SECRET',message:"Invalid value for 'PRIVATE_SECRET': 'PRIVATE_TOKEN'."},'unknown'],
+  [{message:'PRIVATE_SECRET'.repeat(400)},'unknown'],
+  [{param:'tool_choice',message:"Invalid value for 'input[0].role': 'developer'."},'unknown'],
+ ];
+ for(const [details,expected] of cases){
+  const error={status:400,code:'invalid_value',error:details};
+  const record=azureDiagnostic(error,context);assert.equal(record.providerInvalidValueClassification,expected);
+  assert.equal(JSON.stringify(record).includes('PRIVATE'),false);assert.equal(sanitizeDiagnostic(record).providerInvalidValueClassification,expected);
+ }
+ const nested={status:400,error:{code:'invalid_request_error',innererror:{code:'invalid_value',details:[{target:'input[0].content[0].type',value:'input_text'}]}}};
+ nested.error.innererror.error=nested;
+ assert.equal(azureDiagnostic(nested,context).providerInvalidValueClassification,'input_content_type_input_text');
+ assert.equal(azureDiagnostic({status:400,code:'invalid_value',error:{param:'input',details:[{param:'input[0].role',value:'developer'}]}},context).providerInvalidValueClassification,'unknown');
+ assert.equal(azureDiagnostic({status:400,code:'invalid_value',error:{details:[{param:'input[0].role',value:'developer'},{param:'tool_choice',value:'none'}]}},context).providerInvalidValueClassification,'unknown');
+ const wrapped=Object.assign(Error("400 Invalid value for 'stream': 'false'. PRIVATE_SECRET"),{status:400,code:'invalid_value'});
+ assert.equal(azureDiagnostic(wrapped,context).providerInvalidValueClassification,'stream_false');
+ for(const error of [{status:500,code:'invalid_value',error:cases[0][0]},{status:400,code:'invalid_request_error',error:cases[0][0]}])assert.equal(azureDiagnostic(error,context).providerInvalidValueClassification,null);
+ assert.equal(azureDiagnostic({status:400,code:'invalid_value',error:cases[0][0]},{stage:'token_acquisition'}).providerInvalidValueClassification,null);
+ assert.equal(sanitizeDiagnostic({providerErrorCode:'invalid_value',providerHttpStatus:400,providerFailureStage:'responses_request',providerInvalidValueClassification:'PRIVATE'}).providerInvalidValueClassification,'unknown');
+});
+
+test('installed SDK missing-param invalid-value errors retain safe evidence, Entra authentication and unchanged privacy controls',async()=>{
+ const sdk=await loadAzureSDK(),previous=globalThis.fetch,id='f68d8663-42b5-41d9-80f4-a36b8354e696';
+ class Credential{async getToken(){return {token:'synthetic-only-token',expiresOnTimestamp:Date.now()+3600000};}}
+ const cases=[
+  [{code:'invalid_value',param:null,message:"Invalid value for 'tool_choice': 'none'. Supported values are: 'auto'. PRIVATE_SECRET"},'tool_choice_none'],
+  [{code:'invalid_value',param:'input[0].role',message:"Invalid value: 'developer'. Supported values are: 'user'. PRIVATE_SECRET"},'input_role_developer'],
+  [{code:'invalid_value',param:null,message:'PRIVATE_SECRET arbitrary failure'},'unknown'],
+  [{code:'invalid_value',param:null,message:'PRIVATE_SECRET',details:[{target:'input[0].content[0].type',value:'input_text'}]},'input_content_type_input_text'],
+ ];
+ try{
+  for(const [details,expected] of cases){
+   const records=[];let calls=0;
+   globalThis.fetch=async(resource,options)=>{
+    calls++;const request=new Request(resource,options),body=JSON.parse(await request.text());
+    assert.equal(request.headers.get('authorization'),'Bearer synthetic-only-token');assert.equal(body.store,false);assert.deepEqual(body.tools,[]);assert.equal(body.tool_choice,'none');assert.equal(body.max_output_tokens,4000);assert.equal(body.stream,false);assertDraftGuidance(body.input[0].content[0].text,draft);assert.deepEqual(body.input.map(item=>item.role),['developer','user']);
+    return new Response(JSON.stringify({error:details}),{status:400,headers:{'content-type':'application/json','x-request-id':id}});
+   };
+   const provider=createAIProvider({env,loadSDK:async()=>({AIProjectClient:sdk.AIProjectClient,ClientSecretCredential:Credential})});
+   await assert.rejects(()=>provider.suggest(draft,{onProviderDiagnostic:row=>records.push(row)}),{reason:'provider_http'});
+   assert.equal(calls,1);assert.equal(records[0].providerInvalidValueClassification,expected);assert.equal(records[0].providerRequestId,id);assert.equal(records[0].providerCredentialState,'acquired');assert.equal(records[0].providerErrorParam,details.param==='input[0].role'?null:details.param);
+   for(const secret of ['PRIVATE_SECRET','synthetic-only-token',draft.description])assert.equal(JSON.stringify(records).includes(secret),false);
+  }
+ }finally{globalThis.fetch=previous;}
+});
+
+test('safe invalid-value classification reaches server telemetry with correlation ID but never the frontend',async()=>{
+ const id='f68d8663-42b5-41d9-80f4-a36b8354e696';
+ const f=servicesFixture(async()=>{throw Object.assign(Error("400 Invalid value for 'tool_choice': 'none'. PRIVATE_SECRET"),{status:400,code:'invalid_value',requestID:id});});
+ const result=await http(f.app).post('/api/ai/assist').set('Authorization','Bearer owner').send({kind:'request',title:draft.title,description:draft.description}).expect(503);
+ const row=f.diagnostics[0];assert.equal(row.providerInvalidValueClassification,'tool_choice_none');assert.equal(row.providerRequestId,id);assert.match(row.correlationId,/^[a-f0-9-]{36}$/);assert.equal(row.providerHttpStatus,400);assert.equal(f.calls.responses.length,1);
+ assert.equal(JSON.stringify(row).includes('PRIVATE_SECRET'),false);assert.equal(JSON.stringify(result.body).includes('tool_choice'),false);assert.equal(JSON.stringify(result.body).includes(id),false);assert.equal(result.body.error.fields.aiReason,'service_unavailable');
+});
+
+test('default PimpPilot console operation logger includes missing-param classifications and unknown without exposing private errors',async()=>{
+ const previous=console.info,logs=[],{format}=require('node:util');
+ const id='f68d8663-42b5-41d9-80f4-a36b8354e696';
+ const cases=[
+  [{message:"Invalid value for 'input[0].role': 'developer'. PRIVATE_SECRET"},'input_role_developer'],
+  [{message:"Invalid value for 'tool_choice': 'none'. PRIVATE_SECRET"},'tool_choice_none'],
+  [{message:'PRIVATE_SECRET',details:[{target:'tools',value:[]}]},'tools_empty_array'],
+  [{message:"Invalid 'max_output_tokens': must be less than 100. PRIVATE_SECRET"},'max_output_tokens_range'],
+  [{message:"Invalid value for 'stream': 'false'. PRIVATE_SECRET"},'stream_false'],
+  [{message:"Invalid value: 'none'. Supported values are: 'auto'. PRIVATE_SECRET"},'enum_none_field_unknown'],
+  [{message:'PRIVATE_SECRET unrecognized description of input role, tools and limits'},'unknown'],
+  [{message:"Invalid value for 'tool_choice': 'PRIVATE_SECRET_none'."},'tool_choice_unknown'],
+ ];
+ console.info=(...args)=>logs.push({args,formatted:format(...args)});
+ try{
+  for(const [details,classification] of cases){
+   const f=servicesFixture(async body=>{
+    for(const field of ['instructions','reasoning','text'])assert.equal(Object.hasOwn(body,field),false);
+    assert.equal(body.store,false);assert.deepEqual(body.tools,[]);assert.equal(body.tool_choice,'none');assert.equal(body.max_output_tokens,4000);assert.equal(body.stream,false);
+    const error=Object.assign(Error('400 '+details.message),{name:'BadRequestError',status:400,code:'invalid_value',param:null,error:{...details,code:'invalid_value',param:null},requestID:id});
+    throw error;
+   },{defaultDiagnostic:true}),before=JSON.stringify(f.rows),count=logs.length;
+   const response=await http(f.app).post('/api/ai/assist').set('Authorization','Bearer owner').send({kind:'request',title:draft.title,description:draft.description}).expect(503);
+   assert.equal(logs.length,count+1);const {args,formatted}=logs.at(-1),record=args[1];
+   assert.equal(args[0],'PimpPilot operation');assert.equal(record.providerErrorParam,null);assert.equal(record.providerErrorCode,'invalid_value');assert.equal(record.providerInvalidValueClassification,classification);
+   assert.equal(record.providerRequestId,id);assert.match(record.correlationId,/^[a-f0-9-]{36}$/);assert.equal(record.providerHttpStatus,400);assert.equal(record.providerFailureStage,'responses_request');
+   assert.ok(formatted.includes("providerInvalidValueClassification: '"+classification+"'"));
+   for(const privateText of ['PRIVATE_SECRET',draft.description,env.AZURE_CLIENT_SECRET])assert.equal(formatted.includes(privateText),false);
+   const publicBody=JSON.stringify(response.body);for(const internal of ['providerInvalidValueClassification',id,'PRIVATE_SECRET'])assert.equal(publicBody.includes(internal),false);
+   assert.equal(response.body.error.fields.aiReason,'service_unavailable');assert.equal(f.calls.responses.length,1);assert.equal(JSON.stringify(f.rows),before);
+  }
+ }finally{console.info=previous;}
 });
