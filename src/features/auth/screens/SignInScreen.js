@@ -1,4 +1,5 @@
 import {useLoginCooldown} from '../hooks/useLoginCooldown';
+import GoogleSignIn from '../components/GoogleSignIn';
 import { useAuth } from '../context/AuthContext';
 import { login } from '../services/accounts';
 import { authError } from '../utils/authErrors';
@@ -80,6 +81,7 @@ export default function SignInScreen({ navigation, route }) {
           </View>
 
           {/* Form card */}
+          <GoogleSignIn disabled={loading || cooldown.seconds !== 0}/>
           <View style={styles.formCard}>
             <View style={styles.dividerRow}>
               <View style={styles.dividerLine} />

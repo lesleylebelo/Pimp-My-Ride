@@ -2,12 +2,12 @@ import {apiRequest} from '../../../shared/services/api';
 import {Platform} from 'react-native';
 import {guardedLogin} from './loginCooldown';
 import { requireConnection } from '../../../shared/services/network';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateCurrentUser, deleteUser, getIdTokenResult, sendEmailVerification } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updateCurrentUser, deleteUser, getIdTokenResult, sendEmailVerification, signOut } from 'firebase/auth';
 import { doc, getDocFromServer } from 'firebase/firestore';
 import { firebase, withIsolatedAuth } from '../../../shared/services/firebase';
 import { DOCUMENT_KEYS, fileError } from '../utils/registration';
 let accountActionPending = false;
-async function isolatedAccountAction(operation) {
+export async function isolatedAccountAction(operation) {
  if (accountActionPending) throw new Error('Another account action is in progress.');
  accountActionPending = true;
  try {
@@ -19,6 +19,10 @@ async function isolatedAccountAction(operation) {
 export async function login(email, password) {
  return isolatedAccountAction(async ({auth, db}) => {
   const { user } = await guardedLogin(() => signInWithEmailAndPassword(auth, email.trim(), password));
+  return validateAndPromote({auth,db},user);
+ });
+}
+export async function validateAndPromote({auth,db},user,assertActive=()=>{}) {
   if(!user.emailVerified){
    const unverified=new Error('Please verify your email before signing in. Open the verification link in your inbox, or resend the email.');
    unverified.code='auth/email-not-verified';throw unverified;
@@ -40,9 +44,16 @@ export async function login(email, password) {
   // Only a verified user with a valid profile may enter the persisted app session.
   const mainAuth = firebase().auth;
   if (mainAuth.currentUser) throw new Error('Your account changed. Please try again.');
+  assertActive();
   await updateCurrentUser(mainAuth, user);
+  try{assertActive();}
+  catch(error){
+   // Cancellation may arrive while Firebase writes persistence. The context's
+   // account lock prevents publishing that session until cleanup completes.
+   if(mainAuth.currentUser?.uid===user.uid)await signOut(mainAuth);
+   throw error;
+  }
   return mainAuth.currentUser;
- });
 }
 export async function register(form, role) {
  if (!['owner','shop'].includes(role)) throw new Error('This role cannot register.');
@@ -98,7 +109,7 @@ export async function resendVerification(email, password) {
  });
 }
 
-function profilePayload(form,role,user) {
+export function profilePayload(form,role,user) {
  if (!['owner','shop'].includes(role)) throw new Error('This role cannot register.');
  const data = {
   fullName: form.fullName.trim(), email: user.email, phone: form.phone.replace(/[\s()-]/g,''), role,

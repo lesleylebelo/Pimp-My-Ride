@@ -11,7 +11,7 @@
     "start:local": "node --env-file=.env.local local-server.cjs",
     "check:local-config": "node check-local-config.cjs",
     "check:ai-config": "node check-ai-config.cjs",
-    "test": "node --test test/http.test.cjs test/storage.test.cjs test/reviews.test.cjs test/security.test.cjs test/cleanup.test.cjs test/documents.test.cjs test/reliability.test.cjs test/trusted-admin-operations.test.cjs test/marketplace.test.cjs test/photos.test.cjs test/photo-cleanup.test.cjs test/posts.test.cjs test/ai-assist.test.cjs test/ai-azure.test.cjs test/ai-studio.test.cjs test/ai-grounding.test.cjs test/ai-release-control.test.cjs test/ai-production-compatibility.test.cjs test/mock-payment-configuration.test.cjs test/profile-photos.test.cjs"
+    "test": "node --test test/google-auth.test.cjs test/http.test.cjs test/storage.test.cjs test/reviews.test.cjs test/security.test.cjs test/cleanup.test.cjs test/documents.test.cjs test/reliability.test.cjs test/trusted-admin-operations.test.cjs test/marketplace.test.cjs test/photos.test.cjs test/photo-cleanup.test.cjs test/posts.test.cjs test/ai-assist.test.cjs test/ai-azure.test.cjs test/ai-studio.test.cjs test/ai-grounding.test.cjs test/ai-release-control.test.cjs test/ai-production-compatibility.test.cjs test/mock-payment-configuration.test.cjs test/profile-photos.test.cjs"
   },
   "dependencies": {
     "@azure/ai-projects": "2.9.0",
@@ -21,6 +21,7 @@
     "express": "^5.1.0",
     "express-rate-limit": "^8.1.0",
     "firebase-admin": "^14.4.0",
+    "google-auth-library": "^10.9.1",
     "helmet": "^8.1.0",
     "multer": "^2.0.2"
   },

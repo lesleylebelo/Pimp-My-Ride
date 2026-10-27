@@ -5,6 +5,7 @@ const {getFirestore}=require('firebase-admin/firestore');
 const {createServices}=require('./services.cjs');
 const {createStorage,createMediaStorage}=require('./storage.cjs');
 const {createApp}=require('./app.cjs');
+const {createGoogleAuth}=require('./google-auth.cjs');
 const {corsOrigins,storageConfig,validateEmulatorHost,listenHost}=require('./config.cjs');
 const fs=require('node:fs');
 const path=require('node:path');
@@ -42,7 +43,7 @@ async function start(){try{
  const profileStorage=createStorage({url:storage.url,key:storage.key,bucket:storage.photoBucket,scope:'profiles'});
  const requestStorage=createMediaStorage({url:storage.url,key:storage.key,bucket:storage.requestBucket,scope:'requests'});
  const postStorage=createMediaStorage({url:storage.url,key:storage.key,bucket:storage.postsBucket,legacyBucket:storage.legacyPostsBucket,scope:'showcase'});
- const app=createApp({auth,services:createServices({db,auth,storage:storageClient,photoStorage,profileStorage,requestStorage,postStorage}),trustProxy:process.env.RENDER?1:false,
+ const app=createApp({auth,googleExchange:createGoogleAuth({auth,db}),services:createServices({db,auth,storage:storageClient,photoStorage,profileStorage,requestStorage,postStorage}),trustProxy:process.env.RENDER?1:false,
   allowedOrigins:corsOrigins(process.env.CORS_ORIGINS,process.env.NODE_ENV==='production')});
  const server=app.listen(portValue,host,()=>console.log('PimpMyRide API ready.'));
  server.requestTimeout=90000;
