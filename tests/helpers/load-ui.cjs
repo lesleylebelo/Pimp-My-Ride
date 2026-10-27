@@ -31,7 +31,7 @@ function loadUI(file,mocks={}) {
  const cache={};
  const resolvedMocks=Object.fromEntries(Object.entries(mocks).filter(([name])=>name.startsWith('.')).map(([name,value])=>[path.resolve(path.dirname(path.resolve(file)),name+'.js'),value]));
  const expoStubs={
-   '@react-navigation/native': { useIsFocused: () => true },
+   '@react-navigation/native': { useIsFocused: () => true, usePreventRemove: () => {} },
    '@react-native-async-storage/async-storage': { getItem: async () => null, setItem: async () => undefined, removeItem: async () => undefined },
    '@react-native-community/netinfo': { addEventListener: () => () => {}, fetch: async () => ({isConnected: true}) },
    'expo-image-manipulator': { manipulateAsync: async (...args) => ({uri: args[0], width: 1200, height: 900, fileSize: 1024}), SaveFormat: {JPEG: 'jpeg'} },

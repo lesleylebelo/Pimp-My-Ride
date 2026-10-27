@@ -1,13 +1,14 @@
-import {CustomerModal as Modal,CustomerGrid,CustomerState,CustomerPressable} from '../../customer/components/CustomerUI';
+import {CustomerModal as Modal,CustomerPressable} from '../../customer/components/CustomerUI';
 import React, {useEffect, useRef, useState} from 'react';
-import {ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, View} from 'react-native';
+import {ActivityIndicator, RefreshControl, ScrollView, useWindowDimensions, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
+import {usePreventRemove} from '@react-navigation/native';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
 import ConfirmationButton from '../../../shared/components/ConfirmationButton';
 import {useAuth} from '../../auth/context/AuthContext';
 import {marketApi} from '../services/marketApi';
 import {useMarketData} from '../hooks/useMarketData';
-import {Page, Card, Field, Button, Notice, StatusTag, useInfiniteCursor, formatMoney} from '../components/MarketplaceUI';
+import {Field, Notice, useInfiniteCursor, formatMoney} from '../components/MarketplaceUI';
 import PhotoGallery from '../components/PhotoGallery';
 import RequestPhotoUploads from '../components/RequestPhotoUploads';
 import LocationPicker from '../../../shared/location/LocationPicker';
@@ -16,13 +17,15 @@ import PrivatePhoto from '../components/PrivatePhoto';
 import AIAssistButton from '../components/AIAssistButton';
 import {vehicleErrors, requestErrors, parseMoney} from '../utils/validation';
 import {useTheme} from '../../../shared/theme/ThemeContext';
-import {GaragePage, GarageAction, garageStyles} from '../components/GarageUI';
-import {QuotationPage, QuotationCard, QuotationAction, QuotationSection, quotationStyles} from '../components/QuotationUI';
+import {GaragePage, GarageAction, GarageGrid, garageStyles} from '../components/GarageUI';
+import {QuotationCard} from '../components/QuotationUI';
+import {RequestPage,RequestAction,RequestSection,RequestText,RequestStatus,RequestState,RequestGrid,RequestListCard,RequestOptions as SelectionList,RequestDiscard,RequestAudience,requestVehicleLabel,requestResponseLabel,requestDate} from '../../customer/components/CustomerRequestUI';
 
 const hasErrors = errors => Object.values(errors).some(Boolean);
-const vehicleName = vehicle => `${vehicle.make} ${vehicle.model} (${vehicle.year})`;
-const when = value => value ? new Date(value).toLocaleDateString() : 'Not specified';
-const requestStatus = status => status === 'open' ? 'Open for quotations' : status === 'booked' ? 'Quotation accepted' : 'Closed request';
+const vehicleName = vehicle => {
+  const name=[vehicle?.make,vehicle?.model].filter(Boolean).join(' ');
+  return name?`${name}${vehicle.year?` (${vehicle.year})`:''}`:'Vehicle details unavailable';
+};
 
 function useMutation() {
   const {offline, user} = useAuth();
@@ -51,7 +54,7 @@ function useMutation() {
 export function GarageScreen(props) {const {user}=useAuth();return <GarageContent key={user?.uid||'signed-out'} {...props}/>;}
 function GarageContent({navigation}) {
   const {theme}=useTheme();
-  const styles=garageStyles(theme),wide=useWindowDimensions().width>=800;
+  const styles=garageStyles(theme);
   const [archived, setArchived] = useState(false), [cursor, setCursor] = useState(null);
   const [message, setMessage] = useState('');
   const [selected,setSelected]=useState(null);
@@ -66,30 +69,36 @@ function GarageContent({navigation}) {
     }
   }
   function open(route,params){if(!disabled){setSelected(null);if(params)navigation.navigate(route,params);else navigation.navigate(route);}}
-  const cover=vehicle=><View style={[styles.cover,!vehicle.photoIds?.length&&{height:160}]}>
-    <View style={styles.coverPlaceholder}><Ionicons name="car-sport-outline" size={64} color={theme.textSecondary}/><Text style={styles.placeholderText}>{vehicle.photoIds?.length?'Private vehicle photo':'Add photos to make it yours'}</Text></View>
-    {!!vehicle.photoIds?.length&&<PrivatePhoto target="vehicle" id={vehicle.id} imageStyle={styles.coverImage} accessibilityLabel={`Photo of ${vehicle.make} ${vehicle.model}`}/>}
+  const cover=vehicle=><View style={styles.cover}>
+    <View style={styles.coverPlaceholder}><Ionicons name="car-sport-outline" size={44} color={theme.textSecondary}/><Text style={styles.placeholderText}>{vehicle.photoIds?.length?'Private vehicle photo':'No vehicle photo yet'}</Text></View>
+    {!!vehicle.photoIds?.length&&<PrivatePhoto target="vehicle" id={vehicle.id} style={styles.coverPhoto} imageStyle={styles.coverImage} accessibilityLabel={`Photo of ${vehicle.make} ${vehicle.model}`}/>}
   </View>;
   const archiveControl=vehicle=><ConfirmationButton palette={theme} title={vehicle.archived ? `Restore ${vehicle.make} ${vehicle.model}` : `Remove ${vehicle.make} ${vehicle.model}`} message={vehicle.archived ? 'Restore this vehicle to your active garage. Its open requests can become visible to shops again.' : 'Remove this vehicle from your active garage. It will not be deleted permanently; past service requests, quotations, and bookings will be preserved.'} disabled={disabled} danger={!vehicle.archived} onConfirm={() => archive(vehicle)}/>;
   return <GaragePage title="My Garage" subtitle="Your vehicles, details and private photos." navigation={navigation} tabs onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}
     refreshControl={<RefreshControl refreshing={busy&&!!feed.items.length} onRefresh={()=>{if(!disabled)void refresh().catch(()=>{});}} tintColor={theme.textPrimary}/>}>
-    <View style={styles.toolbar}><View style={styles.intro}><Text style={styles.eyebrow}>YOUR COLLECTION</Text><Text weight="semibold" style={styles.sectionTitle}>{archived?'Archived vehicles':'Your vehicles'}</Text><Text style={styles.secondary}>Choose a vehicle to view its details or request a service.</Text></View>
+    <View style={styles.toolbar}><View style={styles.intro}><Text weight="semibold" style={styles.sectionTitle}>{archived?'Archived vehicles':'Your vehicles'}</Text><Text style={styles.secondary}>Ready for your next service.</Text></View>
       <GarageAction title="Add vehicle" icon="add-outline" primary disabled={disabled} onPress={()=>open('VehicleForm')}/></View>
     <View style={styles.filters}>{[false,true].map(value=><CustomerPressable key={String(value)} accessibilityRole="button" accessibilityLabel={value?'Archived vehicles':'Active vehicles'} accessibilityState={{selected:archived===value,disabled}} disabled={disabled} onPress={()=>{if(!disabled&&archived!==value){feed.reset();setArchived(value);setCursor(null);setSelected(null);setMessage('');}}} style={[styles.filter,archived===value&&styles.filterSelected]}><Text weight={archived===value?'semibold':'regular'} style={styles.filterText}>{value?'Archived vehicles':'Active vehicles'}</Text></CustomerPressable>)}</View>
     <Notice busy={mutation.saving} error={mutation.offline?'Connect to view or update your garage.':mutation.error || error}/>
     {busy&&!feed.items.length&&<View accessibilityRole="status" style={styles.empty}><ActivityIndicator color={theme.textPrimary}/><Text style={styles.secondary}>Loading your garage...</Text></View>}
     {!!message && <Text accessibilityRole="status">{message}</Text>}
-    <CustomerGrid>{feed.items.map(vehicle=><View key={vehicle.id} testID={`garage-vehicle-${vehicle.id}`} style={[styles.vehicleCard,{width:'100%',borderRadius:12,borderWidth:1,borderColor:theme.border}]}>
-      <Pressable accessibilityRole="button" accessibilityLabel={`View details for ${vehicle.make} ${vehicle.model}`} disabled={disabled} onPress={()=>{if(!disabled)setSelected(vehicle);}}>{cover(vehicle)}</Pressable>
-      <View style={styles.cardBody}><Text style={styles.eyebrow}>{String(vehicle.year)}</Text><Text weight="semibold" style={styles.vehicleTitle}>{vehicle.make} {vehicle.model}</Text><Text style={styles.specLine}>{[vehicle.colour,vehicle.registration].filter(Boolean).join(' · ')}</Text>
-        <GarageAction title={`View ${vehicle.make} ${vehicle.model}`} icon="car-outline" disabled={disabled} onPress={()=>{if(!disabled)setSelected(vehicle);}}/>
-        <View style={styles.cardActions}><View style={styles.actionCell}><GarageAction title={`Photos for ${vehicle.make} ${vehicle.model}`} icon="images-outline" disabled={disabled} onPress={()=>open('VehiclePhotos',{id:vehicle.id})}/></View>
-          {!archived&&<View style={styles.actionCell}><GarageAction title={`Edit ${vehicle.make} ${vehicle.model}`} icon="create-outline" disabled={disabled} onPress={()=>open('VehicleForm',{vehicle})}/></View>}</View>
+    <GarageGrid>{feed.items.map(vehicle=><View key={vehicle.id} testID={`garage-vehicle-${vehicle.id}`} style={styles.vehicleCard}>
+      {cover(vehicle)}
+      <View style={styles.cardBody}>
+        <CustomerPressable accessibilityRole="button" accessibilityLabel={`View ${vehicle.make} ${vehicle.model}`} disabled={disabled} onPress={()=>{if(!disabled)setSelected(vehicle);}} style={styles.identity}>
+          <Text accessibilityRole="header" weight="semibold" style={[styles.vehicleTitle,{flex:1}]}>{vehicle.make} {vehicle.model}</Text><Ionicons name="chevron-forward-outline" size={18} color={theme.textSecondary}/>
+        </CustomerPressable>
+        <Text style={styles.specLine}>{[vehicle.year,vehicle.colour,vehicle.archived?'Archived':null].filter(Boolean).join(' · ')}</Text>
         {!archived&&<GarageAction title={`Request service for ${vehicle.make} ${vehicle.model}`} icon="construct-outline" primary disabled={disabled} onPress={()=>open('RequestForm',{vehicleId:vehicle.id,vehicle})}/>}
-        {archiveControl(vehicle)}
+        {!archived&&<GarageAction title={`Explore ${vehicle.make} ${vehicle.model} in PimpPilot Studio`} icon="sparkles-outline" disabled={disabled} onPress={()=>open('PimpPilotStudio',{vehicleId:vehicle.id,vehicle})}/>}
+        <View style={styles.cardActions}>
+          {!archived&&<View style={styles.actionCell}><GarageAction title={`Edit ${vehicle.make} ${vehicle.model}`} icon="create-outline" disabled={disabled} onPress={()=>open('VehicleForm',{vehicle})}/></View>}
+          <View style={styles.actionCell}><GarageAction title={`Photos for ${vehicle.make} ${vehicle.model}`} icon="images-outline" disabled={disabled} onPress={()=>open('VehiclePhotos',{id:vehicle.id,vehicle})}/></View>
+        </View>
+        <View style={styles.cardFooter}>{archiveControl(vehicle)}</View>
       </View>
-    </View>)}</CustomerGrid>
-    {data&&!busy&&!error&&!feed.items.length&&<View style={styles.empty}><Ionicons name={archived?'archive-outline':'car-sport-outline'} size={56} color={theme.textSecondary}/><Text weight="semibold" style={styles.emptyTitle}>{archived?'No archived vehicles.':'Your garage is empty.'}</Text><Text style={styles.emptyBody}>{archived?'Vehicles you remove from your active garage will stay here with their history.':'Add your first vehicle to keep its details and photos together, ready for your next service request.'}</Text></View>}
+    </View>)}</GarageGrid>
+    {data&&!busy&&!error&&!mutation.offline&&!feed.items.length&&<View style={styles.empty}><Ionicons name={archived?'archive-outline':'car-sport-outline'} size={56} color={theme.textSecondary}/><Text weight="semibold" style={styles.emptyTitle}>{archived?'No archived vehicles.':'Your garage is empty.'}</Text><Text style={styles.emptyBody}>{archived?'Vehicles you remove from your active garage will stay here with their history.':'Add your first vehicle to keep its details and photos together, ready for your next service request.'}</Text>{!archived&&<GarageAction title="Add your first vehicle" icon="add-outline" primary disabled={disabled} onPress={()=>open('VehicleForm')}/>}</View>}
     <GarageAction title="Refresh vehicles" icon="refresh-outline" disabled={disabled} onPress={()=>{if(!disabled)void refresh().catch(()=>{});}}/>
     {busy&&!!feed.items.length&&<Text style={styles.secondary}>Loading more vehicles...</Text>}
     <Modal visible={!!selected} transparent animationType="fade" onRequestClose={()=>setSelected(null)}>
@@ -98,7 +107,7 @@ function GarageContent({navigation}) {
           {cover(selected)}<Text weight="semibold" style={styles.vehicleTitle}>{selected.make} {selected.model}</Text>
           <Text weight="semibold" style={styles.sectionTitle}>Vehicle specifications</Text><View style={styles.specGrid}>{[['Make',selected.make],['Model',selected.model],['Year',selected.year],['Colour',selected.colour],['Registration',selected.registration],['Garage status',selected.archived?'Archived':'Active']].map(([label,value])=><View key={label} style={styles.spec}><Text style={styles.secondary}>{label}</Text><Text style={styles.specValue}>{String(value??'Not specified')}</Text></View>)}</View>
           <Text style={styles.secondary}>Registration stays private to your account.</Text>
-          <GarageAction title="Manage photos" icon="images-outline" disabled={disabled} onPress={()=>open('VehiclePhotos',{id:selected.id})}/>
+          <GarageAction title="Manage photos" icon="images-outline" disabled={disabled} onPress={()=>open('VehiclePhotos',{id:selected.id,vehicle:selected})}/>
           {!selected.archived&&<><GarageAction title="Edit vehicle" icon="create-outline" disabled={disabled} onPress={()=>open('VehicleForm',{vehicle:selected})}/><GarageAction title="Create service request" icon="construct-outline" primary disabled={disabled} onPress={()=>open('RequestForm',{vehicleId:selected.id,vehicle:selected})}/></>}
         </ScrollView></View></View>}
     </Modal>
@@ -112,14 +121,18 @@ function VehicleDraft({route, navigation}) {
   const vehicle = route.params?.vehicle;
   const [form, setForm] = useState(() => ({make: vehicle?.make || '', model: vehicle?.model || '', year: vehicle?.year ? String(vehicle.year) : '', colour: vehicle?.colour || '', registration: vehicle?.registration || ''}));
   const [touched, setTouched] = useState({}), [submitted, setSubmitted] = useState(false);
+  const initial=useRef(form),[saved,setSaved]=useState(false),[leaveAction,setLeaveAction]=useState(null);
   const mutation = useMutation(), errors = vehicleErrors(form), disabled = mutation.saving || mutation.offline;
+  const dirty=Object.keys(form).some(key=>form[key]!==initial.current[key]);
+  usePreventRemove(!saved&&(dirty||mutation.saving),({data})=>{if(!mutation.saving)setLeaveAction(data.action);});
+  useEffect(()=>{if(saved){if(navigation.canGoBack?.()===false)navigation.navigate('Garage');else navigation.goBack();}},[saved,navigation]);
   function edit(key, value) {if (!disabled) {setForm(previous => ({...previous, [key]: value})); setTouched(previous => ({...previous, [key]: true}));}}
   async function save() {
     setSubmitted(true);
     if (disabled || hasErrors(errors)) return;
     try {
       const result = await mutation.run('vehicleSave', {...form, year: Number(form.year), ...(vehicle ? {id: vehicle.id, version: vehicle.version} : {})});
-      if (result) navigation.goBack();
+      if (result) setSaved(true);
     } catch (_) {}
   }
   return <GaragePage title={vehicle?'Edit vehicle':'Add vehicle'} subtitle={vehicle?'Keep your vehicle details up to date.':'Vehicle details stay with your account.'} navigation={navigation} keyboard>
@@ -128,73 +141,67 @@ function VehicleDraft({route, navigation}) {
       {[['Vehicle identity',[['make','Make',80,'e.g. Toyota'],['model','Model',80,'e.g. Corolla'],['year','Year',4,'e.g. 2024']]],['Appearance & registration',[['colour','Colour',80,'e.g. Pearl white'],['registration','Registration number',20,'Your registration']]]].map(([heading,fields])=><View key={heading} style={styles.formSection}>
         <Text accessibilityRole="header" weight="semibold" style={styles.sectionTitle}>{heading}</Text><View style={styles.fields}>{fields.map(([key,label,maxLength,placeholder])=><View key={key} style={[styles.fieldCell,wide&&styles.wideField]}><Field label={`${label} *`} accessibilityLabel={label} value={form[key]} placeholder={placeholder} onChangeText={value=>edit(key,value)} onBlur={()=>setTouched(previous=>({...previous,[key]:true}))} error={(submitted||touched[key])?errors[key]:null} editable={!disabled} maxLength={maxLength} keyboardType={key==='year'?'number-pad':'default'} autoCapitalize={key==='registration'?'characters':'words'}/></View>)}</View>
       </View>)}
-      {hasErrors(errors)&&<View style={styles.validation}><Text style={styles.error}>Complete these details before saving:</Text>{Object.entries(errors).map(([key,error])=><Text key={key} style={styles.error}>{error}</Text>)}</View>}
+      {submitted&&hasErrors(errors)&&<View style={styles.validation}><Text style={styles.error}>Complete these details before saving:</Text>{Object.entries(errors).map(([key,error])=><Text key={key} style={styles.error}>{error}</Text>)}</View>}
       <Notice busy={mutation.saving} error={mutation.offline?'Connect to save your vehicle.':mutation.error}/>
-      <View style={styles.cardActions}><View style={styles.actionCell}><GarageAction title="Cancel" disabled={mutation.saving} onPress={()=>{if(!mutation.saving)navigation.canGoBack?.()===false?navigation.navigate('Garage'):navigation.goBack();}}/></View><View style={styles.actionCell}><GarageAction title="Save vehicle" icon="checkmark-outline" primary disabled={disabled||hasErrors(errors)} onPress={save}/></View></View>
+      <View style={styles.cardActions}><View style={styles.actionCell}><GarageAction title="Cancel" disabled={mutation.saving} onPress={()=>{if(!mutation.saving)navigation.canGoBack?.()===false?navigation.navigate('Garage'):navigation.goBack();}}/></View><View style={styles.actionCell}><GarageAction title="Save vehicle" loading={mutation.saving} icon="checkmark-outline" primary disabled={disabled||hasErrors(errors)} onPress={save}/></View></View>
+      <Modal visible={!!leaveAction} transparent animationType="fade" onRequestClose={()=>setLeaveAction(null)}>
+        <View style={styles.backdrop}><View style={[styles.formSection,{width:'100%',maxWidth:440}]} accessibilityViewIsModal>
+          <Text accessibilityRole="header" weight="semibold" style={styles.sectionTitle}>Discard vehicle changes?</Text><Text style={styles.secondary}>Your changes have not been saved.</Text>
+          <GarageAction title="Keep editing" onPress={()=>setLeaveAction(null)}/><GarageAction title="Discard changes" danger onPress={()=>{const action=leaveAction;setLeaveAction(null);navigation.dispatch(action);}}/>
+        </View></View>
+      </Modal>
     </View>
   </GaragePage>;
 }
 
-export function OwnerRequestsScreen({navigation}) {
-  const {theme}=useTheme();
-  const styles=makeStyles(theme);
-  const {offline} = useAuth(), [cursor, setCursor] = useState(null);
-  const {data, busy, error, refresh} = useMarketData('requests', {feed: 'mine', cursor}, setCursor);
-  const feed = useInfiniteCursor(data, busy, setCursor, {pageCursor:cursor});
-  const disabled = busy || offline;
-  return <Page title="Requests" subtitle="Your work, from first idea to accepted quote" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
-    <Button title="Create service request" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('RequestForm');}}/>
-    <Notice busy={busy} error={error}/>
-    <CustomerGrid>{feed.items.map(request => <Card key={request.id}>
-      <Text weight="semibold" style={styles.heading}>{request.title}</Text>
-      <Text>{request.categoryName} · {request.city}</Text>
-      <StatusTag>{requestStatus(request.status)}</StatusTag>
-      <Text>{request.visibility === 'direct' ? 'Direct request' : 'Open request'}</Text>
-      <Text>{formatMoney(request.budgetMinCents)} – {formatMoney(request.budgetMaxCents)}</Text>
-      <Button title={`View ${request.title}`} disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('OwnerRequest', {id: request.id});}}/>
-    </Card>)}</CustomerGrid>
-    {data && !busy && !feed.items.length && <Text style={styles.muted}>No requests yet. Add a vehicle, then tell workshops what you need.</Text>}
-    <Button title="Refresh requests" outline disabled={disabled} onPress={() => {if (!disabled) void refresh().catch(() => {});}}/>
-    {busy && !!feed.items.length && <Text style={styles.muted}>Loading more requests...</Text>}
-  </Page>;
-}
-
-function SelectionList({title, state, feed, selected, onSelect, label, disabled, onLayout}) {
-  const {theme}=useTheme();
-  const styles=makeStyles(theme);
-  return <Card onLayout={onLayout} style={styles.selectionCard}>
-    <Text weight="medium" style={styles.sectionEyebrow}>{title}</Text>
-    <Notice busy={state.busy} error={state.error}/>
-    <View style={styles.selectionChips}>{feed.items.map(item => {
-      const active = selected === item.id;
-      return <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={`${active ? 'Selected: ' : ''}${label(item)}`} accessibilityState={{selected: active, disabled: disabled || state.busy}} disabled={disabled || state.busy} onPress={() => {if (!disabled && !state.busy) onSelect(item);}} style={[styles.selectionChip, active && styles.selectedChip]}>
-        <Text style={[styles.selectionText, active && styles.selectedText]}>{label(item)}</Text>
-        {active && <Ionicons name="checkmark" size={16} color={theme.primaryText}/>}
-      </Pressable>;
-    })}</View>
-    {state.data && !state.busy && !feed.items.length && <Text style={styles.muted}>{title.includes('MODIFICATION TYPE') ? 'No active service categories are configured.' : 'No available options.'}</Text>}
-    <Button title={`Refresh ${title.toLowerCase()}`} outline disabled={disabled || state.busy} onPress={() => {if (!disabled && !state.busy) void state.refresh().catch(() => {});}}/>
-    {state.busy && !!feed.items.length && <Text style={styles.muted}>Loading more options...</Text>}
-  </Card>;
+export function OwnerRequestsScreen(props){const {user}=useAuth();return <OwnerRequests key={user?.uid||'signed-out'} {...props}/>;}
+function OwnerRequests({navigation}) {
+  const {theme}=useTheme(),{offline}=useAuth();
+  const [cursor,setCursor]=useState(null);
+  const {data,busy,error,refresh}=useMarketData('requests',{feed:'mine',cursor},setCursor);
+  const feed=useInfiniteCursor(data,busy,setCursor,{pageCursor:cursor}),disabled=busy||offline;
+  const reload=()=>{if(!disabled)void refresh().catch(()=>{});};
+  return <RequestPage title="My Requests" subtitle="Your service requests and workshop responses." navigation={navigation}
+    onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}
+    refreshControl={<RefreshControl refreshing={busy&&!!feed.items.length} onRefresh={reload} tintColor={theme.textPrimary}/>}>
+    <View style={{flexDirection:'row',flexWrap:'wrap',gap:14,alignItems:'center',justifyContent:'space-between'}}>
+      <RequestText muted style={{flex:1,minWidth:160}}>Manage your vehicle's next service.</RequestText>
+      <RequestAction title="Create service request" displayTitle="New request" icon="add-outline" primary disabled={disabled} onPress={()=>{if(!disabled)navigation.navigate('RequestForm');}}/>
+    </View>
+    <Notice error={error}/>
+    {busy&&!feed.items.length&&<RequestState title="Loading your requests..." busy/>}
+    <RequestGrid>{feed.items.map(request=><RequestListCard key={request.id} request={request} navigation={navigation} disabled={disabled}/>)}</RequestGrid>
+    {data&&!busy&&!error&&!offline&&!feed.items.length&&<RequestState title="No requests yet" description="Choose a vehicle and tell workshops what you need." icon="document-text-outline"
+      action={<RequestAction title="New request" icon="add-outline" primary onPress={()=>navigation.navigate('RequestForm')}/>}/>}
+    <RequestAction title="Refresh requests" icon="refresh-outline" disabled={disabled} onPress={reload}/>
+    {busy&&!!feed.items.length&&<RequestText muted accessibilityRole="status">Loading more requests...</RequestText>}
+  </RequestPage>;
 }
 
 export function RequestFormScreen(props){const {user} = useAuth();const request=props.route.params?.request;return <RequestDraft key={`${user?.uid}:${request?.id||props.route.params?.vehicleId||'choose'}`} {...props}/>;}
 function RequestDraft({route, navigation}) {
-  const {theme}=useTheme();
-  const styles=makeStyles(theme);
+  const {fontScale}=useWindowDimensions();
+  const {user:studioUser}=useAuth();
+  const studioDraft=studioUser?.uid&&route.params?.studioDraft?.uid===studioUser.uid?route.params.studioDraft:null;
   const request = route.params?.request, editing = !!request;
   const [vehicleCursor,setVehicleCursor]=useState(null),[categoryCursor,setCategoryCursor]=useState(null),[shopCursor,setShopCursor]=useState(null);
   const vehicles = useMarketData('vehicles', {cursor: vehicleCursor, archived: false});
   const categories = useMarketData('categories', {cursor: categoryCursor});
   const shops = useMarketData('shops', {cursor: shopCursor});
   const vehicleFeed=useInfiniteCursor(vehicles.data,vehicles.busy,setVehicleCursor,{autoLoad:false}),categoryFeed=useInfiniteCursor(categories.data,categories.busy,setCategoryCursor,{autoLoad:false}),shopFeed=useInfiniteCursor(shops.data,shops.busy,setShopCursor,{autoLoad:false});
-  const [form, setForm] = useState(() => ({vehicleId: request?.vehicleId || route.params?.vehicleId || '', title: request?.title || '', description: request?.description || '', categoryId: request?.categoryId || '', city: request?.city || '', budgetMin: request?.budgetMinCents === undefined ? '' : String(request.budgetMinCents / 100), budgetMax: request?.budgetMaxCents === undefined ? '' : String(request.budgetMaxCents / 100), preferredDate: request?.preferredDate || '', visibility: request?.visibility || (route.params?.shop?.id?'direct':'open'), shopId: request?.shopId || route.params?.shop?.id || '', photoIds: request?.photoIds || []}));
-  const [selected, setSelected] = useState(() => ({vehicle: route.params?.vehicle || null, category: null, shop: route.params?.shop || null}));
+  const [form, setForm] = useState(() => ({vehicleId: request?.vehicleId || (route.params?.vehicle?.archived ? '' : route.params?.vehicleId) || '', title: request?.title || (!editing&&typeof studioDraft?.title==='string'?studioDraft.title.slice(0,100):''), description: request?.description || (!editing&&typeof studioDraft?.description==='string'?studioDraft.description.slice(0,300):''), categoryId: request?.categoryId || '', city: request?.city || '', budgetMin: request?.budgetMinCents === undefined ? '' : String(request.budgetMinCents / 100), budgetMax: request?.budgetMaxCents === undefined ? '' : String(request.budgetMaxCents / 100), preferredDate: request?.preferredDate || '', visibility: request?.visibility || (route.params?.shop?.id?'direct':'open'), shopId: request?.shopId || route.params?.shop?.id || '', photoIds: request?.photoIds || []}));
+  const [selected, setSelected] = useState(() => ({vehicle: request?.vehicle || route.params?.vehicle || null, category: null, shop: route.params?.shop || null}));
   const [mandatoryServicesText, setMandatoryServicesText] = useState((request?.mandatoryServices || []).join('\n'));
   const [serviceLocation, setServiceLocation] = useState(request?.serviceLocation || null), [locating, setLocating] = useState(false);
   const [touched, setTouched] = useState({}), [submitted, setSubmitted] = useState(false);
-  const [uploadingAttachment,setUploadingAttachment]=useState(false);
+  const [uploadingAttachment,setUploadingAttachment]=useState(false),[attachmentDraft,setAttachmentDraft]=useState(false);
   const mutation = useMutation(), errors = requestErrors(form), disabled = mutation.saving || mutation.offline || uploadingAttachment || locating;
+  const initial=useRef(JSON.stringify([form,mandatoryServicesText,serviceLocation])),[savedResult,setSavedResult]=useState(null),[leaveAction,setLeaveAction]=useState(null);
+  const dirty=JSON.stringify([form,mandatoryServicesText,serviceLocation])!==initial.current;
+  const pending=mutation.saving||uploadingAttachment||locating;
+  usePreventRemove(!savedResult&&(dirty||attachmentDraft||pending),({data})=>{if(!pending)setLeaveAction(data.action);});
+  useEffect(()=>{if(savedResult)navigation.replace('OwnerRequest',{id:savedResult.id});},[savedResult,navigation]);
+  const selectedVehicle=vehicleFeed.items.find(item=>item.id===form.vehicleId)||selected.vehicle;
   const mandatoryServices = mandatoryServicesText.split('\n').map(value => value.trim()).filter(Boolean);
   if (mandatoryServices.length > 20 || mandatoryServices.some(value => value.length > 200) || new Set(mandatoryServices.map(value => value.toLowerCase())).size !== mandatoryServices.length) errors.mandatoryServices = 'Use up to 20 unique service requirements, each at most 200 characters.';
   const selectorLayouts=useRef({}),scrollPosition=useRef(0),viewportHeight=useRef(0);
@@ -206,132 +213,128 @@ function RequestDraft({route, navigation}) {
   function edit(key, value) {if (!disabled) {setForm(previous => ({...previous, [key]: value})); setTouched(previous => ({...previous, [key]: true}));}}
   const fieldError = key => (submitted || touched[key]) ? errors[key] : null;
   function showValidation() {setSubmitted(true);setTouched(Object.fromEntries(Object.keys(form).map(key => [key, true])));}
-  function choose(kind, item) {if (disabled) return; edit(`${kind}Id`, item.id); if (kind === 'vehicle') setForm(previous => ({...previous, photoIds: []})); setSelected(previous => ({...previous, [kind]: item}));}
+  function choose(kind, item) {if (disabled || (kind==='vehicle'&&item.archived)) return; edit(`${kind}Id`, item.id); if (kind === 'vehicle') setForm(previous => ({...previous, photoIds: []})); setSelected(previous => ({...previous, [kind]: item}));}
   async function submit() {
     setSubmitted(true);
-    if (disabled || hasErrors(errors)) return;
+    if (disabled || attachmentDraft || hasErrors(errors)) return;
     const {budgetMin, budgetMax, shopId, photoIds, ...input} = form;
     try {
       const result = await mutation.run(editing ? 'requestUpdate' : 'requestCreate', {...input, ...(serviceLocation || request?.serviceLocation ? {serviceLocation} : {}), ...(mandatoryServices.length || request?.mandatoryServices ? {mandatoryServices} : {}), budgetMinCents: parseMoney(budgetMin), budgetMaxCents: parseMoney(budgetMax), ...(form.visibility === 'direct' ? {shopId} : {}), ...(editing ? {photoIds, id: request.id, version: request.version || 1} : (photoIds.length ? {photoIds} : {}))});
-      if (result) navigation.replace('OwnerRequest', {id: result.id});
+      if (result) setSavedResult(result);
     } catch (_) {}
   }
-  return <Page title={editing ? 'Edit service request' : 'Request a service'} subtitle="Tell us what you need" navigation={navigation} onScroll={loadMore} onLayout={layoutPage}>
-    <Text style={styles.formIntro}>Tell us what you have in mind. Shops will use these details to prepare a quote.</Text>
-    <SelectionList title="01  /  YOUR VEHICLE" state={vehicles} feed={vehicleFeed} selected={form.vehicleId} onSelect={item => choose('vehicle', item)} label={vehicleName} disabled={disabled} onLayout={layoutSelector('vehicle')}/>
-    {!!form.vehicleId && <View style={styles.selectedVehicle}><View style={styles.selectedVehicleCopy}>
-      <Text style={styles.selectedVehicleLabel}>SELECTED VEHICLE</Text>
-      <Text style={styles.selectedVehicleName}>{selected.vehicle ? vehicleName(selected.vehicle) : 'Vehicle from your garage'}</Text>
-    </View><Ionicons name="checkmark-circle" size={21} color={theme.accent}/></View>}
+  if(editing&&request.status!=='open')return <RequestPage title="Service request" navigation={navigation} back>
+    <RequestState title="This request can no longer be edited" description="Only open service requests can be changed." action={<RequestAction title="View request" onPress={()=>navigation.navigate('OwnerRequest',{id:request.id})}/>}/>
+  </RequestPage>;
+  return <RequestPage title={editing?'Edit service request':'New service request'} subtitle="Tell workshops what your vehicle needs." navigation={navigation} back form onScroll={loadMore} onLayout={layoutPage}>
+    <RequestText muted>Choose a vehicle and category, then complete the fields labelled Required. Nothing is published until you submit.</RequestText>
+    <SelectionList title="Vehicle" state={vehicles} feed={vehicleFeed} selected={form.vehicleId} onSelect={item=>choose('vehicle',item)} label={vehicleName} disabled={disabled} onLayout={layoutSelector('vehicle')}/>
+    {!!form.vehicleId&&<RequestText accessibilityRole="status">Selected vehicle: {selectedVehicle?vehicleName(selectedVehicle):'Vehicle from your Garage. Choose an active vehicle below if it is no longer available.'}</RequestText>}
     <Notice error={fieldError('vehicleId')}/>
-    {!form.vehicleId && <Button title="Add a vehicle" outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehicleForm');}}/>}
-    {!!form.vehicleId && <Card>
-      <Text weight="semibold">Attach vehicle photos (optional)</Text>
-      <Text>Choose up to five photos. Published requests keep these attachments even if you later change your garage photos.</Text>
-      <Button title="Manage vehicle photos" outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('VehiclePhotos', {id: form.vehicleId});}}/>
-      <PhotoGallery target="vehicle" id={form.vehicleId} selectedIds={form.photoIds} onSelectionChange={ids => edit('photoIds', ids)} disabled={disabled}/>
-      <RequestPhotoUploads key={form.vehicleId} vehicleId={form.vehicleId} selectedIds={form.photoIds} onSelectionChange={ids=>setForm(previous=>({...previous,photoIds:ids}))} disabled={mutation.saving||mutation.offline} onBusyChange={setUploadingAttachment}/>
-      <Text>{form.photoIds.length} photos selected</Text>
-      {!!form.photoIds.length && <Button title="Clear photo selection" outline disabled={disabled} onPress={() => edit('photoIds', [])}/>}
-    </Card>}
-    <SelectionList title="02  /  MODIFICATION TYPE" state={categories} feed={categoryFeed} selected={form.categoryId} onSelect={item => choose('category', item)} label={item => item.name} disabled={disabled} onLayout={layoutSelector('category')}/>
-    {selected.category && <Text style={styles.selectionSummary}>Selected: {selected.category.name}</Text>}
+    {!form.vehicleId&&<RequestAction title="Add a vehicle" icon="add-outline" disabled={disabled} onPress={()=>{if(!disabled)navigation.navigate('VehicleForm');}}/>}
+    <SelectionList title="Service category" state={categories} feed={categoryFeed} selected={form.categoryId} onSelect={item=>choose('category',item)} label={item=>item.name} disabled={disabled} onLayout={layoutSelector('category')}/>
+    {selected.category&&<RequestText muted>Selected: {selected.category.name}</RequestText>}
     <Notice error={fieldError('categoryId')}/>
-    <View style={styles.formSection}>
-      <Text style={styles.sectionEyebrow}>03  /  THE DETAILS</Text>
-      <Field label="Request title" placeholder="e.g. satin black vinyl wrap" value={form.title} onChangeText={value => edit('title', value)} onBlur={() => setTouched(previous => ({...previous, title: true}))} maxLength={100} editable={!disabled} error={fieldError('title')}/>
-      <Field label="Description" placeholder="Tell the shop what you're looking for…" value={form.description} onChangeText={value => edit('description', value)} onBlur={() => setTouched(previous => ({...previous, description: true}))} maxLength={300} multiline editable={!disabled} error={fieldError('description')} helperText={`${form.description.length}/300 characters`}/>
+    <RequestSection title="Request details">
+      <Field label="Request title" accessibilityLabel="Request title" helperText="Required · up to 100 characters" placeholder="e.g. Repair and repaint the front bumper" value={form.title} onChangeText={value=>edit('title',value)} onBlur={()=>setTouched(previous=>({...previous,title:true}))} maxLength={100} editable={!disabled} error={fieldError('title')}/>
+      <Field label="Description" helperText={`Required · ${form.description.length}/300 characters`} placeholder="Describe the work and the finish you want." value={form.description} onChangeText={value=>edit('description',value)} onBlur={()=>setTouched(previous=>({...previous,description:true}))} maxLength={300} multiline editable={!disabled} error={fieldError('description')}/>
       <AIAssistButton kind="request" title={form.title} description={form.description} categoryId={form.categoryId} disabled={disabled} onApply={suggestion=>{
         setForm(previous=>({...previous,title:suggestion.title,description:suggestion.description,...(suggestion.category?{categoryId:suggestion.category.id}:{})}));
         if(suggestion.category)setSelected(previous=>({...previous,category:suggestion.category}));
       }}/>
-      <Field label="City" value={form.city} onChangeText={value => edit('city', value)} onBlur={() => setTouched(previous => ({...previous, city: true}))} maxLength={100} editable={!disabled} error={fieldError('city')}/>
-      <Field label="Mandatory services (optional, one per line)" value={mandatoryServicesText} onChangeText={setMandatoryServicesText} multiline maxLength={4020} editable={!disabled} error={errors.mandatoryServices} helperText="Up to 20 unique requirements, each at most 200 characters. Shops confirm each requirement for recommendations."/>
-      <LocationPicker label="Service location" value={serviceLocation} onChange={setServiceLocation} disabled={mutation.saving || mutation.offline || uploadingAttachment} onBusyChange={setLocating}/>
-      <Text style={styles.budgetLabel}>BUDGET RANGE  ·  ZAR</Text>
-      <View style={styles.budgetRow}>
-        <Field style={styles.budgetField} label="Minimum budget (ZAR)" placeholder="R 0" value={form.budgetMin} onChangeText={value => edit('budgetMin', value)} onBlur={() => setTouched(previous => ({...previous, budgetMin: true}))} keyboardType="decimal-pad" maxLength={12} editable={!disabled} error={fieldError('budgetMin')} inputStyle={styles.budgetInput}/>
-        <Field style={styles.budgetField} label="Maximum budget (ZAR)" placeholder="R 0" value={form.budgetMax} onChangeText={value => edit('budgetMax', value)} onBlur={() => setTouched(previous => ({...previous, budgetMax: true}))} keyboardType="decimal-pad" maxLength={12} editable={!disabled} error={fieldError('budgetMax')} inputStyle={styles.budgetInput}/>
+    </RequestSection>
+    <RequestSection title="Location & requirements">
+      <Field label="City" helperText="Required" placeholder="e.g. Johannesburg" value={form.city} onChangeText={value=>edit('city',value)} onBlur={()=>setTouched(previous=>({...previous,city:true}))} maxLength={100} editable={!disabled} error={fieldError('city')}/>
+      <Field label="Mandatory services (optional, one per line)" value={mandatoryServicesText} onChangeText={value=>{if(!disabled){setMandatoryServicesText(value);setTouched(previous=>({...previous,mandatoryServices:true}));}}} onBlur={()=>setTouched(previous=>({...previous,mandatoryServices:true}))} multiline maxLength={4020} editable={!disabled} error={fieldError('mandatoryServices')} helperText="Up to 20 unique requirements, 200 characters each. Workshops confirm coverage in their quotations."/>
+      <LocationPicker label="Service location" value={serviceLocation} onChange={setServiceLocation} disabled={mutation.saving||mutation.offline||uploadingAttachment} onBusyChange={setLocating}/>
+    </RequestSection>
+    <RequestSection title="Budget & timing">
+      <View style={{flexDirection:'row',flexWrap:'wrap',gap:14}}>
+        <Field style={{flexGrow:1,flexBasis:fontScale>=1.4?'100%':240,minWidth:0}} label="Minimum budget (ZAR)" helperText="Required" placeholder="0.00" value={form.budgetMin} onChangeText={value=>edit('budgetMin',value)} onBlur={()=>setTouched(previous=>({...previous,budgetMin:true}))} keyboardType="decimal-pad" maxLength={12} editable={!disabled} error={fieldError('budgetMin')}/>
+        <Field style={{flexGrow:1,flexBasis:fontScale>=1.4?'100%':240,minWidth:0}} label="Maximum budget (ZAR)" helperText="Required" placeholder="0.00" value={form.budgetMax} onChangeText={value=>edit('budgetMax',value)} onBlur={()=>setTouched(previous=>({...previous,budgetMax:true}))} keyboardType="decimal-pad" maxLength={12} editable={!disabled} error={fieldError('budgetMax')}/>
       </View>
-      <Field label="Preferred date (optional, YYYY-MM-DD)" value={form.preferredDate} onChangeText={value => edit('preferredDate', value)} onBlur={() => setTouched(previous => ({...previous, preferredDate: true}))} autoCapitalize="none" maxLength={10} editable={!disabled} error={fieldError('preferredDate')}/>
+      <Field label="Preferred date (optional, YYYY-MM-DD)" placeholder="YYYY-MM-DD" value={form.preferredDate} onChangeText={value=>edit('preferredDate',value)} onBlur={()=>setTouched(previous=>({...previous,preferredDate:true}))} autoCapitalize="none" maxLength={10} editable={!disabled} error={fieldError('preferredDate')}/>
+    </RequestSection>
+    <RequestSection title="Who can respond?" description="Choose the audience for this request.">
+      <View style={{flexDirection:'row',flexWrap:'wrap',gap:10}}>{[['open','Any approved shop'],['direct','One approved shop']].map(([value,label])=><RequestAudience key={value} title={label} selected={form.visibility===value} disabled={disabled} onPress={()=>edit('visibility',value)}/>)}</View>
+      <RequestText muted>{form.visibility==='direct'?'Only your selected shop can view this request and submit a quotation.':'Approved shops can view this request and submit private quotations.'}</RequestText>
+    </RequestSection>
+    {form.visibility==='direct'&&<><SelectionList title="Approved shops" state={shops} feed={shopFeed} selected={form.shopId} onSelect={item=>choose('shop',item)} label={item=>`${item.shopName} · ${item.city}`} disabled={disabled} onLayout={layoutSelector('shop')}/>
+      {selected.shop&&<RequestText muted>Selected shop: {selected.shop.shopName}</RequestText>}<Notice error={fieldError('shopId')}/></>}
+    {!!form.vehicleId&&<RequestSection title="Photos (optional)" description="Attach up to five private photos. Published requests keep their attached copy when your Garage photos change.">
+      <RequestAction title="Manage vehicle photos" icon="images-outline" disabled={disabled} onPress={()=>{if(!disabled)navigation.navigate('VehiclePhotos',{id:form.vehicleId});}}/>
+      <PhotoGallery target="vehicle" id={form.vehicleId} selectedIds={form.photoIds} onSelectionChange={ids=>edit('photoIds',ids)} disabled={disabled}/>
+      <RequestPhotoUploads key={form.vehicleId} vehicleId={form.vehicleId} selectedIds={form.photoIds} onSelectionChange={ids=>setForm(previous=>({...previous,photoIds:ids}))} disabled={mutation.saving||mutation.offline} onBusyChange={setUploadingAttachment} onDraftChange={setAttachmentDraft}/>
+      <RequestText muted>{form.photoIds.length} {form.photoIds.length===1?'photo':'photos'} selected</RequestText>
+      {!!form.photoIds.length&&<RequestAction title="Clear photo selection" disabled={disabled} onPress={()=>edit('photoIds',[])}/>}
+    </RequestSection>}
+    {attachmentDraft&&<RequestText muted accessibilityRole="status">Upload or cancel your selected photo before submitting.</RequestText>}
+    <Notice busy={mutation.saving} error={mutation.offline?'Connect to save your request.':mutation.error}/>
+    {!!invalidFields.length&&!mutation.saving&&<RequestSection title={submitted?'Complete these fields before submitting:':'Before you submit'}>
+      {submitted&&invalidFields.map(key=><RequestText key={key}>{errors[key]}</RequestText>)}
+      {!submitted&&<RequestText muted>Choose your vehicle and service category, then complete the required details and budget.</RequestText>}
+      <RequestAction title="Show required fields" disabled={mutation.offline} onPress={showValidation}/>
+    </RequestSection>}
+    <View style={{flexDirection:'row',flexWrap:'wrap',gap:12}}>
+      <RequestAction title="Cancel request changes" displayTitle="Cancel" disabled={mutation.saving||uploadingAttachment||locating} style={{flexGrow:1,flexBasis:180}} onPress={()=>{if(!mutation.saving&&!uploadingAttachment&&!locating)navigation.canGoBack?.()===false?navigation.navigate('OwnerRequests'):navigation.goBack();}}/>
+      <RequestAction title={editing?'Save request':'Submit request'} primary loading={mutation.saving} disabled={disabled||attachmentDraft||hasErrors(errors)} style={{flexGrow:1,flexBasis:180}} onPress={submit}/>
     </View>
-    <Card><Text weight="medium" style={styles.sectionEyebrow}>04  /  WHO CAN QUOTE?</Text>
-      <Button title="Any approved shop" outline={form.visibility !== 'open'} disabled={disabled} onPress={() => edit('visibility', 'open')}/>
-      <Button title="One approved shop" outline={form.visibility !== 'direct'} disabled={disabled} onPress={() => edit('visibility', 'direct')}/>
-      <Text>{form.visibility === 'direct' ? 'Only your selected shop can view this request and submit a quotation.' : 'Approved shops can view this request and submit private quotations.'}</Text>
-    </Card>
-    {form.visibility === 'direct' && <><SelectionList title="Approved shops" state={shops} feed={shopFeed} selected={form.shopId} onSelect={item => choose('shop', item)} label={item => `${item.shopName} · ${item.city}`} disabled={disabled} onLayout={layoutSelector('shop')}/>
-      {selected.shop && <Text>Selected shop: {selected.shop.shopName}</Text>}<Notice error={fieldError('shopId')}/></>}
-    <Notice busy={mutation.saving} error={mutation.error}/>
-    {!!invalidFields.length && !mutation.saving && <Card accessibilityRole="alert">
-      <Text weight="semibold">Complete these fields before submitting:</Text>
-      {invalidFields.map(key => <Text key={key}>{errors[key]}</Text>)}
-      <Button title="Show required fields" outline disabled={mutation.offline} onPress={showValidation}/>
-    </Card>}
-    <Button title={editing ? 'Save request' : 'Submit request'} disabled={disabled || hasErrors(errors)} onPress={submit}/>
-  </Page>;
+    <RequestDiscard action={leaveAction} onKeep={()=>setLeaveAction(null)} onDiscard={()=>{const action=leaveAction;setLeaveAction(null);navigation.dispatch(action);}}/>
+  </RequestPage>;
 }
 
-export function OwnerRequestScreen(props) {const {user}=useAuth();return <OwnerRequest key={`${user?.uid}:${props.route.params.id}`} {...props}/>;}
-function OwnerRequest({route, navigation}) {
-  const {theme}=useTheme();
-  const styles=quotationStyles(theme),Button=QuotationAction,Card=QuotationSection;
-  const [quotesCursor,setQuotesCursor]=useState(null),id = route.params.id;
-  const {data, busy, error, refresh} = useMarketData('request', {id, quotesCursor});
+export function OwnerRequestScreen(props){const {user}=useAuth();return <OwnerRequest key={`${user?.uid}:${props.route.params.id}`} {...props}/>;}
+function OwnerRequest({route,navigation}) {
+  const [quotesCursor,setQuotesCursor]=useState(null),[message,setMessage]=useState(''),id=route.params.id;
+  const {data,busy,error,refresh}=useMarketData('request',{id,quotesCursor});
   const quotesFeed=useInfiniteCursor(data,busy,setQuotesCursor,{itemsKey:'quotes',cursorKey:'quotesCursor'});
-  const mutation = useMutation(), request = data?.request, disabled = busy || mutation.saving || mutation.offline;
-  async function close() {
-    const result = await mutation.run('requestClose', {id});
-    if (result) {quotesFeed.reset();setQuotesCursor(null); await refresh().catch(() => {});}
+  const mutation=useMutation(),last=useRef(null),disabled=busy||mutation.saving||mutation.offline;
+  if(data?.request)last.current=data.request;
+  const request=data?.request||((busy||mutation.offline)?last.current:null);
+  async function close(){
+    const result=await mutation.run('requestClose',{id});
+    if(result){setMessage('Request closed. Existing quotations remain available to view.');quotesFeed.reset();setQuotesCursor(null);await refresh().catch(()=>{});}
   }
-  return <QuotationPage title={request?.title || 'Service request'} subtitle="Request details and quotes" navigation={navigation} onScroll={quotesFeed.onScroll} onLayout={quotesFeed.onLayout} onContentSizeChange={quotesFeed.onContentSizeChange}>
-    <Notice busy={busy || mutation.saving} error={mutation.error || error}/>
-    {request && <><Card>
-      <StatusTag>{requestStatus(request.status)}</StatusTag>
-      <Text>{request.categoryName} · {request.city}</Text>
-      {request.vehicle && <Text>{vehicleName(request.vehicle)} · {request.vehicle.colour}</Text>}
-      <Text>{request.description}</Text>
-      <Text>Budget: {formatMoney(request.budgetMinCents)} – {formatMoney(request.budgetMaxCents)}</Text>
-      <Text>Preferred date: {request.preferredDate || 'Flexible'}</Text>
-      <Text>{request.visibility === 'direct' ? 'Direct request to one approved shop' : 'Open request to approved shops'}</Text>
-      <Text>Created: {when(request.createdAt)}</Text>
-      {request.bookingId && <Button title="View booking" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('BookingDetail', {id: request.bookingId});}}/>}
-      {request.status === 'open' && <Button title="Edit request" outline disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('RequestForm', {request});}}/>}
-      {request.status === 'open' && <ConfirmationButton title="Close request" message="Stop new or updated quotations for this request. Existing quotations remain available to view. Closing does not create a booking." disabled={disabled} danger onConfirm={close}/>}
-    </Card>
-      {!!request.photoIds?.length && <PhotoGallery target="request" id={id}/>}
+  return <RequestPage title={request?.title||'Service request'} subtitle="Request details and workshop responses." navigation={navigation} back onScroll={quotesFeed.onScroll} onLayout={quotesFeed.onLayout} onContentSizeChange={quotesFeed.onContentSizeChange}>
+    <Notice busy={busy||mutation.saving} error={mutation.error||error}/>
+    {!!message&&<RequestText accessibilityRole="status">{message}</RequestText>}
+    {request&&<>
+      <RequestSection title="Request information">
+        <RequestStatus status={request.status}/>
+        <RequestText>{[request.categoryName,request.city].filter(Boolean).join(' · ')||'Service details unavailable'}</RequestText>
+        <RequestText muted>{request.visibility==='direct'?'Audience: one selected workshop':request.visibility==='open'?'Audience: approved workshops':'Audience unavailable'}</RequestText>
+        {requestDate(request.createdAt)&&<RequestText muted>Created: {requestDate(request.createdAt)}</RequestText>}
+        {requestDate(request.updatedAt)&&<RequestText muted>Updated: {requestDate(request.updatedAt)}</RequestText>}
+        {requestDate(request.closedAt)&&<RequestText muted>Closed: {requestDate(request.closedAt)}</RequestText>}
+      </RequestSection>
+      <RequestSection title="Vehicle"><RequestText>{requestVehicleLabel(request.vehicle)}</RequestText>{!!request.vehicle?.colour&&<RequestText muted>{request.vehicle.colour}</RequestText>}</RequestSection>
+      <RequestSection title="Requested work">
+        <RequestText>{request.description||'No description supplied.'}</RequestText>
+        {!!request.mandatoryServices?.length&&<><RequestText heading>Service requirements</RequestText>{request.mandatoryServices.map((service,index)=><RequestText key={index}>• {service}</RequestText>)}</>}
+        <RequestText muted>Budget: {formatMoney(request.budgetMinCents)} – {formatMoney(request.budgetMaxCents)}</RequestText>
+        <RequestText muted>Preferred date: {request.preferredDate||'Flexible'}</RequestText>
+        <RequestText muted>{request.serviceLocation?'A service location is supplied for quotation distance estimates.':'No service location supplied.'}</RequestText>
+      </RequestSection>
+      <RequestSection title="Private photos" description="Only authorised participants can access these attachments.">
+        {request.photoIds?.length?<PhotoGallery target="request" id={id}/>:<RequestText muted>No photos attached.</RequestText>}
+      </RequestSection>
+      <RequestSection title="Manage request">
+        {request.status==='open'?<>
+          <RequestAction title="Edit request" icon="create-outline" disabled={disabled} onPress={()=>{if(!disabled)navigation.navigate('RequestForm',{request});}}/>
+          <ConfirmationButton title="Close request" message="Stop new or updated quotations for this request. Existing quotations remain available to view. Closing does not create a booking." disabled={disabled} danger onConfirm={close}/>
+        </>:<RequestText muted>{request.status==='booked'?'A quotation has been accepted. This request can no longer be edited or closed.':request.status==='closed'?'This request is closed. Existing quotations remain available to view.':'Management actions are unavailable for this status.'}</RequestText>}
+        {!!request.bookingId&&<RequestAction title="View booking" icon="calendar-outline" disabled={disabled} onPress={()=>{if(!disabled)navigation.navigate('BookingDetail',{id:request.bookingId});}}/>}
+      </RequestSection>
       <CustomerConversationPicker key={`${id}:${request.termsVersion}`} request={request} navigation={navigation} disabled={disabled}/>
-      <Text weight="semibold" style={styles.heading}>Private quotations</Text>
-      <Text>Compare quoted work, prices and validity. An accepted offer creates a booking awaiting the shop's confirmation.</Text>
-      {request.status === 'open' && <Button title="Compare quotes" disabled={disabled} onPress={() => {if (!disabled) navigation.navigate('QuoteComparison', {id});}}/>}
-      {quotesFeed.items.map(quote => <QuotationCard key={quote.id} quote={quote} request={request} compact/>)}
-      {!busy && !quotesFeed.items.length && <Text style={styles.muted}>No quotations yet.</Text>}
-      {busy && !!quotesFeed.items.length && <Text style={styles.muted}>Loading more quotations...</Text>}
+      <RequestSection title="Workshop responses">
+        {requestResponseLabel(request.quotationCount)&&<RequestText>{requestResponseLabel(request.quotationCount)}</RequestText>}
+        <RequestText muted>Quotations are private. Review their scope and validity before continuing.</RequestText>
+        {request.status==='open'&&<RequestAction title="Compare quotes" icon="reader-outline" disabled={disabled} onPress={()=>{if(!disabled)navigation.navigate('QuoteComparison',{id});}}/>}
+        {!busy&&!error&&!quotesFeed.items.length&&<RequestText muted>{mutation.offline?'Connect to refresh workshop responses.':'No quotations yet.'}</RequestText>}
+      </RequestSection>
+      {quotesFeed.items.map(quote=><QuotationCard key={quote.id} quote={quote} request={request} compact/>)}
+      {busy&&!!quotesFeed.items.length&&<RequestText muted>Loading more quotations...</RequestText>}
     </>}
-    <Button title="Refresh request" outline disabled={disabled} onPress={() => {if (!disabled) void refresh().catch(() => {});}}/>
-  </QuotationPage>;
+    <RequestAction title="Refresh request" icon="refresh-outline" disabled={disabled} onPress={()=>{if(!disabled)void refresh().catch(()=>{});}}/>
+  </RequestPage>;
 }
-
-const makeStyles = (colors) => StyleSheet.create({
-  heading: {fontSize: 18, lineHeight: 26, color: colors.textPrimary, fontWeight: '600'},
-  muted: {color: colors.textSecondary, fontSize: 14},
-  row: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
-  formIntro: {color: colors.textSecondary, lineHeight: 22},
-  sectionEyebrow: {fontSize: 11, lineHeight: 16, letterSpacing: 1.1, color: colors.textMuted, fontWeight: '600'},
-  selectionCard: {padding: 20, gap: 14},
-  selectionChips: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
-  selectionChip: {minHeight: 40, maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8, backgroundColor: colors.surfaceMuted, borderWidth: 1, borderColor:colors.border},
-  selectedChip: {backgroundColor: colors.primary},
-  selectionText: {fontSize: 13, color: colors.textSecondary, fontWeight: '500'},
-  selectedText: {color: colors.primaryText, fontWeight: '700'},
-  selectedVehicle: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderRadius: 16, backgroundColor: colors.surfaceCard, borderWidth: 1, borderColor: colors.border},
-  selectedVehicleCopy: {flex: 1, gap: 4},
-  selectedVehicleLabel: {fontSize: 10, letterSpacing: 1, color: colors.textMuted, fontWeight: '600'},
-  selectedVehicleName: {fontSize: 15, lineHeight: 21, color: colors.textPrimary, fontWeight: '500'},
-  selectionSummary: {fontSize: 13, color: colors.textSecondary},
-  formSection: {padding: 20, borderRadius: 12, backgroundColor: colors.surfaceCard, gap: 12, borderWidth: 1, borderColor: colors.border},
-  budgetLabel: {fontSize: 11, letterSpacing: 1, color: colors.textMuted, fontWeight: '600', paddingTop: 2},
-  budgetRow: {flexDirection: 'row', gap: 12},
-  budgetField: {flex: 1, minWidth: 0},
-  budgetInput: {fontFamily: 'monospace', fontVariant: ['tabular-nums']},
-});

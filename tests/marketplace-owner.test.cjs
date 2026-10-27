@@ -131,7 +131,7 @@ test('request form scrolls vehicle choices independently, validates amounts and 
   let fail=true,release;
   const context=setup({read:(op,input)=>op==='vehicles'?{items:input.cursor?[secondVehicle]:[vehicle],cursor:input.cursor?null:'vehicle-page-two'}:op==='categories'?{items:[category]}:{items:[shop]},api:async()=>{if(fail){await new Promise(resolve=>{release=resolve;});throw Error('Network interrupted. Retry this request.');}return {id:'new-request'};}});
   const tree=await mount(context,'RequestFormScreen');
-  const selector=tree.root.find(node=>node.props.title==='01  /  YOUR VEHICLE'&&typeof node.props.onLayout==='function');
+  const selector=tree.root.find(node=>node.props.title==='Vehicle'&&typeof node.props.onLayout==='function');
   assert.ok(selector);await act(async()=>selector.props.onLayout({nativeEvent:{layout:{y:0,height:180}}}));
   assert.ok(context.reads.some(([op,input])=>op==='vehicles'&&input.cursor==='vehicle-page-two'));
   assert.equal(button(tree,'Next'),undefined);await press(tree,'Ford Fiesta (2020)');await press(tree,'Paint');
@@ -146,17 +146,13 @@ test('request form scrolls vehicle choices independently, validates amounts and 
   fail=false;await press(tree,'Submit request');assert.deepEqual(context.moves,[['replace','OwnerRequest',{id:'new-request'}]]);await unmount(tree);
 });
 
-test('untouched empty request form exposes all validation errors through the summary affordance',async()=>{
+test('untouched request fields stay neutral until the explicit validation affordance',async()=>{
  const context=setup({read:op=>({items:op==='vehicles'?[vehicle]:op==='categories'?[category]:[shop]})});
  const tree=await mount(context,'RequestFormScreen');
  assert.equal(button(tree,'Submit request').props.disabled,true);
- assert.ok(says(tree,'Complete these fields before submitting:'));
- assert.ok(says(tree,'Vehicle is required.'));
- assert.ok(says(tree,'Service category is required.'));
- assert.ok(says(tree,'Title is required.'));
- assert.ok(says(tree,'Description is required.'));
- assert.ok(says(tree,'City is required.'));
- assert.ok(says(tree,'Enter an amount up to R1,000,000 with at most two decimal places.'));
+ assert.ok(says(tree,'Before you submit'));
+ assert.equal(says(tree,'Vehicle is required.'),false);
+ assert.equal(says(tree,'Title is required.'),false);
  await press(tree,'Show required fields');
  assert.ok(says(tree,'Vehicle is required.'));
  assert.ok(says(tree,'Title is required.'));
@@ -192,7 +188,7 @@ test('owner requests scroll through the mine feed and disable opening or creatin
 
 test('garage opens the correct vehicle photo library and blocks navigation offline',async()=>{
  const context=setup({read:()=>({items:[vehicle,secondVehicle],cursor:null})}),tree=await mount(context,'GarageScreen');
- await press(tree,'Photos for Ford Fiesta');assert.deepEqual(context.moves,[['navigate','VehiclePhotos',{id:secondVehicle.id}]]);
+ await press(tree,'Photos for Ford Fiesta');assert.deepEqual(context.moves,[['navigate','VehiclePhotos',{id:secondVehicle.id,vehicle:secondVehicle}]]);
  context.auth.offline=true;await act(async()=>tree.update(React.createElement(context.screens.GarageScreen,{navigation:context.navigation})));
  assert.equal(button(tree,'Photos for Toyota Corolla').props.disabled,true);await press(tree,'Photos for Toyota Corolla');assert.equal(context.moves.length,1);await unmount(tree);
 });

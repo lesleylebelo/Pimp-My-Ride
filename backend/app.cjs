@@ -33,7 +33,8 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
  const perUser=rateLimit({windowMs:60000,limit:60,keyGenerator:req=>req.identity.uid,standardHeaders:'draft-8',legacyHeaders:false,message:limitMessage,handler:rateResponse});
  const heartbeats=rateLimit({windowMs:60000,limit:12,keyGenerator:req=>req.identity.uid,standardHeaders:'draft-8',legacyHeaders:false,message:limitMessage});
  app.use('/api',(req,res,next)=>req.path==='/session'?heartbeats(req,res,next):perUser(req,res,next));
- app.use('/api',express.json({limit:'32kb'}));
+ const studioJson=express.json({limit:'1600kb'}),ordinaryJson=express.json({limit:'32kb'});
+ app.use('/api',(req,res,next)=>(req.path==='/ai/studio'?studioJson:ordinaryJson)(req,res,next));
  const action=(fn)=>async(req,res,next)=>{try{if(!req.body||Array.isArray(req.body)||typeof req.body!=='object')throw new ApiError('invalid-argument','Expected a JSON object.');res.json({data:await fn({auth:req.identity,data:req.body})});}catch(e){next(e);}};
  const postAction=(fn,status=200)=>async(req,res,next)=>{try{if(['POST','PATCH'].includes(req.method)&&(!req.body||Array.isArray(req.body)||typeof req.body!=='object'))throw new ApiError('validation_error','Expected a JSON object.');res.status(status).json({data:await fn({auth:req.identity,data:req.body||{},query:req.query,id:req.params.id})});}catch(e){next(e);}};
  app.get('/api/posts',postAction(services.postsList));
@@ -45,6 +46,7 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
  app.post('/api/marketplace',action(services.marketplace));
  app.post('/api/messaging',action(services.messaging));
  app.post('/api/ai/assist',action(services.aiAssist));
+ app.post('/api/ai/studio',action(services.aiStudio));
  app.post('/api/posts',(req,res,next)=>req.body?.op?action(services.postsApi)(req,res,next):postAction(services.createShowcase,201)(req,res,next));
  app.post('/api/photos',action(services.photosApi));
  app.post('/api/profile/photos',action(services.profilePhotos));

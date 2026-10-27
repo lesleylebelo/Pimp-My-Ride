@@ -9,6 +9,7 @@ import {BookingsScreen,BookingDetailScreen} from './screens/BookingScreens';
 import {QuoteComparisonScreen} from './screens/QuoteComparisonScreen';
 import PaymentChoiceScreen from './screens/PaymentChoiceScreen';
 import VehiclePhotosScreen from './screens/VehiclePhotosScreen';
+import PimpPilotStudioScreen from './screens/PimpPilotStudioScreen';
 import {GarageScreen,VehicleFormScreen,OwnerRequestsScreen,RequestFormScreen,OwnerRequestScreen} from './screens/OwnerMarketplaceScreens';
 import {useTheme} from '../../shared/theme/ThemeContext';
 import {PostDetailScreen,ShopProfileScreen} from './screens/PostScreens';
@@ -35,6 +36,7 @@ export default function OwnerNavigator(){
       <Stack.Screen name="VehicleForm" component={VehicleFormScreen} options={{presentation:'modal'}}/>
       <Stack.Screen name="OwnerRequests" component={OwnerRequestsScreen}/>
       <Stack.Screen name="VehiclePhotos" component={VehiclePhotosScreen}/>
+      <Stack.Screen name="PimpPilotStudio" component={PimpPilotStudioScreen}/>
       <Stack.Screen name="RequestForm" component={RequestFormScreen}/>
       <Stack.Screen name="OwnerRequest" component={OwnerRequestScreen}/>
       <Stack.Screen name="QuoteComparison" component={QuoteComparisonScreen}/>

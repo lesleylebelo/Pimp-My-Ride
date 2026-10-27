@@ -1,5 +1,5 @@
 const D=require('./domain.cjs'),M=require('./marketplace-domain.cjs');
-const {createAIProvider,unavailable}=require('./ai-provider.cjs');
+const {createAIProvider,unavailable}=require('./ai-provider-selection.cjs');
 const {ApiError}=require('./errors.cjs');
 const {AIFailure,failure,rejection}=require('./ai-errors.cjs');
 const {randomUUID,createHash}=require('node:crypto');

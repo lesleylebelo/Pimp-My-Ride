@@ -40,17 +40,19 @@ test('failed or expired showcase access stays unavailable and offers an explicit
  }finally{if(tree)await act(async()=>tree.unmount());}
 });
 
-function requestFixture(){
- const state={uid:'owner',offline:false,focused:true,selected:[],picks:0,uploads:0,busy:[],uncertain:true};
+function requestFixture({mode='dark'}={}){
+ const {palettes}=loadUI('src/shared/theme/colors.js');
+ const state={uid:'owner',offline:false,focused:true,selected:[],picks:0,uploads:0,busy:[],drafts:[],uncertain:true};
  const file={uri:'file:///synthetic.png',name:'synthetic.png',mimeType:'image/png',size:92};
  const Component=loadUI('src/features/marketplace/components/RequestPhotoUploads.js',{
+  '../../../shared/theme/ThemeContext':{useTheme:()=>({theme:palettes[mode]})},
   '../../auth/context/AuthContext':{useAuth:()=>({user:{uid:state.uid},offline:state.offline})},
   '@react-navigation/native':{useIsFocused:()=>state.focused},'./MarketplaceUI':{Button:'Button'},'./PrivatePhoto':()=>null,
   '../services/postsApi':{pickPostPhotos:async maximum=>{assert.equal(maximum,1);state.picks++;return [file];}},
   '../services/photoApi':{listPhotos:async()=>({version:3,items:[]}),uploadRequestPhoto:async(vehicle,version,photo,uid)=>{state.uploads++;assert.equal(vehicle,'car');assert.equal(version,3);assert.equal(photo,file);assert.equal(uid,'owner');if(state.late)return new Promise(resolve=>{state.resolve=resolve;});if(state.uncertain)throw Error('Unknown upload outcome');return {id:'request-photo'};}},
  }).default;
- const props=()=>({vehicleId:'car',selectedIds:state.selected,onSelectionChange:ids=>{state.selected=ids;},onBusyChange:value=>state.busy.push(value)});
- return {state,Component,props};
+ const props=()=>({vehicleId:'car',selectedIds:state.selected,onSelectionChange:ids=>{state.selected=ids;},onBusyChange:value=>state.busy.push(value),onDraftChange:value=>state.drafts.push(value)});
+ return {state,Component,props,palette:palettes[mode]};
 }
 
 test('direct attachment retries keep the chosen file, attach only a confirmed ID, and never publish a false success',async()=>{
@@ -86,4 +88,27 @@ test('request attachment preparation is cancellable and preserves the five-photo
   await act(async()=>tree.root.findAllByType('Button').find(n=>n.props.title==='Cancel attachment').props.onPress());assert.equal(tree.root.findAllByType('Image').length,0);assert.deepEqual(state.selected,[]);
   state.selected=['1','2','3','4','5'];await act(async()=>tree.update(React.createElement(Component,props())));assert.equal(tree.root.findByType('Button').props.disabled,true);await act(async()=>tree.root.findByType('Button').props.onPress());assert.equal(state.picks,1);assert.equal(state.uploads,0);
  }finally{if(tree)await act(async()=>tree.unmount());}
+});
+
+test('an unuploaded attachment reports an unsaved draft until explicit cancellation or disposal',async()=>{
+ const {state,Component,props}=requestFixture();let tree;
+ try{
+  await act(async()=>{tree=create(React.createElement(Component,props()));});assert.equal(state.drafts.at(-1),false);
+  await act(async()=>tree.root.findByType('Button').props.onPress());assert.equal(state.drafts.at(-1),true);assert.equal(state.uploads,0);
+  await act(async()=>tree.root.findAllByType('Button').find(n=>n.props.title==='Upload attachment').props.onPress());assert.equal(state.drafts.at(-1),true,'Failed upload retains its local draft');
+  await act(async()=>tree.root.findAllByType('Button').find(n=>n.props.title==='Cancel attachment').props.onPress());assert.equal(state.drafts.at(-1),false);
+ }finally{if(tree)await act(async()=>tree.unmount());assert.equal(state.drafts.at(-1),false);}
+});
+
+test('selected and uploaded attachment captions remain readable in both themes',async()=>{
+ const luminance=hex=>{const c=hex.slice(1).match(/../g).map(v=>parseInt(v,16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);return c[0]*.2126+c[1]*.7152+c[2]*.0722;};
+ const contrast=(a,b)=>(Math.max(luminance(a),luminance(b))+.05)/(Math.min(luminance(a),luminance(b))+.05);
+ for(const mode of ['light','dark']){
+  const {state,Component,props,palette}=requestFixture({mode});let tree;
+  try{
+   await act(async()=>{tree=create(React.createElement(Component,props()));});await act(async()=>tree.root.findByType('Button').props.onPress());
+   const caption=()=>tree.root.findAllByType('Text').find(n=>n.props.children==='synthetic.png');assert.ok(contrast(caption().props.style.color,palette.surfaceCard)>=4.5);
+   state.uncertain=false;await act(async()=>tree.root.findAllByType('Button').find(n=>n.props.title==='Upload attachment').props.onPress());await act(async()=>tree.update(React.createElement(Component,props())));assert.ok(contrast(caption().props.style.color,palette.surfaceCard)>=4.5);
+  }finally{if(tree)await act(async()=>tree.unmount());}
+ }
 });

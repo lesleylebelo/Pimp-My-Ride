@@ -8,15 +8,16 @@ const field=(tree,label)=>tree.root.findAllByType('TextInput').find(n=>n.props.a
 const press=(tree,label)=>act(async()=>button(tree,label).props.onPress());
 const text=tree=>tree.root.findAllByType('Text').map(n=>[n.props.children].flat().join('')).join('\n');
 const flat=value=>Object.assign({},...[value].flat(Infinity).filter(Boolean));
-function setup({mode='dark',width=390,platform='ios'}={}){
+function setup({mode='dark',width=390,platform='ios',fontScale=1}={}){
  const {palettes}=loadUI('src/shared/theme/colors.js');
  const state={auth:{user:{uid:'owner'},profile:{role:'owner'},offline:false},data:{items:[car,other],cursor:null},busy:false,error:'',calls:[],moves:[],refreshes:0};
  const Primary=loadUI('src/shared/components/PrimaryButton.js').default;
  const mocks={
-  'react-native':{Platform:{OS:platform},useWindowDimensions:()=>({width,height:844,fontScale:1,scale:1})},
+  'react-native':{Platform:{OS:platform},useWindowDimensions:()=>({width,height:844,fontScale,scale:1})},
   '../../../shared/components/landing/LandingUI':{LandingText:'Text',LandingButton:Primary,LandingShell:({children})=>React.createElement('View',null,children),ownerTabs:['Discover','Garage','My Requests','Bookings','Profile'].map(label=>({label})),shopTabs:[],useLandingFeedback:()=>({})},
   '../../../shared/theme/ThemeContext':{useTheme:()=>({theme:palettes[mode],isDark:mode==='dark'})},
   '../../auth/context/AuthContext':{useAuth:()=>state.auth},
+  '@react-navigation/native':{useIsFocused:()=>true,usePreventRemove:(enabled,callback)=>{state.preventRemove=enabled;state.beforeRemove=callback;}},
   '../hooks/useMarketData':{useMarketData:()=>({data:state.data,busy:state.busy,error:state.error,refresh:async()=>{state.refreshes++;}})},
   '../services/marketApi':{marketApi:async(op,input)=>{state.calls.push({op,input});return state.reply?state.reply(op,input):{id:'saved'};}},
   '../components/PhotoGallery':props=>React.createElement('PhotoGallery',props),
@@ -24,7 +25,7 @@ function setup({mode='dark',width=390,platform='ios'}={}){
  };
  const screens=loadUI('src/features/marketplace/screens/OwnerMarketplaceScreens.js',mocks);
  const Photos=loadUI('src/features/marketplace/screens/VehiclePhotosScreen.js',mocks).default;
- const navigation={navigate:(...args)=>state.moves.push(args),goBack:()=>state.moves.push(['back']),canGoBack:()=>true};
+ const navigation={navigate:(...args)=>state.moves.push(args),dispatch:action=>state.moves.push(['dispatch',action]),goBack:()=>{if(state.preventRemove)state.beforeRemove({data:{action:{type:'GO_BACK'}}});else state.moves.push(['back']);},canGoBack:()=>true};
  return {state,screens,Photos,navigation,palettes};
 }
 async function mounted(s,name,params,run){
@@ -36,16 +37,16 @@ async function mounted(s,name,params,run){
 }
 
 test('garage renders multiple vehicles, private covers, honest placeholders and responsive cards',async()=>{
- for(const width of [390,1200]){
+ for(const width of [390,768,1440]){
   const s=setup({width});await mounted(s,'GarageScreen',{},async tree=>{
    assert.match(text(tree),/Toyota Corolla/);assert.match(text(tree),/Ford Fiesta/);
    const cards=tree.root.findAllByType('View').filter(n=>n.props.testID?.startsWith('garage-vehicle-'));assert.equal(cards.length,2);
-   assert.equal(flat(cards[0].props.style).width,'100%');assert.equal(flat(cards[0].parent.props.style).width==='100%',width<768);
-   const cover=tree.root.findByType('PrivatePhoto');assert.equal(cover.props.target,'vehicle');assert.equal(cover.props.id,'car-1');assert.equal(cover.props.imageStyle.height,250);
-   assert.match(text(tree),/Add photos to make it yours/);assert.equal(tree.root.findAllByType('Image').length,1,'Only the existing brand logo is rendered; vehicle imagery stays private.');
+   assert.equal(flat(cards[0].props.style).width,'100%');assert.equal(flat(cards[0].parent.props.style).width==='100%',width<748);
+   const cover=tree.root.findByType('PrivatePhoto');assert.equal(cover.props.target,'vehicle');assert.equal(cover.props.id,'car-1');assert.equal(cover.props.imageStyle.height,'100%');
+   assert.match(text(tree),/No vehicle photo yet/);assert.equal(tree.root.findAllByType('Image').length,1,'Only the existing brand logo is rendered; vehicle imagery stays private.');
    assert.deepEqual(tree.root.findByType('SafeAreaView').props.edges,['top','bottom','left','right']);
    await press(tree,'Add vehicle');assert.deepEqual(s.state.moves,[['VehicleForm']]);
-   await press(tree,'Photos for Toyota Corolla');assert.deepEqual(s.state.moves.at(-1),['VehiclePhotos',{id:'car-1'}]);
+   await press(tree,'Photos for Toyota Corolla');assert.deepEqual(s.state.moves.at(-1),['VehiclePhotos',{id:'car-1',vehicle:car}]);
    await press(tree,'Edit Ford Fiesta');assert.deepEqual(s.state.moves.at(-1),['VehicleForm',{vehicle:other}]);
    await press(tree,'Request service for Ford Fiesta');assert.deepEqual(s.state.moves.at(-1),['RequestForm',{vehicleId:other.id,vehicle:other}]);
   });
@@ -56,7 +57,7 @@ test('details group supplied specifications and preserve edit, photos, request a
   await press(tree,'View Toyota Corolla');assert.match(text(tree),/Vehicle specifications/);assert.match(text(tree),/TEST001GP/);
   const modal=tree.root.findByType('Modal');assert.equal(modal.findAllByType('PrivatePhoto')[0].props.id,'car-1');
   await press(tree,'Back to Garage');assert.equal(tree.root.findAllByType('Modal').length,0);
-  for(const [action,destination,params] of [['Manage photos','VehiclePhotos',{id:car.id}],['Edit vehicle','VehicleForm',{vehicle:car}],['Create service request','RequestForm',{vehicleId:car.id,vehicle:car}]]){
+  for(const [action,destination,params] of [['Manage photos','VehiclePhotos',{id:car.id,vehicle:car}],['Edit vehicle','VehicleForm',{vehicle:car}],['Create service request','RequestForm',{vehicleId:car.id,vehicle:car}]]){
    await press(tree,'View Toyota Corolla');await press(tree,action);assert.equal(tree.root.findAllByType('Modal').length,0);assert.deepEqual(s.state.moves.at(-1),[destination,params]);
   }
  });
@@ -95,12 +96,12 @@ test('add form shows grouped required fields, live validation, keyboard layout a
  for(const platform of ['ios','android','web']){
   const s=setup({platform,width:1200});await mounted(s,'VehicleFormScreen',{},async tree=>{
    assert.match(text(tree),/Vehicle identity/);assert.match(text(tree),/Appearance & registration/);assert.match(text(tree),/All fields marked/);
-   assert.equal(tree.root.findAllByType('TextInput').length,5);assert.equal(button(tree,'Save vehicle').props.disabled,true);assert.match(text(tree),/Make is required/);
+   assert.equal(tree.root.findAllByType('TextInput').length,5);assert.equal(button(tree,'Save vehicle').props.disabled,true);assert.doesNotMatch(text(tree),/Make is required/);
    assert.equal(tree.root.findByType('KeyboardAvoidingView').props.behavior,platform==='ios'?'padding':platform==='android'?'height':undefined);
    assert.equal(tree.root.findByType('ScrollView').props.keyboardShouldPersistTaps,'handled');
    for(const [label,value] of [['Make','Toyota'],['Model','Corolla'],['Year','2024'],['Colour','White'],['Registration number','TEST001GP']])await act(async()=>field(tree,label).props.onChangeText(value));
    assert.equal(button(tree,'Save vehicle').props.disabled,false);assert.equal(field(tree,'Registration number').props.autoCapitalize,'characters');
-   await press(tree,'Cancel');assert.deepEqual(s.state.moves,[['back']]);assert.equal(s.state.calls.length,0);
+   await press(tree,'Cancel');assert.match(text(tree),/Discard vehicle changes/);await press(tree,'Keep editing');assert.equal(field(tree,'Make').props.value,'Toyota');await press(tree,'Cancel');await press(tree,'Discard changes');assert.deepEqual(s.state.moves,[['dispatch',{type:'GO_BACK'}]]);assert.equal(s.state.calls.length,0);
   });
  }
 });
@@ -131,4 +132,66 @@ test('both themes retain readable text and accessible action sizes',async()=>{
    assert.ok(tree.root.findAllByType('Pressable').filter(n=>n.props.accessibilityRole==='tab').every(n=>flat(n.props.style({pressed:false})).minHeight>=44));
   });
  }
+});
+
+test('cards keep identity, public details and service action before secondary actions; private registration stays in details',async()=>{
+ const s=setup();await mounted(s,'GarageScreen',{},async tree=>{
+  assert.doesNotMatch(text(tree),/TEST001GP/);
+  const card=tree.root.findByProps({testID:'garage-vehicle-car-1'});
+  assert.deepEqual(card.findAllByType('Pressable').map(n=>n.props.accessibilityLabel),['View Toyota Corolla','Request service for Toyota Corolla','Explore Toyota Corolla in PimpPilot Studio','Edit Toyota Corolla','Photos for Toyota Corolla','Remove Toyota Corolla']);
+  assert.match(text(tree),/2024 · White/);
+  for(const control of card.findAllByType('Pressable')){let parent=control.parent;while(parent&&parent!==card){assert.notEqual(parent.type,'Pressable','No nested interactive targets');parent=parent.parent;}}
+  assert.ok(card.findByType('PrivatePhoto'));await press(tree,'View Toyota Corolla');assert.match(text(tree),/TEST001GP/);
+ });
+});
+
+test('measured Garage grid keeps at most two columns and one column for enlarged text',async()=>{
+ for(const fontScale of [1,1.6]){
+  const s=setup({width:1440,fontScale});await mounted(s,'GarageScreen',{},async tree=>{
+   const grid=tree.root.findByProps({testID:'garage-grid'});
+   await act(async()=>grid.props.onLayout({nativeEvent:{layout:{width:720}}}));
+   const wrapper=tree.root.findByProps({testID:'garage-vehicle-car-1'}).parent;
+   assert.equal(flat(wrapper.props.style).width,fontScale>=1.4?'100%':351);
+   await act(async()=>grid.props.onLayout({nativeEvent:{layout:{width:358}}}));assert.equal(flat(wrapper.props.style).width,'100%');
+  });
+ }
+});
+
+test('Garage actions expose hover, focus, pressed and disabled feedback without movement',async()=>{
+ const s=setup({platform:'web'});await mounted(s,'GarageScreen',{},async(tree,update)=>{
+  const label='Request service for Toyota Corolla',control=()=>button(tree,label),style=()=>flat(control().props.style({pressed:false}));
+  await act(async()=>control().props.onHoverIn({}));assert.ok(style().opacity<1);
+  await act(async()=>control().props.onFocus({}));assert.equal(style().outlineWidth,2);assert.equal(style().outlineColor,s.palettes.dark.accent);
+  assert.equal(flat(control().props.style({pressed:true})).opacity,.72);assert.equal(style().transform,undefined);
+  s.state.auth.offline=true;await update();assert.equal(control().props.disabled,true);assert.equal(style().opacity,.48);
+ });
+});
+
+test('save admits only one pending mutation and exits only after acknowledged persistence',async()=>{
+ const s=setup();let resolve;s.state.reply=()=>new Promise(r=>{resolve=r;});
+ await mounted(s,'VehicleFormScreen',{vehicle:car},async tree=>{
+  await act(async()=>field(tree,'Colour').props.onChangeText('Blue'));
+  const save=button(tree,'Save vehicle').props.onPress;let first,second;
+  await act(async()=>{first=save();second=save();});assert.equal(s.state.calls.length,1);assert.equal(button(tree,'Save vehicle').props.disabled,true);
+  assert.equal(s.state.preventRemove,true);s.state.beforeRemove({data:{action:{type:'GO_BACK'}}});assert.equal(tree.root.findAllByType('Modal').length,0,'Pending save cannot be discarded');
+  await act(async()=>{resolve({id:car.id});await Promise.all([first,second]);});assert.deepEqual(s.state.moves,[['back']]);assert.equal(s.state.preventRemove,false);
+ });
+});
+
+test('late saves cannot navigate a switched account and untouched fields validate only after interaction',async()=>{
+ const s=setup();let resolve;s.state.reply=()=>new Promise(r=>{resolve=r;});
+ await mounted(s,'VehicleFormScreen',{vehicle:car},async(tree,update)=>{
+  await act(async()=>field(tree,'Colour').props.onChangeText('Blue'));let pending;await act(async()=>{pending=button(tree,'Save vehicle').props.onPress();});
+  s.state.auth.user={uid:'new-owner'};await update();assert.equal(field(tree,'Colour').props.value,'White');
+  await act(async()=>{resolve({id:car.id});await pending;});assert.equal(s.state.moves.length,0);
+ });
+ await mounted(s,'VehicleFormScreen',{},async tree=>{
+  assert.doesNotMatch(text(tree),/Make is required/);await act(async()=>field(tree,'Make').props.onBlur());assert.match(text(tree),/Make is required/);
+ });
+});
+
+test('empty Garage offers Add and photo management shows only the matching vehicle identity',async()=>{
+ const s=setup();s.state.data={items:[],cursor:null};await mounted(s,'GarageScreen',{},async tree=>{await press(tree,'Add your first vehicle');assert.deepEqual(s.state.moves,[['VehicleForm']]);});
+ await mounted(s,'Photos',{id:car.id,vehicle:car},async tree=>{assert.match(text(tree),/Toyota Corolla/);assert.doesNotMatch(text(tree),/TEST001GP/);assert.equal(tree.root.findByType('PhotoGallery').props.id,car.id);});
+ await mounted(s,'Photos',{id:other.id,vehicle:car},async tree=>{assert.doesNotMatch(text(tree),/Toyota Corolla/);});
 });
