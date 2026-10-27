@@ -33,6 +33,16 @@ async function setup({role='owner',verified=true,admin=false,cached=null,initial
  notify:()=>profileListener({metadata:{fromCache:false,hasPendingWrites:false}}),
  close:()=>act(()=>renderer.unmount()),get stopped(){return stopped;}};
 }
+test('Google-backed Firebase session restores through the same observer and clears its session/cache on logout',async()=>{
+ const s=await setup({signedOut:true});
+ s.user.providerData=[{providerId:'google.com',uid:'google-subject'}];
+ await s.act(()=>s.restore(s.user));
+ assert.equal(s.state.user.uid,'u1');assert.equal(s.state.profile.role,'owner');
+ assert.ok(s.calls.reload>0&&s.calls.tokens>0&&s.calls.profile>0);
+ await s.act(()=>s.state.logout());
+ assert.equal(s.auth.currentUser,null);assert.equal(s.state.user,null);assert.ok(s.cleared.includes('u1'));await s.close();
+});
+
 test('restored unverified sessions are signed out before any reload, token or profile read',async()=>{
  for(const role of ['owner','shop','admin']){
   const s=await setup({role,verified:false,cached:{profile:{role},savedAt:Date.now()}});

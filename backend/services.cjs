@@ -156,6 +156,13 @@ async function adminApi(request){
  D.fail('Unknown operation.');
 }
 const sessionEvent=createPresence({db,actor});
+async function authorizeGoogleSession(request){
+ const a=await actor(request),user=await auth.getUser(a.uid);
+ if(!user.providerData.some(p=>p.providerId==='google.com')||a.profile.role==='admin'||user.customClaims?.admin===true)D.fail('Google access is unavailable for this account. Use email/password.','permission-denied');
+ D.editable(a.profile);
+ if(a.profile.statusOperation||a.profile.provisioningOperation)D.fail('Account access is restricted.','permission-denied');
+ return {uid:a.uid};
+}
 async function completeProfile(request){
  if(request.data?.op==='shopLocationSave')return saveShopLocation({db,actor,request});
  if(!request.auth)D.fail('Sign in to continue.','unauthenticated');
@@ -180,6 +187,6 @@ const aiAssist=createAIAssist({db,actor,provider:aiProvider,onDiagnostic:aiDiagn
 const aiStudio=createAIStudio({db,actor,provider:aiStudioProvider});
 const {photosApi,checkPhotoUpload,uploadPhoto}=createPhotos({db,auth,storage:photoStorage,requestStorage,actor});
 const {postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage}=createPosts({db,auth,actor,storage:postStorage});
-return {...profilePhotos,adminApi,sessionEvent,completeProfile,listDocuments,checkUpload,uploadDocument,marketplace,messaging,aiAssist,aiStudio,photosApi,checkPhotoUpload,uploadPhoto,postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage};
+return {...profilePhotos,adminApi,sessionEvent,completeProfile,authorizeGoogleSession,listDocuments,checkUpload,uploadDocument,marketplace,messaging,aiAssist,aiStudio,photosApi,checkPhotoUpload,uploadPhoto,postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage};
 }
 module.exports={createServices};

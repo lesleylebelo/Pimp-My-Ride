@@ -6,7 +6,7 @@ const {ApiError}=require('./errors.cjs');
 const cors = require('cors');
 const {corsOrigins}=require('./config.cjs');
 const STATUS={'invalid-argument':400,validation_error:400,unauthenticated:401,unauthorized:401,'permission-denied':403,forbidden:403,'not-found':404,not_found:404,'already-exists':409,'failed-precondition':409,'resource-exhausted':429,'unavailable':503,'internal':500};
-function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}){
+function createApp({services,auth,googleExchange,trustProxy=false,allowedOrigins=corsOrigins()}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',trustProxy);app.use(helmet());
  app.use(cors({
   origin: allowedOrigins,
@@ -15,6 +15,14 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
 }));
  app.use((req,res,next)=>{res.set('Cache-Control','no-store');next();});
  app.get('/health',(_,res)=>res.json({ok:true}));
+ // Pre-session exchange; existing /api Firebase token middleware stays intact.
+ app.post('/auth/google',rateLimit({windowMs:60000,limit:12,standardHeaders:'draft-8',legacyHeaders:false}),express.json({limit:'32kb'}),async(req,res,next)=>{
+  try{
+   if(!allowedOrigins.includes(req.headers.origin))throw new ApiError('permission-denied','This sign-in origin is not allowed.');
+   if(!googleExchange)throw new ApiError('unavailable','Google sign-in is not configured. Use email/password.');
+   res.json({data:await googleExchange(req.body)});
+  }catch(e){next(e instanceof ApiError?e:new ApiError('unavailable','Google sign-in could not complete. Try again or use email/password.'));}
+ });
  const rateResponse=(req,res,next,options)=>res.status(options.statusCode).json(
   req.path==='/ai/assist'?{error:{...options.message.error,fields:{aiReason:'rate_limit'}}}:options.message);
  const limits=rateLimit({windowMs:60000,limit:90,standardHeaders:'draft-8',legacyHeaders:false,message:{error:{code:'resource-exhausted',message:'Too many requests. Wait a minute.'}},handler:rateResponse});
@@ -52,6 +60,7 @@ function createApp({services,auth,trustProxy=false,allowedOrigins=corsOrigins()}
  app.post('/api/profile/photos',action(services.profilePhotos));
  app.post('/api/session',action(services.sessionEvent));
  app.post('/api/profile',action(services.completeProfile));
+ app.post('/api/auth/google/authorize',action(services.authorizeGoogleSession));
  app.post('/api/documents/list',action(services.listDocuments));
  let uploading=0;
  const disconnected=(req,res)=>req.aborted||res.destroyed;

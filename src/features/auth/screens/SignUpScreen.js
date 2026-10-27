@@ -1,4 +1,5 @@
 import { useFocusEffect } from '@react-navigation/native';
+import GoogleSignIn from '../components/GoogleSignIn';
 import { Alert } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { register } from '../services/accounts';
@@ -128,6 +129,7 @@ export default function SignUpScreen({ navigation, route }) {
           keyboardShouldPersistTaps="handled"
         >
           <AuthHeader title={headerTitle} subtitle={headerSubtitle} />
+          <GoogleSignIn disabled={loading} initialRole={role}/>
 
           <View style={styles.body} pointerEvents={loading ? "none" : "auto"}>
             {step > 1 && <Pressable onPress={goBack}><Text style={styles.termsLink}>Back</Text></Pressable>}
