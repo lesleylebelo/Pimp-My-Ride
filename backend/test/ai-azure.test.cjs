@@ -102,8 +102,9 @@ function servicesFixture(reply){
  const db={doc:path=>({get:async()=>({exists:!!rows[path],data:()=>rows[path]})}),collection:path=>{assert.equal(path,'serviceCategories');return {where:()=>({limit:()=>({get:async()=>({docs:[{id:'paint',data:()=>rows['serviceCategories/paint']}]})})})};},runTransaction:()=>assert.fail('No marketplace or generation accounting writes')};
  const auth={getUser:async()=>({emailVerified:true,metadata:{creationTime:'2020-01-01'}}),verifyIdToken:async uid=>({uid,email_verified:true,auth_time:Date.now()/1000})};
  const f=fakeSDK(reply||(async(body)=>envelope(body.text.format.name==='pimppilot_studio'?plan:{...suggestion,categoryId:JSON.parse(body.input[0].content[0].text).kind==='showcase'?'Wrap & Paint':'paint'})));
- const services=createServices({db,auth,storage:{},aiProvider:createAIProvider({env,loadSDK:f.loadSDK}),aiStudioProvider:createAIStudioProvider({env,loadSDK:f.loadSDK}),aiDiagnostic:()=>{}});
- return {rows,calls:f.calls,app:createApp({services,auth})};
+ const diagnostics=[];
+ const services=createServices({db,auth,storage:{},aiProvider:createAIProvider({env,loadSDK:f.loadSDK}),aiStudioProvider:createAIStudioProvider({env,loadSDK:f.loadSDK}),aiDiagnostic:value=>diagnostics.push(value)});
+ return {rows,calls:f.calls,diagnostics,app:createApp({services,auth})};
 }
 test('actual authenticated Express routes serve customer and workshop drafting repeatedly through Azure and keep existing validation and no-write contracts',async()=>{
  const f=servicesFixture(),before=JSON.stringify(f.rows);
@@ -130,4 +131,76 @@ test('Azure Studio has independent instructions, schema and bounded user context
  assert.deepEqual(body.input[0].content[1],{type:'input_image',image_url:'data:image/jpeg;base64,'+image.data,detail:'auto'});
  await http(f.app).post('/api/ai/assist').set('Authorization','Bearer owner').send({kind:'request',title:draft.title,description:draft.description}).expect(200);
  const next=f.calls.responses[1][0];assert.equal(next.text.format.name,'pimppilot_draft');assert.doesNotMatch(next.instructions,/Studio mode only/);assert.equal(next.input[0].content.length,1);assert.equal(next.conversation,undefined);assert.equal(next.previous_response_id,undefined);
+});
+
+test('fast Azure rejection preserves the HTTP status and safe SDK evidence only in server telemetry',async()=>{
+ const id='9f5c9234-4da4-48e4-b324-28c86b293c6a';
+ const error=Object.assign(Error('PRIVATE prompt, secret and https://private.test/?token=PRIVATE'),{name:'BadRequestError',status:400,code:'unsupported_parameter',param:'store',requestID:id});
+ const f=servicesFixture(async()=>{throw error;}),before=JSON.stringify(f.rows);
+ const response=await http(f.app).post('/api/ai/assist').set('Authorization','Bearer owner').send({kind:'request',title:draft.title,description:draft.description}).expect(503);
+ assert.equal(response.body.error.code,'unavailable');assert.equal(response.body.error.fields.aiReason,'service_unavailable');
+ const row=f.diagnostics[0];assert.equal(row.reasonCode,'provider_http');assert.equal(row.providerHttpStatus,400);
+ assert.equal(row.providerFailureStage,'responses_request');assert.equal(row.providerErrorType,'BadRequestError');
+ assert.equal(row.providerErrorCode,'unsupported_parameter');assert.equal(row.providerErrorParam,'store');assert.equal(row.providerRequestId,id);
+ assert.equal(row.providerFailureSubcode,'azure_unsupported_parameter');assert.equal(row.providerCredentialState,'not_observed');
+ assert.equal(JSON.stringify(row).includes('PRIVATE'),false);assert.equal(JSON.stringify(response.body).includes(id),false);
+ assert.equal(JSON.stringify(response.body).includes('providerError'),false);assert.equal(JSON.stringify(f.rows),before);assert.equal(f.calls.responses.length,1);
+});
+
+test('installed Azure/OpenAI SDK HTTP errors report response status, request ID and acquired credential state without raw bodies',async()=>{
+ const sdk=await loadAzureSDK(),previous=globalThis.fetch,id='74737c5f-30d7-4c2b-a706-abf79fa54c28';
+ class InterceptedCredential{async getToken(){return {token:'PRIVATE_TEST_TOKEN',expiresOnTimestamp:Date.now()+3600000};}}
+ let calls=0;
+ try{
+  for(const status of [400,401,403,404,422,429,500,503]){
+   globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({error:{code:'invalid_request_error',param:'text.format.schema',message:'PRIVATE_RAW_AZURE_BODY'}}),{status,headers:{'content-type':'application/json','apim-request-id':id}});};
+   const records=[],statuses=[],p=createAzureProvider({env,loadSDK:async()=>({AIProjectClient:sdk.AIProjectClient,ClientSecretCredential:InterceptedCredential})});
+   await assert.rejects(()=>p.suggest(draft,{onResponse:value=>statuses.push(value),onProviderDiagnostic:value=>records.push(value)}),{code:'unavailable'});
+   assert.deepEqual(statuses,[status]);assert.equal(records[0].providerHttpStatus,status);assert.equal(records[0].providerRequestId,id);
+   assert.equal(records[0].providerCredentialState,'acquired');assert.equal(records[0].providerFailureStage,'responses_request');
+   assert.equal(JSON.stringify(records).includes('PRIVATE'),false);
+  }
+  assert.equal(calls,8,'SDK errors must never trigger retries or a fallback');
+ }finally{globalThis.fetch=previous;}
+});
+
+test('token failure is distinguished from Responses rejection and concurrent cached-client operations retain independent stages',async()=>{
+ const sdk=await loadAzureSDK(),previous=globalThis.fetch;let rejectToken,started;
+ const waiting=new Promise(resolve=>started=resolve);let tokens=0,requests=0;
+ class InterceptedCredential{async getToken(){
+  if(++tokens===1){started();return new Promise((_,reject)=>{rejectToken=reject;});}
+  return {token:'PRIVATE_TEST_TOKEN',expiresOnTimestamp:Date.now()+3600000};
+ }}
+ globalThis.fetch=async()=>{requests++;return new Response(JSON.stringify({error:{code:'invalid_request_error',param:'reasoning.effort',message:'PRIVATE'}}),{status:400,headers:{'content-type':'application/json'}});};
+ try{
+  const p=createAzureProvider({env,loadSDK:async()=>({AIProjectClient:sdk.AIProjectClient,ClientSecretCredential:InterceptedCredential})}),a=[],b=[];
+  const first=assert.rejects(()=>p.suggest(draft,{onProviderDiagnostic:value=>a.push(value)}),{reason:'provider_auth'});
+  await waiting;
+  const second=assert.rejects(()=>p.suggest(draft,{onProviderDiagnostic:value=>b.push(value)}),{reason:'provider_auth'});
+  await new Promise(resolve=>setImmediate(resolve));
+  rejectToken(Object.assign(Error('PRIVATE credential failure'),{name:'AuthenticationRequiredError',statusCode:400,code:'invalid_client'}));await Promise.all([first,second]);
+  assert.equal(a[0].providerFailureStage,'token_acquisition');assert.equal(a[0].providerCredentialState,'failed');assert.equal(a[0].providerHttpStatus,400);assert.equal(a[0].providerFailureSubcode,'azure_client_credentials');
+  assert.equal(b[0].providerFailureStage,'token_acquisition');assert.equal(b[0].providerCredentialState,'failed');
+  assert.equal(requests,0,'A failed token acquisition must not reach Responses');
+  const c=[];await assert.rejects(()=>p.suggest(draft,{onProviderDiagnostic:value=>c.push(value)}),{reason:'provider_http'});
+  assert.equal(c[0].providerFailureStage,'responses_request');assert.equal(c[0].providerCredentialState,'acquired');assert.equal(c[0].providerErrorParam,'reasoning.effort');
+  assert.equal(requests,1);assert.equal(JSON.stringify([a,b,c]).includes('PRIVATE'),false);
+ }finally{globalThis.fetch=previous;}
+});
+
+test('diagnostics bound cause traversal, sanitise string/nested statuses, and reject arbitrary private fields',async()=>{
+ const {azureDiagnostic,sanitizeDiagnostic}=require('../ai-azure-diagnostics.cjs');
+ const inner={statusCode:'404',headers:new Headers({'x-ms-request-id':'71c109c4-102e-45e3-b05e-0872123b39b3'}),code:'AgentNotFound'};
+ const wrapped=Object.assign(Error('PRIVATE'),{cause:inner});inner.cause=wrapped;
+ const record=azureDiagnostic(wrapped,{stage:'responses_request',credentialState:'acquired'});
+ assert.equal(record.providerHttpStatus,404);assert.equal(record.providerErrorCode,'AgentNotFound');assert.equal(record.providerFailureSubcode,'azure_http_404');
+ const invalid=sanitizeDiagnostic(Object.fromEntries(Object.keys(record).map(key=>[key,'PRIVATE'])));
+ assert.ok(Object.values(invalid).every(value=>value===null));
+ for(const value of [0,600,-1,'400 PRIVATE',Infinity])assert.equal(azureDiagnostic({status:value},{stage:'responses_request'}).providerHttpStatus,null);
+ for(const [code,subcode] of [['ENOTFOUND','azure_dns'],['ERR_TLS_CERT_ALTNAME_INVALID','azure_tls'],['ECONNRESET','azure_connection']]){
+  assert.equal(azureDiagnostic({cause:{code}},{stage:'responses_request'}).providerFailureSubcode,subcode);
+ }
+ const f=fakeSDK(async()=>{throw {cause:{response:{status:404}},message:'PRIVATE'};});
+ await assert.rejects(()=>createAzureProvider({env,loadSDK:f.loadSDK}).suggest(draft),{reason:'model_unavailable'});
+ const g=fakeSDK();assert.deepEqual(await createAzureProvider({env,loadSDK:g.loadSDK}).suggest(draft,{onResponse:()=>{throw Error('telemetry');}}),suggestion);
 });
