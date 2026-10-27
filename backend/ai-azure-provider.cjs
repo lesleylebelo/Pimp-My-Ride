@@ -107,7 +107,8 @@ function createAzureProvider({env=process.env,studio=false,loadSDK=loadAzureSDK,
      // from customer text/images. Backend validation remains authoritative.
      input:[{role:'developer',content:[{type:'input_text',text:instructions}]},{role:'user',content}],store:false,stream:false,
      tools:[],tool_choice:'none',max_output_tokens:studio?6000:4000,
-     reasoning:{effort:'minimal'},
+     // This saved-agent endpoint rejects request-level reasoning overrides too.
+     // Leave reasoning behavior to the existing agent/model configuration.
      text:{format:{type:'json_schema',name:studio?'pimppilot_studio':'pimppilot_draft',strict:true,schema}},
     },{signal:controller.signal,maxRetries:0,timeout:timeoutMs});
     context.httpStatus=200;observe(onResponse,200);context.stage='output_extraction';
