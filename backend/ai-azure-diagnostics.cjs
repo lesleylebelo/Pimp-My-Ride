@@ -1,5 +1,6 @@
 // Closed allowlists only. Never copy SDK messages, stacks, bodies, URLs, or
 // arbitrary error-code/parameter/header values into operational telemetry.
+const {invalidValueClassification,classifications}=require('./ai-azure-invalid-value.cjs');
 const stages=new Set(['sdk_initialization','request_serialization','token_acquisition','responses_request','output_extraction']);
 const types=new Set(['Error','TypeError','ReferenceError','SyntaxError','OpenAIError','APIError','APIConnectionError','APIConnectionTimeoutError','APIUserAbortError','BadRequestError','AuthenticationError','PermissionDeniedError','NotFoundError','ConflictError','UnprocessableEntityError','RateLimitError','InternalServerError','CredentialUnavailableError','AuthenticationRequiredError','AggregateAuthenticationError','ClientAuthError','ClientConfigurationError','RestError','AbortError']);
 const codes=new Set(['invalid_request_error','invalid_request','InvalidRequest','BadRequest','InvalidArgument','unsupported_parameter','UnsupportedParameter','unsupported_value','invalid_value','invalid_json_schema','DeploymentNotFound','ModelNotFound','AgentNotFound','ResourceNotFound','InvalidApiVersionParameter','InvalidAuthenticationTokenAudience','invalid_resource','invalid_client','unauthorized_client','access_denied','AuthorizationPermissionMismatch','AuthorizationFailed','Forbidden','InternalServerError','ServiceUnavailable','ENOTFOUND','EAI_AGAIN','ECONNRESET','ECONNREFUSED','ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT','CERT_HAS_EXPIRED','UNABLE_TO_VERIFY_LEAF_SIGNATURE','DEPTH_ZERO_SELF_SIGNED_CERT','ERR_TLS_CERT_ALTNAME_INVALID']);
@@ -22,6 +23,7 @@ function sanitizeDiagnostic(value={}){
   providerRequestId:requestId(value.providerRequestId),
   providerFailureSubcode:subcodes.has(value.providerFailureSubcode)||/^azure_http_[1-5]\d{2}$/.test(value.providerFailureSubcode||'')?value.providerFailureSubcode:null,
   providerCredentialState:credentialStates.has(value.providerCredentialState)?value.providerCredentialState:null,
+  providerInvalidValueClassification:classifications.has(value.providerInvalidValueClassification)?value.providerInvalidValueClassification:value.providerErrorCode==='invalid_value'&&value.providerFailureStage==='responses_request'&&httpStatus(value.providerHttpStatus)===400?'unknown':null,
  };
 }
 function azureDiagnostic(error,context={}){
@@ -45,6 +47,7 @@ function azureDiagnostic(error,context={}){
  else if(['ENOTFOUND','EAI_AGAIN'].includes(code))subcode='azure_dns';
  else if(['CERT_HAS_EXPIRED','UNABLE_TO_VERIFY_LEAF_SIGNATURE','DEPTH_ZERO_SELF_SIGNED_CERT','ERR_TLS_CERT_ALTNAME_INVALID'].includes(code))subcode='azure_tls';
  else if(['ECONNRESET','ECONNREFUSED','ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT'].includes(code))subcode='azure_connection';
- return sanitizeDiagnostic({providerFailureStage:context.stage,providerErrorType:type,providerHttpStatus:status,providerErrorCode:code,providerErrorParam:param,providerRequestId:id,providerFailureSubcode:subcode,providerCredentialState:context.credentialState});
+ const classification=invalidValueClassification(chain,code,context.stage,status);
+ return sanitizeDiagnostic({providerFailureStage:context.stage,providerErrorType:type,providerHttpStatus:status,providerErrorCode:code,providerErrorParam:param,providerRequestId:id,providerFailureSubcode:subcode,providerCredentialState:context.credentialState,providerInvalidValueClassification:classification});
 }
 module.exports={azureDiagnostic,sanitizeDiagnostic,httpStatus};
