@@ -9,7 +9,7 @@ export const cancelled=()=>Object.assign(new Error('Google sign-in cancelled. Yo
 export function assertGoogleActive(signal){if(signal?.aborted)throw cancelled();}
 
 // Credentials and tokens stay inside this operation, never route params/storage.
-export async function exchangeGoogle(data,signal){
+export async function exchangeGoogle(data,signal,{android=false}={}){
  const base=(process.env.EXPO_PUBLIC_API_URL||'').replace(/\/$/,'');
  if(!/^https:\/\//.test(base)&&!(__DEV__&&/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(base)))throw new Error('Google sign-in requires a configured HTTPS backend.');
  const controller=new AbortController(),abort=()=>controller.abort();
@@ -17,7 +17,7 @@ export async function exchangeGoogle(data,signal){
  const timer=setTimeout(abort,90000);
  try{
   assertGoogleActive(signal);
-  const response=await fetch(`${base}/auth/google`,{method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:controller.signal});
+  const response=await fetch(`${base}/auth/google${android?'/android':''}`,{method:'POST',credentials:'omit',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:controller.signal});
   const body=await response.json();
   assertGoogleActive(signal);
   if(!response.ok)throw Object.assign(new Error(body?.error?.message||'Google sign-in could not complete.'),{code:`api/${body?.error?.code||'unavailable'}`});

@@ -5,6 +5,7 @@ const {mutation}=require('./mutations.cjs');
 const {createMockPaymentProvider}=require('./payment-provider.cjs');
 const {assertMockPaymentsEnabled}=require('./mock-payment-gate.cjs');
 const C=require('./marketplace-communications.cjs');
+const {enqueueEmail}=require('./transactional-email.cjs');
 const {readRecommendations}=require('./quote-recommendation-read.cjs');
 const PAGE_SIZE=20;
 const stamp=()=>FieldValue.serverTimestamp();
@@ -389,6 +390,7 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
     const initialAmount=input.paymentMethod==='pay_deposit'?quote.depositAmountCents:quote.totalCents;
     const initialPaymentStatus=input.paymentMethod==='pay_in_store'?'due':'pending';
     const checkout=input.paymentMethod==='pay_in_store'?null:await paymentProvider.createCheckout({paymentId:attemptRef.id,amountCents:initialAmount,currency:quote.currency});
+    if(input.paymentMethod==='pay_in_store')enqueueEmail(tx,db,{kind:'pay_in_store_selected',id:bookingRef.id,bookingId:bookingRef.id,ownerId:a.uid,snapshot:{customerName:customerDisplayName(customer),shopName:quote.shopName,requestTitle:value.title,paidCents:0,balanceDueCents:quote.totalCents}});
     tx.create(bookingRef,{simulated:true,testTransaction:true,paymentProvider:'mock',paymentAccountingMode:'simulated',...terms,...depositSnapshot,customerName:customerDisplayName(customer),ownerId:a.uid,shopId:quote.shopId,serviceRequestId:requestRef.id,quoteId:quoteRef.id,vehicleId:value.vehicleId,vehicle:M.vehicleSnapshot(value.vehicle),photoIds:P.photoIds(value.photoIds),shopName:quote.shopName,requestTitle:value.title,categoryName:value.categoryName,city:value.city,status:input.paymentMethod==='pay_in_store'?'pending_confirmation':'pending_payment',paymentMethod:input.paymentMethod,paymentStatus:initialPaymentStatus,paidCents:0,balanceDueCents:quote.totalCents,currentPaymentAttemptId:attemptRef.id,serviceStatus:'not_started',createdAt:stamp(),updatedAt:stamp()});
     tx.create(attemptRef,{bookingId:bookingRef.id,provider:'mock',providerReference:checkout?.providerReference||null,method:input.paymentMethod==='pay_in_store'?'pay_in_store':'simulated_online',kind:'initial',amountCents:initialAmount,currency:quote.currency,status:initialPaymentStatus,simulated:true,testTransaction:true,createdAt:stamp(),updatedAt:stamp()});
     notify(tx,a.uid,'quotation_accepted',bookingRef.id);
@@ -420,7 +422,11 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
     const overallStatus=paymentStatus(paidCents,balanceDueCents,result.status);
     tx.update(attemptRef,{status:result.status,updatedAt:stamp(),resolvedAt:result.status==='pending'?null:stamp()});
     tx.update(ref,{paidCents,balanceDueCents,paymentStatus:overallStatus,updatedAt:stamp(),...(successful?{simulatedPaymentVerifiedAt:stamp(),...(booking.status==='pending_payment'?{status:'pending_confirmation'}:{})}:{})});
-    if(successful)tx.create(db.doc(`paymentReceipts/${attemptRef.id}`),{...C.receiptSnapshot({booking,bookingId:ref.id,attemptId:attemptRef.id,method:attempt.method,amountCents:attempt.amountCents,paidCents,balanceDueCents}),issuedAt:stamp()});
+    if(successful){
+     const savedReceipt=C.receiptSnapshot({booking,bookingId:ref.id,attemptId:attemptRef.id,method:attempt.method,amountCents:attempt.amountCents,paidCents,balanceDueCents});
+     tx.create(db.doc(`paymentReceipts/${attemptRef.id}`),{...savedReceipt,issuedAt:stamp()});
+     enqueueEmail(tx,db,{kind:'mock_payment_receipt',id:attemptRef.id,bookingId:ref.id,ownerId:booking.ownerId,snapshot:{booking:{paymentMethod:booking.paymentMethod},receipt:savedReceipt}});
+    }
     event(tx,a.uid,`simulated_payment_${result.status}`,ref.id,{paymentAttemptId:attemptRef.id,amountCents:attempt.amountCents,currency:booking.currency});
     event(tx,booking.shopId,`simulated_payment_${result.status}`,ref.id,{paymentAttemptId:attemptRef.id,amountCents:attempt.amountCents,currency:booking.currency});
     audit(tx,a.uid,op,ref.id,{paymentAttemptId:attemptRef.id,status:result.status,amountCents:attempt.amountCents,simulated:true});return {id:ref.id,paymentAttemptId:attemptRef.id,paymentStatus:overallStatus,paymentAttemptStatus:result.status};
@@ -487,7 +493,9 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
     }
     const paidCents=accounting.totalCents,balanceDueCents=0;
     tx.update(ref,{paidCents,balanceDueCents,paymentStatus:'paid',currentPaymentAttemptId:attemptRef.id,simulatedPaymentVerifiedAt:stamp(),updatedAt:stamp(),...(booking.status==='pending_payment'?{status:'pending_confirmation'}:{})});
-    tx.create(db.doc(`paymentReceipts/${attemptRef.id}`),{...C.receiptSnapshot({booking,bookingId:ref.id,attemptId:attemptRef.id,method:input.method,amountCents:accounting.balanceDueCents,paidCents,balanceDueCents}),issuedAt:stamp()});
+    const savedReceipt=C.receiptSnapshot({booking,bookingId:ref.id,attemptId:attemptRef.id,method:input.method,amountCents:accounting.balanceDueCents,paidCents,balanceDueCents});
+    tx.create(db.doc(`paymentReceipts/${attemptRef.id}`),{...savedReceipt,issuedAt:stamp()});
+    enqueueEmail(tx,db,{kind:'mock_payment_receipt',id:attemptRef.id,bookingId:ref.id,ownerId:booking.ownerId,snapshot:{booking:{paymentMethod:booking.paymentMethod},receipt:savedReceipt}});
     event(tx,booking.ownerId,'simulated_in_store_payment_received',ref.id,{paymentAttemptId:attemptRef.id,amountCents:accounting.balanceDueCents,currency:booking.currency});
     event(tx,a.uid,'simulated_in_store_payment_recorded',ref.id,{paymentAttemptId:attemptRef.id,amountCents:accounting.balanceDueCents,currency:booking.currency});
     audit(tx,a.uid,op,ref.id,{paymentAttemptId:attemptRef.id,amountCents:accounting.balanceDueCents,method:input.method,simulated:true});return {id:ref.id,paymentAttemptId:attemptRef.id,paymentStatus:'paid'};
@@ -517,6 +525,7 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
     // Existing booking terms survive later vehicle/category archival or edits.
     B.requireFutureAppointment(appointment);
     tx.update(ref,{status:'confirmed',appointmentDate:appointment.appointmentDate,appointmentTime:appointment.appointmentTime,appointmentAt:Timestamp.fromMillis(appointment.appointmentMillis),confirmedAt:stamp(),updatedAt:stamp()});
+    enqueueEmail(tx,db,{kind:'booking_confirmed',id:ref.id,bookingId:ref.id,ownerId:value.ownerId,snapshot:{customerName:value.customerName||'Customer',shopName:value.shopName||'Workshop',requestTitle:value.requestTitle||'Service booking',vehicle:value.vehicle||{},status:'confirmed',appointmentDate:appointment.appointmentDate,appointmentTime:appointment.appointmentTime}});
     event(tx,value.ownerId,'booking_confirmed',ref.id,{appointmentDate:appointment.appointmentDate,appointmentTime:appointment.appointmentTime});
     event(tx,a.uid,'booking_confirmed',ref.id,{appointmentDate:appointment.appointmentDate,appointmentTime:appointment.appointmentTime});
     audit(tx,a.uid,op,ref.id,{appointmentDate:appointment.appointmentDate,appointmentTime:appointment.appointmentTime});return {id:ref.id};

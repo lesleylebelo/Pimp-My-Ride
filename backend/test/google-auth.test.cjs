@@ -3,6 +3,21 @@ const {createGoogleAuth}=require('../google-auth.cjs');
 const {createApp}=require('../app.cjs');
 const {createServices}=require('../services.cjs');
 const {memoryDb}=require('./helpers/memory-db.cjs');
+const {OAuth2Client}=require('google-auth-library');
+const {generateKeyPairSync,sign}=require('node:crypto');
+// Real JWT verification; only public-certificate retrieval is replaced locally.
+const signingKeys=generateKeyPairSync('rsa',{modulusLength:2048});
+const untrustedKeys=generateKeyPairSync('rsa',{modulusLength:2048});
+function signedFixture(claims,{unsigned=false,untrusted=false}={}){
+ const encode=value=>Buffer.from(JSON.stringify(value)).toString('base64url');
+ const data=encode({alg:unsigned?'none':'RS256',kid:'local-google-fixture'})+'.'+encode(claims);
+ return data+'.'+(unsigned?'':sign('RSA-SHA256',Buffer.from(data),untrusted?untrustedKeys.privateKey:signingKeys.privateKey).toString('base64url'));
+}
+function verifyingClient(){
+ const client=new OAuth2Client();
+ client.getFederatedSignonCertsAsync=async()=>({certs:{'local-google-fixture':signingKeys.publicKey.export({type:'spki',format:'pem'})}});
+ return client;
+}
 const NOW=Date.now(),seconds=Math.floor(NOW/1000),nonce='n'.repeat(64),clientId='synthetic.apps.googleusercontent.com';
 const missing=()=>Object.assign(Error('missing'),{code:'auth/user-not-found'});
 function setup({existing=false,linked=false,profile,identity={},proof={},disabled=false,verified=true}={}){
@@ -100,4 +115,37 @@ test('web exchange enforces origin, JSON bounds and hides unexpected errors; API
  const r=await request(app).post('/auth/google').set('Origin','https://app.example').send({}).expect(503);assert.equal(exchanges,1);assert.ok(!r.text.includes('PRIVATE'));assert.match(r.headers['cache-control'],/no-store/);
  await request(app).post('/auth/google').set('Origin','https://app.example').send({credential:'x'.repeat(40000)}).expect(400);
  await request(app).post('/api/auth/google/authorize').send({}).expect(401);
+});
+test('Android endpoint rejects browser origins and uses identical Google verification, nonce and account restrictions',async()=>{
+ const s=setup();const app=createApp({auth:s.auth,services:s.services,googleExchange:s.exchange,allowedOrigins:['https://app.example']});
+ for(const origin of ['https://app.example','https://evil.example','null']){
+  await request(app).post('/auth/google/android').set('Origin',origin).send(s.input).expect(403);
+ }
+ for(const endpoint of ['/auth/google/android/','/AUTH/GOOGLE/ANDROID'])await request(app).post(endpoint).set('Origin','https://app.example').send(s.input).expect(403);
+ assert.equal(s.users.size,0);
+ await request(app).post('/auth/google/android').send({...s.input,nonce:'x'.repeat(64)}).expect(401);
+ await request(app).post('/auth/google/android').send({...s.input,credential:'forged'}).expect(401);
+ assert.equal(s.users.size,0);
+ const first=await request(app).post('/auth/google/android').send(s.input).expect(200);
+ const web=await request(app).post('/auth/google').set('Origin','https://app.example').send(s.input).expect(200);
+ assert.equal(first.body.data.uid,web.body.data.uid);assert.equal(s.users.size,1);
+});
+
+test('production Google verifier accepts a signed nonce-bound fixture and reuses its UID across Android and web',async()=>{
+ const s=setup(),exchange=createGoogleAuth({auth:s.auth,db:s.db,clientId,googleClient:verifyingClient(),now:()=>NOW});
+ const app=createApp({auth:s.auth,services:s.services,googleExchange:exchange,allowedOrigins:['https://app.example']});
+ const input={credential:signedFixture(s.claims),nonce};
+ const android=await request(app).post('/auth/google/android').send(input).expect(200);
+ const web=await request(app).post('/auth/google').set('Origin','https://app.example').send(input).expect(200);
+ assert.equal(android.body.data.uid,web.body.data.uid);assert.equal(s.users.size,1);
+});
+test('production Google verifier rejects unsigned, forged, expired, wrong-audience, wrong-issuer and wrong-nonce native tokens before account access',async()=>{
+ for(const [changes,options] of [
+  [{},{unsigned:true}],[{},{untrusted:true}],[{exp:seconds-3600,iat:seconds-7200},{}],
+  [{aud:'different-oauth-client.apps.googleusercontent.com'},{}],[{iss:'https://attacker.example'},{}],[{nonce:'x'.repeat(64)},{}],
+ ]){
+  const s=setup(),exchange=createGoogleAuth({auth:s.auth,db:s.db,clientId,googleClient:verifyingClient(),now:()=>NOW});
+  await assert.rejects(()=>exchange({credential:signedFixture({...s.claims,...changes},options),nonce}),error=>error.code==='unauthenticated');
+  assert.equal(s.users.size,0);assert.equal(s.db.rows.size,0);assert.equal(s.calls.length,0);
+ }
 });

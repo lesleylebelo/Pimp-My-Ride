@@ -39,11 +39,14 @@ async function start(){try{
  const auth=getAuth(),db=getFirestore(),storageClient=createStorage({url:storage.url,key:storage.key,bucket:storage.bucket});
  startupDb=db;
  validateMockPaymentConfiguration(process.env,db);
+ const {emailConfig,createEmailDispatcher}=require('./transactional-email.cjs');
+ const emailSettings=emailConfig(process.env);
+ const emailDelivery={config:emailSettings,dispatcher:createEmailDispatcher({db,auth,config:emailSettings})};
  const photoStorage=createMediaStorage({url:storage.url,key:storage.key,bucket:storage.photoBucket,legacyBucket:storage.legacyPhotoBucket,scope:'photos'});
  const profileStorage=createStorage({url:storage.url,key:storage.key,bucket:storage.photoBucket,scope:'profiles'});
  const requestStorage=createMediaStorage({url:storage.url,key:storage.key,bucket:storage.requestBucket,scope:'requests'});
  const postStorage=createMediaStorage({url:storage.url,key:storage.key,bucket:storage.postsBucket,legacyBucket:storage.legacyPostsBucket,scope:'showcase'});
- const app=createApp({auth,googleExchange:createGoogleAuth({auth,db}),services:createServices({db,auth,storage:storageClient,photoStorage,profileStorage,requestStorage,postStorage}),trustProxy:process.env.RENDER?1:false,
+ const app=createApp({auth,emailDelivery,googleExchange:createGoogleAuth({auth,db}),services:createServices({db,auth,storage:storageClient,photoStorage,profileStorage,requestStorage,postStorage}),trustProxy:process.env.RENDER?1:false,
   allowedOrigins:corsOrigins(process.env.CORS_ORIGINS,process.env.NODE_ENV==='production')});
  const server=app.listen(portValue,host,()=>console.log('PimpMyRide API ready.'));
  server.requestTimeout=90000;

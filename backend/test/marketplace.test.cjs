@@ -456,6 +456,49 @@ async function booked(f){const offer=await offered(f),booking=await f.write('own
 const appointment={appointmentDate:'2099-12-01',appointmentTime:'09:30'};
 const bookingAudits=f=>audits(f).filter(([,v])=>['marketplace.quoteAccept','marketplace.bookingConfirm','marketplace.bookingCancel'].includes(v.action));
 
+test('transactional customer emails use committed confirmation, full/deposit receipt and pay-in-store selection snapshots once',async()=>{
+ const E=require('../transactional-email.cjs');
+ for(const paymentMethod of ['pay_now','pay_deposit','pay_in_store']){
+  const f=fixture(),offer=await offered(f,{quote:{...quoteData,depositType:'fixed',depositValue:25000}});
+  const b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod},'checkout-email');
+  await f.write('owner','quoteAccept',{id:offer.id,paymentMethod},'checkout-email');
+  let jobs=collectionRows(f,E.COLLECTION);
+  assert.equal(jobs.length,paymentMethod==='pay_in_store'?1:0);
+  if(paymentMethod==='pay_in_store'){
+   assert.equal(jobs[0].kind,'pay_in_store_selected');assert.equal(jobs[0].snapshot.paidCents,0);assert.equal(collectionRows(f,'paymentReceipts').length,0);
+  }else{
+   const input={id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful'};
+   await f.write('owner','paymentMockResult',input,'email-payment');await f.write('owner','paymentMockResult',input,'email-payment');
+   jobs=collectionRows(f,E.COLLECTION);assert.equal(jobs.length,1);
+   const saved=f.db.rows.get('paymentReceipts/'+b.paymentAttemptId),snapshot=jobs[0].snapshot.receipt;
+   const {issuedAt,...expected}=saved;assert.deepEqual(snapshot,expected);
+   assert.equal(snapshot.amountCents,paymentMethod==='pay_deposit'?25000:100000);
+   assert.equal(snapshot.balanceDueCentsAfter,paymentMethod==='pay_deposit'?75000:0);
+   assert.equal(snapshot.receiptReference,'TEST-'+b.paymentAttemptId);
+   assert.ok(E.renderEmail(jobs[0]).text.includes('ZAR '+(snapshot.amountCents/100).toFixed(2)));
+  }
+  for(const uid of ['owner','competitor'])await assert.rejects(()=>f.write(uid,'bookingConfirm',{id:b.id,...appointment}));
+  assert.equal(collectionRows(f,E.COLLECTION).length,1);
+  await f.write('shop','bookingConfirm',{id:b.id,...appointment},'email-confirm');
+  await f.write('shop','bookingConfirm',{id:b.id,...appointment},'email-confirm');
+  jobs=collectionRows(f,E.COLLECTION);assert.equal(jobs.length,2);
+  const confirmed=jobs.find(j=>j.kind==='booking_confirmed');assert.equal(confirmed.snapshot.status,'confirmed');assert.equal(confirmed.snapshot.appointmentDate,appointment.appointmentDate);
+  assert.ok(jobs.every(j=>j.recipientUid==='owner'&&j.status==='queued'));
+  await f.write('owner','bookingCancel',{id:b.id,reason:'Cancelled after event'});
+  assert.equal(confirmed.snapshot.status,'confirmed');
+ }
+});
+
+test('failed mock payments and rejected customer input never enqueue receipt emails',async()=>{
+ const E=require('../transactional-email.cjs');
+ for(const outcome of ['failed','cancelled','pending']){
+  const f=fixture(),offer=await offered(f),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_now'});
+  await assert.rejects(()=>f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome,email:'arbitrary@example.test'}),{code:'invalid-argument'});
+  await f.write('owner','paymentMockResult',{id:b.id,paymentAttemptId:b.paymentAttemptId,outcome});
+  assert.equal(collectionRows(f,E.COLLECTION).length,0);
+ }
+});
+
 test('hosted full, fixed and percentage deposit payments persist across backend recreation and settle balances once',async()=>{
  const {PROJECT,HOSTED_MOCK_ENV}=require('./helpers/mock-payments.cjs');const config={...HOSTED_MOCK_ENV};
  for(const depositType of ['none','fixed','percentage']){

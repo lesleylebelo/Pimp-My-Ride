@@ -1,7 +1,17 @@
 
 {
   "build": {
+    "development": {
+      "developmentClient": true,
+      "environment": "development",
+      "node": "22.23.3",
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "preview": {
+      "developmentClient": false,
       "environment": "preview",
       "node": "22.23.3",
       "distribution": "internal",

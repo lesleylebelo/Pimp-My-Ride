@@ -14,7 +14,13 @@ test('format handling preserves grounding, non-AI runtime, dependencies, rules a
  for(const file of files.filter(file=>/^backend\/[^/]+\.cjs$/.test(file)&&!allowed.includes(file)))assert.equal(current(file),baseline(file),file);
  // AI presentation and its pending-request lock are deliberately changed by the
  // PimpPilot audit; their behavioural contracts live in tests/ai-assist.test.cjs.
- for(const file of ['firestore.rules','firestore.indexes.json','render.yaml'])assert.equal(current(file),baseline(file),file);
+ for(const file of ['firestore.rules','render.yaml'])assert.equal(current(file),baseline(file),file);
+ // Transactional emails add only their own queue index/exemptions; preserve
+ // every pre-existing marketplace and AI index without relaxing the boundary.
+ const indexes=JSON.parse(current('firestore.indexes.json'));
+ indexes.indexes=indexes.indexes.filter(index=>index.collectionGroup!=='transactionalEmailJobs');
+ indexes.fieldOverrides=indexes.fieldOverrides.filter(index=>index.collectionGroup!=='transactionalEmailJobs');
+ assert.deepEqual(indexes,JSON.parse(baseline('firestore.indexes.json')));
  // The authorised Azure migration adds SDKs but does not upgrade any existing
  // resolved package. Shared transitive dependencies may lose their dev-only flag.
  const oldLock=JSON.parse(baseline('backend/package-lock.json')),newLock=JSON.parse(current('backend/package-lock.json'));
@@ -34,6 +40,10 @@ test('format handling preserves grounding, non-AI runtime, dependencies, rules a
  }
  const old=JSON.parse(baseline('backend/package.json')),next=JSON.parse(current('backend/package.json'));delete old.scripts.test;delete next.scripts.test;
  assert.equal(next.scripts['check:ai-config'],'node check-ai-config.cjs');delete next.scripts['check:ai-config'];
+ assert.equal(next.scripts['test:email'],'node --test test/transactional-email.test.cjs test/marketplace.test.cjs');delete next.scripts['test:email'];
+ // Existing Google sign-in dependency predates the email change. Keep its
+ // declared version pinned to the current lock while comparing older runtime.
+ assert.equal(next.dependencies['google-auth-library'],newLock.packages[''].dependencies['google-auth-library']);delete next.dependencies['google-auth-library'];
  for(const name of ['@azure/ai-projects','@azure/identity'])delete next.dependencies[name];assert.deepEqual(next,old);
 });
 test('no active experimental quota or allowlist dependencies remain',()=>{

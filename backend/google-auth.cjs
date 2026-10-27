@@ -7,8 +7,8 @@ const passwordProvider=user=>user.providerData?.some(p=>p.providerId==='password
 
 // Never exchange an unlinked Google credential through signInWithIdp: Firebase
 // may implicitly link by email. Add the provider only after ownership is proved.
-function createGoogleAuth({auth,db,clientId=process.env.GOOGLE_WEB_CLIENT_ID,verifyGoogle,now=Date.now}){
- const client=new OAuth2Client();
+function createGoogleAuth({auth,db,clientId=process.env.GOOGLE_WEB_CLIENT_ID,verifyGoogle,googleClient=new OAuth2Client(),now=Date.now}){
+ const client=googleClient;
  const verify=verifyGoogle|| (async credential=>(await client.verifyIdToken({idToken:credential,audience:clientId})).getPayload());
  const lookup=async fn=>{try{return await fn();}catch(e){if(e.code==='auth/user-not-found')return null;throw e;}};
  async function eligible(user){

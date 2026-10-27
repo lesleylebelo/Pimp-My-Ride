@@ -25,7 +25,8 @@ function setup({legacy=false}={}){
  const fetch=async(url,options={})=>{
   const parsed=new URL(url);assert.equal(parsed.origin,base);
   calls.push({path:parsed.pathname,method:options.method||'GET',credentials:options.credentials,headers:options.headers});
-  let call=request(app)[(options.method||'GET').toLowerCase()](parsed.pathname).set('Origin',origin);
+  let call=request(app)[(options.method||'GET').toLowerCase()](parsed.pathname);
+  if(parsed.pathname!=='/auth/google/android')call=call.set('Origin',origin);
   for(const [key,value] of Object.entries(options.headers||{}))call=call.set(key,value);
   if(options.body!==undefined)call=call.send(options.body);
   const response=await call;
@@ -74,6 +75,13 @@ test('actual shared client adds /api for profile, Google authorization and marke
   ['completeProfile','existing-uid'],['authorizeGoogleSession','existing-uid'],['marketplace','existing-uid'],
  ]);
  assert.deepEqual(s.verified,Array.from({length:3},()=>['synthetic-firebase-token',true]));
+});
+test('Android exchange reaches its explicit native route with the same signed-credential contract and no Origin',async()=>{
+ const s=setup(),payload={credential:'synthetic-android-google-credential',nonce:'n'.repeat(64)};
+ const result=await s.google.exchangeGoogle(payload,undefined,{android:true});
+ assert.equal(result.uid,'existing-uid');assert.deepEqual(s.handled,[['googleExchange',payload]]);
+ assert.deepEqual(s.calls.map(({path,method})=>({path,method})),[{path:'/auth/google/android',method:'POST'}]);
+ assert.equal(s.verified.length,0);
 });
 
 test('a backend without the Google route produces the observed 404 without retrying a different path',async()=>{
