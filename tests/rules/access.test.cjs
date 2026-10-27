@@ -1,9 +1,26 @@
 const {test,before,after,beforeEach}=require('node:test');const fs=require('fs');
+const assert=require('node:assert/strict');
 require('../../scripts/assert-emulators.cjs').assertEmulators();
 const {initializeTestEnvironment,assertSucceeds,assertFails}=require('@firebase/rules-unit-testing');
 const {doc,setDoc,getDoc,updateDoc,deleteDoc,collection,getDocs}=require('firebase/firestore');
 let env;before(async()=>{env=await initializeTestEnvironment({projectId:'demo-pmr-security',firestore:{rules:fs.readFileSync('firestore.rules','utf8')}});});after(async()=>env?.cleanup());beforeEach(async()=>env.clearFirestore());
 const ctx=(uid,verified=true,admin=false)=>env.authenticatedContext(uid,{email_verified:verified,admin});
+
+test('email dispatcher queues and claims real emulator documents with its production query',async()=>{
+ const backendRequire=require('node:module').createRequire(require('node:path').resolve('backend/package.json'));
+ const {initializeApp,deleteApp}=backendRequire('firebase-admin/app'),{getFirestore}=backendRequire('firebase-admin/firestore');
+ const app=initializeApp({projectId:'demo-pmr-security'},'email-dispatch-emulator'),db=getFirestore(app);
+ const E=require('../../backend/transactional-email.cjs');let calls=0;
+ try{
+  await db.doc('users/email-owner').set({role:'owner',accountStatus:'active'});
+  await db.runTransaction(async tx=>E.enqueueEmail(tx,db,{kind:'booking_confirmed',id:'emulator-booking',bookingId:'emulator-booking',ownerId:'email-owner',snapshot:{status:'confirmed',shopName:'Synthetic shop'}}));
+  const dispatcher=E.createEmailDispatcher({db,auth:{getUser:async()=>({emailVerified:true,email:'synthetic@example.test'})},config:{enabled:true,from:'sender@example.test'},provider:{send:async()=>{calls++;return 'synthetic-provider-id';}}});
+  await Promise.all([dispatcher.dispatch(),dispatcher.dispatch()]);
+  assert.equal(calls,1);
+  const job=(await db.doc(`${E.COLLECTION}/${E.eventKey('booking_confirmed','emulator-booking')}`).get()).data();
+  assert.equal(job.status,'accepted');assert.equal(job.attempts,1);assert.equal(job.payload.to[0],'synthetic@example.test');
+ }finally{await db.terminate();await deleteApp(app);}
+});
 test('simulation metadata cannot be read, forged or removed by any direct client role',async()=>{
  await env.withSecurityRulesDisabled(c=>setDoc(doc(c.firestore(),'bookings','simulation-protected'),{simulated:true,testTransaction:true,paymentProvider:'mock',paymentAccountingMode:'simulated',paidCents:0,balanceDueCents:100}));
  for(const role of ['owner','shop','admin']){await seed(role,role);const ref=doc(ctx(role,true,role==='admin').firestore(),'bookings','simulation-protected');await assertFails(getDoc(ref));await assertFails(setDoc(ref,{enabled:true}));await assertFails(deleteDoc(ref));}
@@ -70,7 +87,7 @@ test('administrators with a pending status or provisioning operation cannot mode
 
 
 test('Phase 3 receipts, outbox, notifications and attempts deny direct reads and all writes even by participants and administrators',async()=>{
- const paths=['paymentReceipts/r','emailOutbox/e','notifications/n','bookings/b/paymentAttempts/a','quotationHeads/h'];
+ const paths=['paymentReceipts/r','emailOutbox/e','transactionalEmailJobs/e','notifications/n','bookings/b/paymentAttempts/a','quotationHeads/h'];
  await env.withSecurityRulesDisabled(async c=>{for(const path of paths)await setDoc(doc(c.firestore(),path),{recipientUid:'owner',ownerId:'owner',shopId:'shop',amountCents:100,readAt:null});});
  for(const role of ['owner','shop','admin']){
   await seed(role,role);const client=ctx(role,true,role==='admin').firestore();

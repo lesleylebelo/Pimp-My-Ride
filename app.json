@@ -31,6 +31,7 @@
       "favicon": "./assets/branding/favicon.png"
     },
     "plugins": [
+      "expo-dev-client",
       "expo-status-bar",
       "expo-secure-store",
       "expo-web-browser",

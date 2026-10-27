@@ -1,6 +1,8 @@
 export function authError(error) {
  if(error?.code?.startsWith('api/'))return error.message;
  const messages = {
+ 'auth/google-native-unavailable': error?.message,
+ 'auth/google-native-error': error?.message,
  'auth/google-cancelled': 'Google sign-in cancelled. You remain signed out.',
  'auth/account-exists-with-different-credential': 'This account uses another sign-in method. Sign in with that method before connecting Google.',
  'auth/credential-already-in-use': 'This Google identity is already connected to another account. Contact support.',

@@ -1,5 +1,13 @@
 {
   "indexes": [
+    {
+      "collectionGroup": "transactionalEmailJobs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "dueAt", "order": "ASCENDING"}
+      ]
+    },
     {"collectionGroup":"conversations","queryScope":"COLLECTION","fields":[{"fieldPath":"ownerId","order":"ASCENDING"},{"fieldPath":"updatedAt","order":"DESCENDING"},{"fieldPath":"__name__","order":"DESCENDING"}]},
     {"collectionGroup":"conversations","queryScope":"COLLECTION","fields":[{"fieldPath":"shopId","order":"ASCENDING"},{"fieldPath":"updatedAt","order":"DESCENDING"},{"fieldPath":"__name__","order":"DESCENDING"}]},
     {
@@ -277,7 +285,7 @@
       ]
     }
   ],
-  "fieldOverrides": [{
+  "fieldOverrides": [{"collectionGroup":"transactionalEmailJobs","fieldPath":"payload","indexes":[]},{"collectionGroup":"transactionalEmailJobs","fieldPath":"snapshot","indexes":[]},{
     "collectionGroup": "documents",
     "fieldPath": "path",
     "indexes": [

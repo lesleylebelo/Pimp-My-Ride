@@ -1,2 +1,2 @@
-// Phase 1 is web only. No native dependency or Expo Go behavior changes.
+// iOS is not configured yet. Metro selects .android.js and .web.js separately.
 export default function GoogleSignIn(){return null;}

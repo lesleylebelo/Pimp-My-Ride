@@ -23,6 +23,8 @@ test('existing server startup supports enabled and disabled simulation and rejec
    'firebase-admin/app':{cert:()=>({}),applicationDefault:()=>assert.fail('Configured credentials must be reused'),initializeApp:()=>calls.push('firebase')},
    'firebase-admin/auth':{getAuth:()=>({})},'firebase-admin/firestore':{getFirestore:()=>db},
    './services.cjs':{createServices:()=>({})},'./storage.cjs':{createStorage:()=>({}),createMediaStorage:()=>({})},
+   './google-auth.cjs':{createGoogleAuth:()=>({})},
+   './transactional-email.cjs':require('../transactional-email.cjs'),
    './ai-azure-provider.cjs':{prepareAzureStartup:require('../ai-azure-provider.cjs').prepareAzureStartup},
    './app.cjs':{createApp:()=>({listen:()=>{calls.push('listen');return {};}})},
    './config.cjs':{...baseConfig,storageConfig:()=>baseConfig.storageConfig(startupEnv),listenHost:()=>baseConfig.listenHost(startupEnv)},'./mock-payment-gate.cjs':require('../mock-payment-gate.cjs'),

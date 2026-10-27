@@ -1,12 +1,12 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),babel=require('@babel/core');
 
-function setup({profile={role:'owner',fullName:'Existing',phone:'0821234567'},link=false,authorizationError,profileError,exchangeError,afterAuthorize,onPersist,wrongUid=false}={}){
+function setup({profile={role:'owner',fullName:'Existing',phone:'0821234567'},link=false,authorizationError,profileError,exchangeError,afterAuthorize,onPersist,wrongUid=false,platform='web'}={}){
  const calls=[],sessions=[],main={currentUser:null},owned={vehicles:{car:{ownerId:'original'}},requests:{r:{ownerId:'original'}},quotes:{q:{shopId:'original'}},bookings:{b:{ownerId:'original'}}};
  let saved=profile;
  const user={uid:'original',email:'owner@example.test',emailVerified:true,getIdToken:async()=>{calls.push('password-proof');return 'fresh-proof';}};
  const mocks={
-  'react-native':{Platform:{OS:'web'}},
+  'react-native':{Platform:{OS:platform}},
   '../../../shared/services/firebase':{firebase:()=>({auth:main}),withIsolatedAuth:async fn=>{const session={auth:{currentUser:null},db:{isolated:true}};sessions.push(session);try{return await fn(session);}finally{session.auth.currentUser=null;calls.push('cleanup');}}},
   '../../../shared/services/network':{requireConnection:async()=>{}},
   './loginCooldown':{guardedLogin:async fn=>fn()},
@@ -38,12 +38,18 @@ function setup({profile={role:'owner',fullName:'Existing',phone:'0821234567'},li
  return {...service,args,controller,calls,main,sessions,owned,getProfile:()=>saved};
 }
 test('new Google Customer and Workshop onboard in isolation and persist only after backend authorization',async()=>{
- for(const role of ['owner','shop']){
-  const s=setup({profile:null});s.args.askProfile=async()=>({role,form:{fullName:'New user',phone:'0821234567',agreed:true,shopName:'Shop',regNumber:'R',address:'Road',city:'City',province:'Province',services:'Paint'}});
+ for(const platform of ['web','android'])for(const role of ['owner','shop']){
+  const s=setup({profile:null,platform});s.args.askProfile=async()=>({role,form:{fullName:'New user',phone:'0821234567',agreed:true,shopName:'Shop',regNumber:'R',address:'Road',city:'City',province:'Province',services:'Paint'}});
   const before=structuredClone(s.owned);await s.googleLogin(s.args);
   assert.equal(s.getProfile().role,role);if(role==='shop')assert.equal(s.getProfile().verificationStatus,'pending');
   assert.ok(s.calls.indexOf('create-profile')<s.calls.indexOf('authorize'));assert.ok(s.calls.indexOf('authorize')<s.calls.indexOf('persist'));
   assert.equal(s.main.currentUser.uid,'original');assert.equal(s.sessions[0].auth.currentUser,null);assert.deepEqual(s.owned,before);
+ }
+});
+test('Android existing Google and password-linked accounts keep the same UID and owned records as web',async()=>{
+ for(const link of [false,true]){
+  const s=setup({platform:'android',link}),before=structuredClone(s.owned);await s.googleLogin(s.args);
+  assert.equal(s.main.currentUser.uid,'original');assert.deepEqual(s.owned,before);assert.ok(!s.calls.includes('create-profile'));assert.equal(s.sessions[0].auth.currentUser,null);
  }
 });
 test('existing Google login does not create or overwrite a profile or owned records',async()=>{

@@ -6,7 +6,7 @@ const {ApiError}=require('./errors.cjs');
 const cors = require('cors');
 const {corsOrigins}=require('./config.cjs');
 const STATUS={'invalid-argument':400,validation_error:400,unauthenticated:401,unauthorized:401,'permission-denied':403,forbidden:403,'not-found':404,not_found:404,'already-exists':409,'failed-precondition':409,'resource-exhausted':429,'unavailable':503,'internal':500};
-function createApp({services,auth,googleExchange,trustProxy=false,allowedOrigins=corsOrigins()}){
+function createApp({services,auth,googleExchange,emailDelivery,trustProxy=false,allowedOrigins=corsOrigins()}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',trustProxy);app.use(helmet());
  app.use(cors({
   origin: allowedOrigins,
@@ -15,10 +15,14 @@ function createApp({services,auth,googleExchange,trustProxy=false,allowedOrigins
 }));
  app.use((req,res,next)=>{res.set('Cache-Control','no-store');next();});
  app.get('/health',(_,res)=>res.json({ok:true}));
+ if(emailDelivery)require('./transactional-email.cjs').mountEmailDispatch(app,emailDelivery);
  // Pre-session exchange; existing /api Firebase token middleware stays intact.
- app.post('/auth/google',rateLimit({windowMs:60000,limit:12,standardHeaders:'draft-8',legacyHeaders:false}),express.json({limit:'32kb'}),async(req,res,next)=>{
+ app.post(['/auth/google','/auth/google/android'],rateLimit({windowMs:60000,limit:12,standardHeaders:'draft-8',legacyHeaders:false}),express.json({limit:'32kb'}),async(req,res,next)=>{
   try{
-   if(!allowedOrigins.includes(req.headers.origin))throw new ApiError('permission-denied','This sign-in origin is not allowed.');
+   // Native HTTP has no Origin header or ambient browser cookies. Keep the web
+   // origin gate unchanged and reject *all* browser origins on the native path.
+   const android=req.path.toLowerCase().replace(/\/+$/,'')==='/auth/google/android';
+   if(android?req.headers.origin!==undefined:!allowedOrigins.includes(req.headers.origin))throw new ApiError('permission-denied','This sign-in origin is not allowed.');
    if(!googleExchange)throw new ApiError('unavailable','Google sign-in is not configured. Use email/password.');
    res.json({data:await googleExchange(req.body)});
   }catch(e){next(e instanceof ApiError?e:new ApiError('unavailable','Google sign-in could not complete. Try again or use email/password.'));}
