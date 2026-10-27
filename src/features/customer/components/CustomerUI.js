@@ -16,7 +16,7 @@ export const customerTabs=[
  {label:'Bookings',route:'Bookings',icon:'calendar-outline'},
  {label:'Profile',route:'OwnerAccount',icon:'person-outline'},
 ];
-const families={VehicleForm:'Garage',VehiclePhotos:'Garage',RequestForm:'OwnerRequests',OwnerRequest:'OwnerRequests',QuoteComparison:'OwnerRequests',PaymentChoice:'OwnerRequests',BookingDetail:'Bookings',ReceiptDetail:'Bookings',PostDetail:'Discover',ShopProfile:'Discover',SavedPosts:'Discover',MyPosts:'Discover',PostForm:'Discover'};
+const families={PimpPilotStudio:'Discover',VehicleForm:'Garage',VehiclePhotos:'Garage',RequestForm:'OwnerRequests',OwnerRequest:'OwnerRequests',QuoteComparison:'OwnerRequests',PaymentChoice:'OwnerRequests',BookingDetail:'Bookings',ReceiptDetail:'Bookings',PostDetail:'Discover',ShopProfile:'Discover',SavedPosts:'Discover',MyPosts:'Discover',PostForm:'Discover'};
 export const customerActiveRoute=route=>families[route]||route;
 export function customerLayout(width,fontScale=1,content=Math.min(width,1200)-(width>=768?48:32)){
  const columns=fontScale>=1.4?1:content>=1000?3:content>=620?2:1;
