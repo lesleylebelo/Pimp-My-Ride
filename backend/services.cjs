@@ -2,6 +2,7 @@ const {FieldValue,Timestamp,FieldPath}=require('firebase-admin/firestore');
 const {ApiError}=require('./errors.cjs');
 const D=require('./domain.cjs');
 const {createReviews}=require('./reviews.cjs');
+const {createServiceReviews}=require('./service-reviews.cjs');
 const {mutation}=require('./mutations.cjs');
 const {createDocuments}=require('./documents.cjs');
 const {createPresence}=require('./presence.cjs');
@@ -32,6 +33,7 @@ function serialize(value){if(value instanceof Timestamp)return value.toMillis();
 function rows(snapshot){return snapshot.docs.map(d=>({id:d.id,...serialize(d.data())}));}
 async function adminApi(request){
  const a=await actor(request,true),input=request.data||{},op=input.op;
+ if(['serviceReviews','serviceReviewModerate','serviceReviewReconcile'].includes(op)){if(op!=='serviceReviews')recent(request);return serviceReviews.moderate(request);}
  if(op==='posts'){
   let query=db.collection('posts').orderBy('createdAt','desc').orderBy(FieldPath.documentId(),'desc');
   if(input.cursor){const cursor=await db.doc(`posts/${D.id(input.cursor)}`).get();if(!cursor.exists)D.fail('Post list changed. Refresh the list.','failed-precondition');query=query.startAfter(cursor);}
@@ -180,6 +182,7 @@ async function completeProfile(request){
  });
 }
 const {listDocuments,checkUpload,uploadDocument}=createDocuments({db,storage,actor});
+const serviceReviews=createServiceReviews({db,auth,actor});
 const marketplace=createMarketplace({db,auth,actor,mockPaymentEnv});
 const messaging=createMessaging({db,auth,actor});
 const profilePhotos=createProfilePhotos({db,auth,actor,storage:profileStorage,messaging,marketplace});
@@ -187,6 +190,6 @@ const aiAssist=createAIAssist({db,actor,provider:aiProvider,onDiagnostic:aiDiagn
 const aiStudio=createAIStudio({db,actor,provider:aiStudioProvider});
 const {photosApi,checkPhotoUpload,uploadPhoto}=createPhotos({db,auth,storage:photoStorage,requestStorage,actor});
 const {postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage}=createPosts({db,auth,actor,storage:postStorage});
-return {...profilePhotos,adminApi,sessionEvent,completeProfile,authorizeGoogleSession,listDocuments,checkUpload,uploadDocument,marketplace,messaging,aiAssist,aiStudio,photosApi,checkPhotoUpload,uploadPhoto,postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage};
+return {serviceReviews:serviceReviews.api,...profilePhotos,adminApi,sessionEvent,completeProfile,authorizeGoogleSession,listDocuments,checkUpload,uploadDocument,marketplace,messaging,aiAssist,aiStudio,photosApi,checkPhotoUpload,uploadPhoto,postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage};
 }
 module.exports={createServices};

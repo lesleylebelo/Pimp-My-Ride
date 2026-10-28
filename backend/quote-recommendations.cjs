@@ -1,5 +1,5 @@
 // Pure advisory scoring over the authorised request read; no client scores or AI.
-const weights=Object.freeze({price:0.40,distance:0.25,compatibility:0.35});
+const weights=Object.freeze({price:0.35,distance:0.15,compatibility:0.30,rating:0.20});
 const own=(value,key)=>Object.prototype.hasOwnProperty.call(value||{},key);
 const version=request=>Number.isSafeInteger(request.termsVersion)&&request.termsVersion>0?request.termsVersion:Number.isSafeInteger(request.version)&&request.version>0?request.version:1;
 const millis=value=>typeof value?.toMillis==='function'?value.toMillis():value;
@@ -22,6 +22,12 @@ function deposit(quote){
  const valid=Number.isSafeInteger(expected)&&expected>0&&expected<quote.totalCents&&expected===amount;
  return {specified:true,valid,cents:valid?amount:null};
 }
+function reputation(summary){
+ const count=summary?.count,average=summary?.average;
+ const rated=Number.isSafeInteger(count)&&count>0&&typeof average==='number'&&Number.isFinite(average)&&average>=1&&average<=5;
+ // Five prior observations at 3.5/5. This does not alter the public count/average.
+ return {average:rated?average:null,count:rated?count:0,adjusted:rated?(count*average+5*3.5)/(count+5):3.5};
+}
 function assess(request,quote,context,now){
  const mandatory=Array.isArray(request.mandatoryServices)?request.mandatoryServices:[],covered=Array.isArray(quote.coveredServices)?quote.coveredServices:[];
  const coverage={matched:mandatory.filter(service=>covered.includes(service)).length,required:mandatory.length,scopeConfirmed:quote.scopeConfirmed===true};
@@ -39,19 +45,20 @@ function assess(request,quote,context,now){
  if(!reason&&quote.allChargesIncluded!==true)reason='All required charges have not been confirmed';
  if(!reason&&(!coverage.scopeConfirmed||coverage.matched!==mandatory.length))reason='Full requested service coverage has not been confirmed';
  return {id:quote.id,shopName:text(quote.shopName)||'Shop',comparable:unavailableReason===null,eligible:reason===null,reason,unavailableReason,totalCents:quote.totalCents,distanceKm:distanceKm(request.serviceLocation,context.location),coverage,
-  depositCents:upfront.cents,remainingAfterDepositCents:upfront.cents===null?null:quote.totalCents-upfront.cents,
+  rating:reputation(context.ratingSummary),depositCents:upfront.cents,remainingAfterDepositCents:upfront.cents===null?null:quote.totalCents-upfront.cents,
   completionDays:Number.isSafeInteger(quote.completionDays)&&quote.completionDays>0&&quote.completionDays<=365?quote.completionDays:null,scope:text(quote.scope)||null,warranty:text(quote.warranty)||null,highlights:[],tradeoffs:[]};
 }
 function recommendQuotations({request,quotes,contexts={},now}){
  if(!Number.isFinite(now))throw new TypeError('An explicit comparison time is required.');
  const entries=quotes.map(quote=>assess(request,quote,contexts[quote.id]||{},now));
  const comparable=entries.filter(entry=>entry.comparable),eligible=entries.filter(entry=>entry.eligible);
- const distanceUsed=eligible.length>0&&eligible.every(entry=>entry.distanceKm!==null),activeWeight=distanceUsed?1:weights.price+weights.compatibility;
+ const distanceUsed=eligible.length>0&&eligible.every(entry=>entry.distanceKm!==null),ratingUsed=eligible.some(entry=>entry.rating.count>0),activeWeight=weights.price+weights.compatibility+(distanceUsed?weights.distance:0)+(ratingUsed?weights.rating:0);
  const minimum=Math.min(...eligible.map(entry=>entry.totalCents)),minDistance=Math.min(...eligible.map(entry=>entry.distanceKm)),maxDistance=Math.max(...eligible.map(entry=>entry.distanceKm));
  for(const entry of eligible){
   const price=minimum/entry.totalCents,distance=!distanceUsed?null:maxDistance===minDistance?1:(maxDistance-entry.distanceKm)/(maxDistance-minDistance),compatibility=1;
-  entry.components={price,distance,compatibility};
-  entry.score=Math.round(1000000*(weights.price*price+weights.compatibility*compatibility+(distanceUsed?weights.distance*distance:0))/activeWeight)/10000;
+  const rating=ratingUsed?(entry.rating.adjusted-1)/4:null;
+  entry.components={price,distance,compatibility,rating};
+  entry.score=Math.round(1000000*(weights.price*price+weights.compatibility*compatibility+(distanceUsed?weights.distance*distance:0)+(ratingUsed?weights.rating*rating:0))/activeWeight)/10000;
  }
  eligible.sort((a,b)=>b.score-a.score||a.totalCents-b.totalCents||(a.id<b.id?-1:a.id>b.id?1:0));
  const comparative=eligible.length>=2;
@@ -65,6 +72,7 @@ function recommendQuotations({request,quotes,contexts={},now}){
   if(entry.depositCents!==null&&entry.depositCents===upfront)entry.highlights.push(deposits.length===comparable.length?'Lowest stated upfront deposit':'Lowest upfront deposit among offers that specify one');
   if(entry.completionDays!==null&&entry.completionDays===fastest)entry.highlights.push('Shortest stated turnaround');
   if(scopeDiffers)entry.tradeoffs.push('Service scopes differ. Review inclusions before choosing; equal coverage claims do not establish equal work or quality.');
+  entry.ratingExplanation=entry.rating.count?`Workshop rating: ${entry.rating.average.toFixed(1)}/5 from ${entry.rating.count} verified ${entry.rating.count===1?'review':'reviews'}. Comparison accounts for review volume (${entry.rating.adjusted.toFixed(2)}/5 adjusted).`:'Workshop rating: Not yet rated. A neutral 3.5/5 prior is used when ratings are scored.';
   if(!entry.warranty)entry.tradeoffs.push('Warranty: Not specified');
   if(entry.depositCents===null)entry.tradeoffs.push('Deposit: Not specified');
   if(entry.completionDays===null)entry.tradeoffs.push('Turnaround: Not specified');
@@ -72,14 +80,14 @@ function recommendQuotations({request,quotes,contexts={},now}){
   else if(entry.totalCents>cheapest)entry.tradeoffs.push('A lower priced current offer exists; its scope and confirmations may differ.');
  }
  if(winner){
-  winner.explanations=['Highest score for confirmed scope, verified price'+(distanceUsed?' and straight-line distance':''),'Fully matches requested services (shop confirmed)'];
+  winner.explanations=['Highest score for confirmed scope, verified price'+(ratingUsed?', confidence-adjusted customer rating':'')+(distanceUsed?' and straight-line distance':''),'Fully matches requested services (shop confirmed)'];
   if(winner.totalCents===minimum)winner.explanations.push('Lowest eligible price');
   if(distanceUsed&&winner.distanceKm===minDistance)winner.explanations.push('Closest eligible shop');
  }
  const status=!comparable.length?'empty':comparable.length===1?'single':eligible.length<2?'insufficient':tied?'tie':'recommended';
  const limitation={empty:'No current eligible quotations are available for comparison. Expired, withdrawn, stale or unavailable offers are excluded.',single:'Only one current quotation is available. Review its terms; there is not enough information to recommend an overall winner.',insufficient:'Insufficient confirmed scope and all-charge information to recommend an overall winner. Compare the available terms below.',tie:'The highest scoring quotations are tied. No overall winner is recommended; compare deposits, turnaround, scope and warranty.'}[status]||null;
- return {entries,rankedIds:comparative?eligible.map(entry=>entry.id):[],recommendedId:winner?.id||null,eligibleCount:eligible.length,comparisonCount:comparable.length,status,limitation,distanceUsed,scopeDiffers,
-  scoringNote:'Advisory score uses verified price (40%), shop-confirmed full coverage (35%) and straight-line distance (25%). If any scored offer has no distance, distance is excluded and remaining weights are normalised. Deposits, turnaround and warranty are shown as trade-offs, not quality scores.',
+ return {entries,rankedIds:comparative?eligible.map(entry=>entry.id):[],recommendedId:winner?.id||null,eligibleCount:eligible.length,comparisonCount:comparable.length,status,limitation,distanceUsed,ratingUsed,scopeDiffers,
+  scoringNote:'Advisory score uses verified price (35%), shop-confirmed full coverage (30%), verified customer rating (20%) and straight-line distance (15%). Rating confidence uses five prior observations at 3.5/5; unrated shops use that neutral prior. If all shops are unrated, rating is excluded for all. If any scored offer lacks distance, distance is excluded for all. Remaining weights are normalised. Customer ratings do not certify mechanical quality or safety. Deposits, turnaround and warranty remain trade-offs.',
   distanceNote:distanceUsed?'Straight-line distance from the service-request location; road distance may differ.':'Distance unavailable for one or more eligible quotations. Distance is excluded from every score.',
   evaluatedAt:now,nextExpiry:comparable.length?Math.min(...quotes.filter(quote=>comparable.some(entry=>entry.id===quote.id)).map(quote=>millis(quote.validUntil))):null};
 }

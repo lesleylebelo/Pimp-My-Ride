@@ -53,6 +53,7 @@ function createApp({services,auth,googleExchange,emailDelivery,trustProxy=false,
  app.delete('/api/posts/:id',postAction(services.deleteShowcase));
  app.post('/api/admin',action(services.adminApi));
  app.post('/api/marketplace',action(services.marketplace));
+ app.post('/api/service-reviews',action(services.serviceReviews));
  app.post('/api/messaging',action(services.messaging));
  app.post('/api/ai/assist',action(services.aiAssist));
  app.post('/api/ai/studio',action(services.aiStudio));

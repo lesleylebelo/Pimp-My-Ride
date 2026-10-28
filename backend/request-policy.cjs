@@ -1,5 +1,5 @@
 const {rateLimit}=require('express-rate-limit');
-const READS=Object.assign(Object.create(null),{marketplace:new Set(['paymentSimulation','vehicles','categories','shops','requests','request','quotes','bookings','booking','notifications','notificationSummary','receipt']),messaging:new Set(['list','get','summary']),posts:new Set(['feed','mine','saved','get']),photos:new Set(['list']),'/profile/photos':new Set(['status'])});
+const READS=Object.assign(Object.create(null),{'service-reviews':new Set(['bookingReview','workshopReviews']),admin:new Set(['serviceReviews']),marketplace:new Set(['paymentSimulation','vehicles','categories','shops','requests','request','quotes','bookings','booking','notifications','notificationSummary','receipt']),messaging:new Set(['list','get','summary']),posts:new Set(['feed','mine','saved','get']),photos:new Set(['list']),'/profile/photos':new Set(['status'])});
 function category(req){
  const path=req.path.toLowerCase().replace(/\/+$/,'')||'/',op=req.body?.op;
  if(path==='/session')return 'session';

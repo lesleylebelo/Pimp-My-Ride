@@ -92,6 +92,7 @@ function QuoteComparison({route, navigation}) {
         <Text>Rank 1 of {recommendations.eligibleCount} eligible quotations · {formatMoney(recommended.totalCents)}</Text>
         <Text>{(recommended.explanations||[]).join('. ')}.</Text>
         <Text>{recommended.distanceKm == null ? 'Distance unavailable' : `${recommended.distanceKm.toFixed(1)} km (straight-line)`}</Text>
+        <Text>{recommended.ratingExplanation}</Text>
         <Text>{recommendations.distanceNote}</Text>
         <Text>Advisory only. Coverage is confirmed by the shop; review the scope and choose any available quotation. Rankings include all current quotations and refresh every 30 seconds.</Text>
       </Card>}
@@ -100,13 +101,14 @@ function QuoteComparison({route, navigation}) {
         <Text>{recommendations?.limitation||(quotes.length===0?'No current eligible quotations are available for comparison.':quotes.length===1?'Only one current quotation is available. Review its terms; no overall winner can be recommended.':'Insufficient confirmed information to recommend an overall winner. Compare the stated terms below.')}</Text>
       </Card>}
       {!!recommendations?.scoringNote&&<Text style={styles.muted}>{recommendations.scoringNote}</Text>}
-      <Text style={styles.muted}>Inclusions, exclusions and additional terms are those stated in each offer's scope. No workshop quality, performance or warranty rating is inferred.</Text>
+      <Text style={styles.muted}>Inclusions, exclusions and additional terms are those stated in each offer's scope. Customer reviews reflect service experiences and do not certify mechanical quality or safety.</Text>
       <View style={styles.grid}>{displayQuotes.map(quote => {
         const assessment = ranking.get(quote.id);
         const currentTerms = matchesRequestVersion(quote,request);
         const eligible = !analysisUnavailable&&request.id===id&&request.status === 'open' && available(quote, Math.max(now, Date.now())) && currentTerms&&assessment?.comparable!==false;
         return <View key={quote.id} style={[styles.gridCell,wide&&styles.wideCell]}><QuotationCard quote={quote} request={request}>
           {request.status==='open' && !!quote.shopId && <ConversationAction serviceRequestId={id} shopId={quote.shopId} navigation={navigation} disabled={disabled}/>}
+          {!!assessment?.ratingExplanation&&<Text>{assessment.ratingExplanation}</Text>}
           {!!assessment?.rank && <Text weight="semibold">Rank {assessment.rank} of {recommendations.eligibleCount}{recommendations.status==='tie'&&assessment.rank===1?' · Tied':recommended?.id === quote.id ? ' · Recommended' : ''}</Text>}
           <Text>Remaining after stated deposit: {formatMoney(assessment?.remainingAfterDepositCents??((quote.depositType==='fixed'||quote.depositType==='percentage')&&Number.isSafeInteger(quote.depositAmountCents)?quote.totalCents-quote.depositAmountCents:quote.depositType==='none'?quote.totalCents:null))}</Text>
           {!quote.scope&&<Text>Service scope: Not specified</Text>}

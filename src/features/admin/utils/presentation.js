@@ -18,6 +18,7 @@ export const adminSections = [
   {route: 'AdminAccounts', filter: 'pending', label: 'Workshop Applications', icon: 'clipboard-outline'},
   {route: 'AdminCategories', label: 'Service Categories', icon: 'layers-outline'},
   {route: 'AdminPresence', label: 'Online Status', icon: 'pulse-outline'},
+  {route: 'AdminServiceReviews', label: 'Service Reviews', icon: 'star-outline'},
   {route: 'AdminAudit', label: 'Activity Log', icon: 'time-outline'},
 ];
 export function activeSection(route) {

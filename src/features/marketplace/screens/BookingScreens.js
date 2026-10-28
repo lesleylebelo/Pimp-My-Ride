@@ -1,3 +1,4 @@
+import {BookingReview,WorkshopBookingReview} from '../components/ServiceReviews';
 import React, {useEffect, useRef, useState} from 'react';
 import {ActivityIndicator, RefreshControl, useWindowDimensions, View} from 'react-native';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
@@ -190,6 +191,8 @@ function BookingDetail({navigation, id}) {
         </View>
         {booking.status!=='cancelled' && <ConversationAction serviceRequestId={booking.serviceRequestId} shopId={booking.shopId} navigation={navigation} disabled={disabled}/>}
       </Card>
+      {profile?.role==='owner'&&(booking.serviceStatus==='completed'||booking.serviceCompletedAt)&&<BookingReview booking={booking} disabled={disabled}/>}
+      {profile?.role==='shop'&&booking.serviceStatus==='completed'&&<WorkshopBookingReview key={booking.id} booking={booking}/>}
       <MockPaymentNotice capability={capability}/>
       <Card>
         <Text weight="semibold" style={styles.heading}>Accepted quotation & payment choice</Text>

@@ -1,3 +1,4 @@
+import {RatingSummary} from '../../marketplace/components/ServiceReviews';
 import React from 'react';
 import {StyleSheet, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
@@ -32,6 +33,7 @@ export default function CustomerFeedPostPresentation({
         <View style={styles.identityCopy}>
           <CustomerText style={styles.author}>{author}</CustomerText>
           {!!(place || time) && <CustomerText muted style={styles.meta}>{[place, time].filter(Boolean).join(' · ')}</CustomerText>}
+          {!!post.shop?.ratingSummary&&<RatingSummary summary={post.shop.ratingSummary}/>}
           {verified && <CustomerText style={[styles.meta, {color: theme.textPrimary}]}>Verified workshop</CustomerText>}
         </View>
       </Identity>
