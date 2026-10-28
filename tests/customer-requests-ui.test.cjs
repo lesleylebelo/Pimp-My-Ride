@@ -114,6 +114,21 @@ test('create and edit guard changed drafts, preserve failed data and lock duplic
  });
 });
 
+test('preferred-date picker restores saved dates, changes the existing request contract and can return to flexible',async()=>{
+ const s=setup();await mount(s,'RequestFormScreen',{request:{...request,preferredDate:'2099-10-15'}},async tree=>{
+  const date=()=>tree.root.findAllByType('input').find(node=>node.props['aria-label']==='Preferred date (optional)');
+  assert.equal(date().props.type,'date');assert.equal(date().props.value,'2099-10-15');
+  await act(async()=>date().props.onChange({target:{value:'2099-10-16',validity:{badInput:false}}}));
+  assert.equal(date().props.value,'2099-10-16');assert.equal(s.state.calls.length,0);
+  await press(tree,'Save request');assert.equal(s.state.calls[0].data.preferredDate,'2099-10-16');
+ });
+ const flexible=setup();await mount(flexible,'RequestFormScreen',{request:{...request,preferredDate:'2099-10-15'}},async tree=>{
+  await press(tree,'Clear Preferred date (optional)');
+  assert.equal(tree.root.findByType('input').props.value,'');
+  await press(tree,'Save request');assert.equal(flexible.state.calls[0].data.preferredDate,'');
+ });
+});
+
 test('closed edits and archived vehicle preselection cannot expose a working submit path',async()=>{
  const s=setup();await mount(s,'RequestFormScreen',{request:{...request,status:'closed'}},async tree=>{assert.equal(button(tree,'Save request'),undefined);assert.match(text(tree),/can no longer be edited/);});
  await mount(s,'RequestFormScreen',{vehicleId:vehicle.id,vehicle:{...vehicle,archived:true}},async tree=>{assert.equal(tree.root.findAllByType('PhotoGallery').length,0);assert.equal(button(tree,'Submit request').props.disabled,true);});

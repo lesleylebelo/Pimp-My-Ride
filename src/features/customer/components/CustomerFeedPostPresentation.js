@@ -10,9 +10,10 @@ import ShowcasePhoto from '../../marketplace/components/ShowcasePhoto';
 // access stays in ShowcasePhoto; the detail screen retains its full gallery.
 export default function CustomerFeedPostPresentation({
   post, onOpen, photos, author, place, time, vehicle,
-  saved, busy, offline, error, onToggleSaved,
+  saved, busy, offline, error, message, onToggleSaved, onProfile,
 }) {
   const {theme} = useTheme();
+  const Identity=onProfile?CustomerPressable:View;
   const shopAuthor = post.authorRole === 'shop';
   const verified = shopAuthor && (
     post.verificationStatus === 'approved' || post.shop?.verificationStatus === 'approved'
@@ -20,7 +21,7 @@ export default function CustomerFeedPostPresentation({
 
   return (
     <CustomerCard style={styles.post}>
-      <View style={styles.identity}>
+      <Identity accessibilityRole={onProfile?'button':undefined} accessibilityLabel={onProfile?`View workshop: ${author}`:undefined} onPress={onProfile} style={styles.identity}>
         <ProfileAvatar
           context={shopAuthor && post.shop?.id ? 'shop' : 'post'}
           id={shopAuthor && post.shop?.id ? post.shop.id : post.id}
@@ -33,7 +34,7 @@ export default function CustomerFeedPostPresentation({
           {!!(place || time) && <CustomerText muted style={styles.meta}>{[place, time].filter(Boolean).join(' · ')}</CustomerText>}
           {verified && <CustomerText style={[styles.meta, {color: theme.textPrimary}]}>Verified workshop</CustomerText>}
         </View>
-      </View>
+      </Identity>
 
       <CustomerPressable
         accessibilityRole="button"
@@ -73,6 +74,7 @@ export default function CustomerFeedPostPresentation({
         />
       </View>
       {!!error && <CustomerText accessibilityRole="alert" style={{color: theme.error}}>{error}</CustomerText>}
+      {!!message && <CustomerText accessibilityLiveRegion="polite" muted>{message}</CustomerText>}
     </CustomerCard>
   );
 }

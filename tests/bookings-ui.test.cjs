@@ -4,14 +4,15 @@ global.IS_REACT_ACT_ENVIRONMENT=true;
 const booking={simulated:true,testTransaction:true,paymentProvider:'mock',paymentAccountingMode:'simulated',id:'fixture-booking',serviceRequestId:'fixture-request',quoteId:'fixture-quote',shopId:'fixture-shop',shopName:'Fixture Workshop with a long supplied name',customerName:'Fixture Customer',requestTitle:'Restore bonnet',vehicle:{make:'Toyota',model:'Corolla',year:2024,colour:'Blue'},status:'pending_confirmation',serviceStatus:'not_started',paymentMethod:'pay_in_store',paymentStatus:'due',totalCents:10050,paidCents:0,balanceDueCents:10050,depositType:'fixed',depositValue:2500,depositAmountCents:2500,scope:'Prepare and paint the bonnet.',items:[{description:'Paint and labour',amountCents:10050}],completionDays:4};
 const button=(tree,label)=>tree.root.findAllByType('Pressable').find(n=>n.props.accessibilityLabel===label);
 const text=tree=>tree.root.findAllByType('Text').map(n=>[n.props.children].flat().join('')).join('\n');
-const input=(tree,label)=>tree.root.findAllByType('TextInput').find(n=>n.props.accessibilityLabel===label);
+const input=(tree,label)=>tree.root.findAll(node=>['AppDatePicker','AppTimePicker'].includes(node.type?.name)).find(node=>node.props.label===label)||tree.root.findAllByType('TextInput').find(node=>node.props.accessibilityLabel===label);
 const press=(tree,label)=>act(async()=>button(tree,label).props.onPress());
 const flatten=value=>Object.assign({},...[value].flat(Infinity).filter(Boolean));
 function setup(role='owner',mode='dark',platform='ios',width=390){
  const {palettes}=loadUI('src/shared/theme/colors.js');
- const state={auth:{user:{uid:role},profile:{role},offline:false},data:{booking},busy:false,error:'',calls:[],moves:[],refreshes:0};
+ const state={auth:{user:{uid:role},profile:{role},offline:false},data:{booking},busy:false,error:'',calls:[],moves:[],refreshes:0,pickers:[]};
  const mocks={
   'react-native':{Platform:{OS:platform},useWindowDimensions:()=>({width,height:844,fontScale:1,scale:1})},
+  '@react-native-community/datetimepicker':{__esModule:true,default:'NativeDateTimePicker',DateTimePickerAndroid:{open:props=>state.pickers.push(props),dismiss:async()=>true}},
   '../../../shared/components/landing/LandingUI':{LandingText:'Text',ownerTabs:['Discover','Garage','My Requests','Bookings','Profile'].map(label=>({label})),shopTabs:['Find Jobs','Requests','Quotes','Bookings','My Shop'].map(label=>({label}))},
   '../../auth/context/AuthContext':{useAuth:()=>state.auth},
   '../../../shared/theme/ThemeContext':{useTheme:()=>({theme:palettes[mode],isDark:mode==='dark'})},
@@ -27,7 +28,7 @@ function setup(role='owner',mode='dark',platform='ios',width=390){
 }
 async function mounted(Component,props,run){let tree;await act(async()=>{tree=create(React.createElement(Component,props));});try{await run(tree,()=>act(async()=>tree.update(React.createElement(Component,props))));}finally{await act(async()=>tree.unmount());}}
 const details=s=>({navigation:s.navigation,route:{params:{id:booking.id}}});
-async function appointment(tree){await act(async()=>input(tree,'Appointment date (YYYY-MM-DD)').props.onChangeText('2099-01-02'));await act(async()=>input(tree,'Appointment time (HH:mm, SAST)').props.onChangeText('14:30'));}
+async function appointment(tree){await act(async()=>input(tree,'Appointment date').props.onChange('2099-01-02'));await act(async()=>input(tree,'Appointment time (SAST)').props.onChange('14:30'));}
 
 test('booking overviews use role-authorised names and do not invent customer contacts',async()=>{
  for(const role of ['owner','shop']){
@@ -76,11 +77,29 @@ test('booking details show exact accepted price and deposit without treating ser
 test('appointment review can be cancelled and only its final confirmation writes',async()=>{
  const s=setup('shop');await mounted(s.screens.BookingDetailScreen,details(s),async tree=>{
   await appointment(tree);await press(tree,'Confirm booking');assert.equal(s.state.calls.length,0);assert.match(text(tree),/does not change payment status/);
-  await press(tree,'Cancel');assert.equal(input(tree,'Appointment date (YYYY-MM-DD)').props.value,'2099-01-02');assert.equal(s.state.calls.length,0);
+  await press(tree,'Cancel');assert.equal(input(tree,'Appointment date').props.value,'2099-01-02');assert.equal(s.state.calls.length,0);
   await press(tree,'Confirm booking');await press(tree,'Confirm');assert.deepEqual(s.state.calls,[{op:'bookingConfirm',data:{id:booking.id,appointmentDate:'2099-01-02',appointmentTime:'14:30'}}]);
   assert.match(text(tree),/Booking confirmed/);assert.equal(button(tree,'Confirm booking'),undefined);
  });
 });
+test('Android and web appointment pickers retain SAST values through the existing confirmation flow',async()=>{
+ for(const platform of ['android','web']){
+  const s=setup('shop','dark',platform);await mounted(s.screens.BookingDetailScreen,details(s),async tree=>{
+   if(platform==='web'){
+    const field=label=>tree.root.findAllByType('input').find(node=>node.props['aria-label']===label);
+    await act(async()=>field('Appointment date').props.onChange({target:{value:'2099-01-02',validity:{badInput:false}}}));
+    await act(async()=>field('Appointment time (SAST)').props.onChange({target:{value:'00:30',validity:{badInput:false}}}));
+   }else{
+    await press(tree,'Appointment date');await act(async()=>s.state.pickers.at(-1).onValueChange({},new Date('2099-01-02T12:00:00+02:00')));
+    await press(tree,'Appointment time (SAST)');await act(async()=>s.state.pickers.at(-1).onValueChange({},new Date('2099-01-01T22:30:00Z')));
+   }
+   assert.equal(s.state.calls.length,0);
+   await press(tree,'Confirm booking');await press(tree,'Confirm');
+   assert.deepEqual(s.state.calls,[{op:'bookingConfirm',data:{id:booking.id,appointmentDate:'2099-01-02',appointmentTime:'00:30'}}]);
+  });
+ }
+});
+
 test('completion requires confirmation, preserves failures, and retains an acknowledged result over a stale refresh',async()=>{
  const s=setup('shop');s.state.data={booking:{...booking,status:'confirmed'}};let fail=true;s.state.api=async()=>{if(fail)throw Error('Completion unavailable');return {id:booking.id,serviceStatus:'completed'};};
  await mounted(s.screens.BookingDetailScreen,details(s),async tree=>{
@@ -141,7 +160,7 @@ test('booking forms preserve safe areas and platform keyboard handling without a
  for(const platform of ['ios','android','web']){
   const s=setup('shop','dark',platform);await mounted(s.screens.BookingDetailScreen,details(s),async tree=>{
    assert.deepEqual(tree.root.findByType('SafeAreaView').props.edges,['top','bottom','left','right']);assert.equal(tree.root.findByType('KeyboardAvoidingView').props.behavior,platform==='ios'?'padding':platform==='android'?'height':undefined);
-   assert.equal(tree.root.findAllByType('TextInput').length,3);assert.equal(tree.root.findByType('ScrollView').props.keyboardShouldPersistTaps,'handled');assert.equal(s.state.calls.length,0);
+   assert.equal(tree.root.findAllByType('TextInput').length,1);assert.equal(tree.root.findByType('ScrollView').props.keyboardShouldPersistTaps,'handled');assert.equal(s.state.calls.length,0);
   });
  }
 });

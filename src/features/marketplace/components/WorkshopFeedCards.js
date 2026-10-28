@@ -36,7 +36,7 @@ export function WorkshopRequestCard({request, disabled, onOpen, time}) {
   </Card>;
 }
 
-export function WorkshopShowcaseCard({post, photos, author, place, time, vehicle, onOpen, onProfile, saved, busy, offline, error, onToggleSaved, management}) {
+export function WorkshopShowcaseCard({post, photos, author, place, time, vehicle, onOpen, onProfile, saved, busy, offline, error, message, onToggleSaved, management}) {
   const {theme} = useTheme();
   return <Card style={styles.card}>
     <Identity onPress={onProfile} label={`View workshop: ${author}`}>
@@ -55,6 +55,7 @@ export function WorkshopShowcaseCard({post, photos, author, place, time, vehicle
       <Action title={saved ? 'Unsave post' : 'Save post'} icon={saved ? 'bookmark' : 'bookmark-outline'} iconOnly loading={busy} disabled={offline || busy} accessibilityState={{selected: saved}} onPress={event => {event?.stopPropagation?.(); void onToggleSaved();}}/>
     </View>
     {!!error && <Text accessibilityRole="alert" style={{color: theme.error}}>{error}</Text>}
+    {!!message && <Text accessibilityLiveRegion="polite" muted>{message}</Text>}
     {management}
   </Card>;
 }

@@ -1,13 +1,15 @@
 import {createReadCoordinator,invalidateReads} from '../../../shared/services/readCoordinator';
 import {Platform} from 'react-native';
 import {photoFileError,preparePhoto} from '../utils/photos';
+import {bookmarkSession,bookmarkRevision,publishBookmark,saveBookmark} from './bookmarkState';
 
 const pending=new Map();
 let lastUid;
 const api=()=>require('../../../shared/services/api');
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 function account(expectedUid){
- const uid=require('../../../shared/services/firebase').firebase().auth.currentUser?.uid;
+ const user=require('../../../shared/services/firebase').firebase().auth.currentUser,uid=user?.uid;
+ bookmarkSession(user);
  if(uid!==lastUid){pending.clear();lastUid=uid;}
  if(!uid)throw new Error('Sign in to continue.');
  if(expectedUid&&uid!==expectedUid)throw new Error('Your account changed. Please try again.');
@@ -92,9 +94,12 @@ export async function removePostPhoto(path,expectedUid){
 
 const coordinatedRead=createReadCoordinator(()=>require('../../../shared/services/firebase').firebase().auth.currentUser);
 export async function postsApi(op,data={},expectedUid,options={}){
- account(expectedUid);
+ const uid=account(expectedUid);
+ if(op==='save')return saveBookmark(uid,data.id,data.saved,async()=>{try{return await executePostsApi(op,data,uid);}finally{invalidateReads();}});
  if(!['feed','mine','saved','get'].includes(op)){try{return await executePostsApi(op,data,expectedUid);}finally{invalidateReads();}}
- return coordinatedRead([op,data],()=>executePostsApi(op,data,expectedUid),{ttl:op==='get'?0:5000,...options});
+ const started=bookmarkRevision(),result=await coordinatedRead([op,data],()=>executePostsApi(op,data,expectedUid),{ttl:op==='get'?0:5000,...options});
+ for(const post of result?.items||[result?.post])if(post?.id&&typeof post.saved==='boolean')publishBookmark(uid,post.id,post.saved,started);
+ return result;
 }
 
 const coordinatedMedia=createReadCoordinator(()=>require('../../../shared/services/firebase').firebase().auth.currentUser);

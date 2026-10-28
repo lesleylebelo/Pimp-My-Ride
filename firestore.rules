@@ -25,16 +25,15 @@ service cloud.firestore {
    }
    match /savedPosts/{postId} {
     allow get, list: if own(uid) && verified() && activeUser(uid);
-    allow create: if own(uid) && verified() && activeUser(uid)
-     && request.resource.data.keys().hasOnly(['postId','createdAt'])
-     && request.resource.data.postId == postId && request.resource.data.createdAt is timestamp
-     && get(/databases/$(database)/documents/posts/$(postId)).data.status == 'published';
-    allow delete: if own(uid) && verified() && activeUser(uid);
-    allow update: if false;
+    // All bookmark mutations use the revoked-token-aware posts API, which
+    // derives the owner and checks current showcase/workshop eligibility.
+    allow create, update, delete: if false;
    }
   }
   match /posts/{postId} {
-   allow get, list: if verified() && activeUser(request.auth.uid) && resource.data.status == 'published';
+   // API reads recheck author eligibility and return a public field projection.
+   // Direct SDK reads would bypass those checks and disclose full records.
+   allow get, list: if false;
    // All post writes go through the authenticated API, which enforces shop
    // ownership, validates uploaded storage objects and records audit events.
    allow create, delete: if false;

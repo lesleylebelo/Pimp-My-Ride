@@ -14,6 +14,7 @@ import {CustomerAction,useCustomerExperience} from '../../customer/components/Cu
 import CustomerPostPresentation from '../../customer/components/CustomerPostPresentation';
 import CustomerFeedPostPresentation from '../../customer/components/CustomerFeedPostPresentation';
 import {WorkshopShowcaseCard} from './WorkshopFeedCards';
+import {usePostBookmark} from '../hooks/usePostBookmark';
 
 export function postTime(value){
  const timestamp=typeof value?.toMillis==='function'?value.toMillis():Number(value)||new Date(value).getTime();
@@ -29,12 +30,10 @@ function formatVehicle(value){
 }
 export function PostCard({post,onOpen,onEdit,onRemoved,editable=false,onSaved,presentation='card',onProfile}){
  const {theme}=useTheme(),colors={...baseColors,primary:theme.accent,textPrimary:theme.textPrimary,textSecondary:theme.textSecondary,background:theme.surfaceMuted,brandGreenLight:theme.accentLight,border:theme.divider,error:theme.error,white:theme.textPrimary},styles=makeStyles(colors);
- const {user,profile,offline}=useAuth(),[saved,setSaved]=useState(post.saved===true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[menu,setMenu]=useState(false);
+ const {user,profile}=useAuth(),[managementError,setError]=useState(''),[menu,setMenu]=useState(false);
+ const bookmark=usePostBookmark(post),{saved,busy,message}=bookmark,offline=bookmark.disabled,error=bookmark.error||managementError;
  async function toggleSaved(){
-  if(busy||offline)return;setBusy(true);setError('');
-  try{const next=!saved;await postsApi('save',{id:post.id,saved:next},user?.uid);setSaved(next);onSaved?.(post.id,next);}
-  catch(e){setError(e.message||'Unable to update saved posts.');}
-  finally{setBusy(false);}
+  const next=await bookmark.toggle();if(typeof next==='boolean')onSaved?.(post.id,next);
  }
  const photos=(Array.isArray(post.images)?post.images:[]).map(image=>typeof image==='string'?{url:image}:image).filter(hasPostImage);
  const vehicle=formatVehicle(post.vehicle);
@@ -42,8 +41,8 @@ export function PostCard({post,onOpen,onEdit,onRemoved,editable=false,onSaved,pr
  const author=post.shop?.name||post.authorName||(post.type==='showcase'?'Workshop':'Customer');
  const customer=useCustomerExperience();
  const CustomerPresentation=presentation==='feed'?CustomerFeedPostPresentation:CustomerPostPresentation;
- if(customer)return <CustomerPresentation {...{post,onOpen,photos,author,place,vehicle,saved,busy,offline,error}} time={postTime(post.createdAt)} onToggleSaved={toggleSaved}/>;
- if(profile?.role==='shop'&&presentation==='feed')return <WorkshopShowcaseCard {...{post,onOpen,onProfile,photos,author,place,vehicle,saved,busy,offline,error}} time={post.createdAt==null?'':postTime(post.createdAt)} onToggleSaved={toggleSaved} management={editable?<View style={{gap:10}}><CustomerAction title="Edit post" onPress={()=>onEdit?.(post)}/><ConfirmationButton title="Delete post" message="Delete this post from public feeds? This cannot be undone." danger presentation="feed" onConfirm={async()=>{try{await postsApi('remove',{id:post.id,...(post.type==='showcase'?{showcase:true}:{})},user?.uid);onRemoved?.(post.id);}catch(e){setError(e.message||'Unable to delete post.');}}}/></View>:null}/>;
+ if(customer)return <CustomerPresentation {...{post,onOpen,onProfile,photos,author,place,vehicle,saved,busy,offline,error,message}} time={postTime(post.createdAt)} onToggleSaved={toggleSaved}/>;
+ if(profile?.role==='shop'&&presentation==='feed')return <WorkshopShowcaseCard {...{post,onOpen,onProfile,photos,author,place,vehicle,saved,busy,offline,error,message}} time={post.createdAt==null?'':postTime(post.createdAt)} onToggleSaved={toggleSaved} management={editable?<View style={{gap:10}}><CustomerAction title="Edit post" onPress={()=>onEdit?.(post)}/><ConfirmationButton title="Delete post" message="Delete this post from public feeds? This cannot be undone." danger presentation="feed" onConfirm={async()=>{try{await postsApi('remove',{id:post.id,...(post.type==='showcase'?{showcase:true}:{})},user?.uid);onRemoved?.(post.id);}catch(e){setError(e.message||'Unable to delete post.');}}}/></View>:null}/>;
  return <Card style={styles.card}>
   <View style={styles.authorRow}>
    <ProfileAvatar context={post.authorRole==='shop'&&post.shop?.id?'shop':'post'} id={post.authorRole==='shop'&&post.shop?.id?post.shop.id:post.id} revision={post.authorPhotoRevision??post.shop?.profilePhotoRevision} shop={post.authorRole==='shop'} size={38}/>
@@ -61,11 +60,12 @@ export function PostCard({post,onOpen,onEdit,onRemoved,editable=false,onSaved,pr
   {!!vehicle&&<Text style={styles.vehicle}>{vehicle}</Text>}
   <View style={styles.actions}>
    <Pressable accessibilityRole="button" accessibilityLabel={`View ${post.title}`} onPress={onOpen} style={styles.view}><Text weight="medium" style={styles.viewText}>View →</Text></Pressable>
-   <Pressable accessibilityRole="button" accessibilityLabel={saved?'Unsave post':'Save post'} accessibilityState={{selected:saved}} disabled={busy||offline} onPress={()=>void toggleSaved()} style={styles.save}>
+   <Pressable accessibilityRole="button" accessibilityLabel={saved?'Unsave post':'Save post'} accessibilityState={{selected:saved,busy,disabled:busy||offline}} disabled={busy||offline} onPress={event=>{event?.stopPropagation?.();void toggleSaved();}} style={styles.save}>
     <Ionicons name={saved?'bookmark':'bookmark-outline'} size={19} color={saved?colors.primary:colors.textSecondary}/><Text style={styles.saveText}>{saved?'Saved':'Save'}</Text>
    </Pressable>
   </View>
   {!!error&&<Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
+  {!!message&&<Text accessibilityLiveRegion="polite" style={styles.location}>{message}</Text>}
   {menu&&<View style={styles.menu}><Button title="Edit post" outline onPress={()=>{setMenu(false);onEdit?.(post);}}/><ConfirmationButton title="Delete post" message="Delete this post from public feeds? This cannot be undone." danger onConfirm={async()=>{try{await postsApi('remove',{id:post.id,...(post.type==='showcase'?{showcase:true}:{})},user?.uid);setMenu(false);onRemoved?.(post.id);}catch(e){setError(e.message||'Unable to delete post.');}}}/></View>}
  </Card>;
 }

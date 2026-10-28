@@ -5,6 +5,8 @@ import {Ionicons} from '@expo/vector-icons';
 import {usePreventRemove} from '@react-navigation/native';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
 import ConfirmationButton from '../../../shared/components/ConfirmationButton';
+import AppDatePicker from '../../../shared/components/AppDatePicker';
+import {sastToday} from '../../../shared/utils/dateTime';
 import {useAuth} from '../../auth/context/AuthContext';
 import {marketApi} from '../services/marketApi';
 import {useMarketData} from '../hooks/useMarketData';
@@ -253,7 +255,7 @@ function RequestDraft({route, navigation}) {
         <Field style={{flexGrow:1,flexBasis:fontScale>=1.4?'100%':240,minWidth:0}} label="Minimum budget (ZAR)" helperText="Required" placeholder="0.00" value={form.budgetMin} onChangeText={value=>edit('budgetMin',value)} onBlur={()=>setTouched(previous=>({...previous,budgetMin:true}))} keyboardType="decimal-pad" maxLength={12} editable={!disabled} error={fieldError('budgetMin')}/>
         <Field style={{flexGrow:1,flexBasis:fontScale>=1.4?'100%':240,minWidth:0}} label="Maximum budget (ZAR)" helperText="Required" placeholder="0.00" value={form.budgetMax} onChangeText={value=>edit('budgetMax',value)} onBlur={()=>setTouched(previous=>({...previous,budgetMax:true}))} keyboardType="decimal-pad" maxLength={12} editable={!disabled} error={fieldError('budgetMax')}/>
       </View>
-      <Field label="Preferred date (optional, YYYY-MM-DD)" placeholder="YYYY-MM-DD" value={form.preferredDate} onChangeText={value=>edit('preferredDate',value)} onBlur={()=>setTouched(previous=>({...previous,preferredDate:true}))} autoCapitalize="none" maxLength={10} editable={!disabled} error={fieldError('preferredDate')}/>
+      <AppDatePicker label="Preferred date (optional)" value={form.preferredDate} onChange={value=>edit('preferredDate',value)} onBlur={()=>setTouched(previous=>({...previous,preferredDate:true}))} minimumDate={sastToday()} clearable disabled={disabled} error={fieldError('preferredDate')} helperText="Choose today or a future date in South Africa, or leave flexible."/>
     </RequestSection>
     <RequestSection title="Who can respond?" description="Choose the audience for this request.">
       <View style={{flexDirection:'row',flexWrap:'wrap',gap:10}}>{[['open','Any approved shop'],['direct','One approved shop']].map(([value,label])=><RequestAudience key={value} title={label} selected={form.visibility===value} disabled={disabled} onPress={()=>edit('visibility',value)}/>)}</View>

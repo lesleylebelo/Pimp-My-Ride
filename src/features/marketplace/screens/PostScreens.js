@@ -1,5 +1,5 @@
 import {CustomerAction,CustomerGrid,CustomerPressable,useCustomerExperience} from '../../customer/components/CustomerUI';
-import React,{useEffect,useRef,useState} from 'react';
+import React,{useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {Image,Pressable,RefreshControl,ScrollView,View,useWindowDimensions} from 'react-native';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
 import {useAuth} from '../../auth/context/AuthContext';
@@ -17,6 +17,8 @@ import {ShowcaseAction as Button,ShowcasePage,WorkshopIdentity,ShowcaseEmpty,sho
 import {WorkshopFeedColumn} from '../components/WorkshopFeedCards';
 import {usePhotoSource} from '../../../shared/components/PhotoSourceChooser';
 import {useIsFocused} from '@react-navigation/native';
+import {usePostBookmark} from '../hooks/usePostBookmark';
+import {bookmarkRevision,bookmarkSnapshot,subscribeBookmarks} from '../services/bookmarkState';
 const categories = ['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
 const failure=e=>e?.message||'Unable to save this post. Please retry.';
 
@@ -118,6 +120,7 @@ export function MyPostsScreen({navigation,route}){
  return <ShowcasePage showTabs title={shop?'My Shop':'My builds'} navigation={navigation} onScroll={onScroll} onContentSizeChange={onContentSizeChange} refreshControl={<RefreshControl refreshing={feed.refreshing} onRefresh={()=>void feed.refresh()}/>}>
   {shop&&<WorkshopIdentity own shop={{profilePhotoRevision:profile?.profilePhotoRevision,name:profile?.shop?.shopName,avatar:profile?.shop?.avatarUrl||profile?.avatarUrl||profile?.photoURL,city:profile?.shop?.city,province:profile?.shop?.province,verificationStatus:profile?.verificationStatus}}/>}
   {shop&&<Button title="Shop account settings" outline onPress={()=>navigation.navigate('ShopAccount')}/>}
+  {shop&&<Button title="Saved posts" icon="bookmark-outline" outline onPress={()=>navigation.navigate('SavedPosts')}/>}
   <Button title={shop?'New showcase':'Share a build'} disabled={feed.busy||!shop} onPress={()=>navigation.navigate('PostForm',{type})}/>
   <Notice busy={feed.busy} error={feed.error}/>
   {!!feed.error&&<Button title="Retry loading posts" outline onPress={()=>void feed.refresh()}/>}
@@ -129,20 +132,28 @@ export function MyPostsScreen({navigation,route}){
 }
 
 export function SavedPostsScreen({navigation}){
- const [cursor,setCursor]=useState(null),{data,busy,error,refresh}=useMarketData('posts',{view:'saved',cursor});
- const feed=useInfiniteCursor(data,busy,setCursor);
- return <Page title="Saved posts" navigation={navigation} onScroll={feed.onScroll} onLayout={feed.onLayout} onContentSizeChange={feed.onContentSizeChange}>
-  <Notice busy={busy} error={error}/>{feed.items.map(post=><PostCard key={post.id} post={post} onOpen={()=>navigation.navigate('PostDetail',{id:post.id})} onSaved={(id,saved)=>{if(!saved)void refresh().catch(()=>{});}}/>)}
-  {!busy&&data&&!feed.items.length&&<Text>You have not saved any posts yet.</Text>}
- </Page>;
+ const {user,offline}=useAuth(),feed=usePostsFeed({view:'saved'});
+ useSyncExternalStore(subscribeBookmarks,bookmarkRevision,bookmarkRevision);
+ const items=offline?[]:feed.items.filter(post=>bookmarkSnapshot(user?.uid,post.id)?.saved!==false);
+ const onScroll=event=>{const {contentOffset,contentSize,layoutMeasurement}=event.nativeEvent;if(contentSize.height-contentOffset.y-layoutMeasurement.height<400)feed.loadNext();};
+ return <ShowcasePage title="Saved posts" navigation={navigation} onScroll={onScroll} refreshControl={<RefreshControl refreshing={feed.refreshing} onRefresh={()=>void feed.refresh()}/>}>
+  <Notice busy={feed.busy} error={offline?'Connect to view saved posts.':feed.error}/>
+  {!!feed.error&&<Button title="Retry loading saved posts" outline onPress={()=>void feed.refresh()}/>}
+  <WorkshopFeedColumn>{items.map(post=><PostCard key={post.id} post={{...post,saved:true}} presentation="feed" onOpen={()=>navigation.navigate('PostDetail',{id:post.id})} onProfile={post.shop?.id?()=>navigation.navigate('ShopProfile',{shop:post.shop}):undefined}/>)}</WorkshopFeedColumn>
+  {!offline&&!feed.busy&&!feed.error&&!items.length&&!feed.cursor&&<ShowcaseEmpty>You have not saved any posts yet.</ShowcaseEmpty>}
+  {!!feed.cursor&&<Button title="Load more saved posts" outline disabled={feed.busy||offline} onPress={feed.loadNext}/>}
+  <Button title="Refresh saved posts" outline disabled={feed.busy||offline} onPress={()=>void feed.refresh()}/>
+ </ShowcasePage>;
 }
 
 export function PostDetailScreen({navigation,route}){
  const {theme}=useTheme(),ui=showcaseStyles(theme),{width}=useWindowDimensions(),[selected,setSelected]=useState(0);
  const customer=useCustomerExperience(),Interaction=customer?CustomerPressable:Pressable;
- const {user}=useAuth(),[post,setPost]=useState(null),[busy,setBusy]=useState(true),[error,setError]=useState('');
+ const {user}=useAuth(),[loaded,setPost]=useState(null),[busy,setBusy]=useState(true),[error,setError]=useState('');
+ const post=loaded&&loaded.uid===user?.uid&&loaded.id===route.params?.id?loaded.post:null;
+ const bookmark=usePostBookmark(post);
  const [retry,setRetry]=useState(0);
- useEffect(()=>{let active=true;setBusy(true);setPost(null);setError('');postsApi('get',{id:route.params?.id},user?.uid).then(result=>{if(active)setPost(result.post);}).catch(e=>{if(active)setError(e.message||failure(e));}).finally(()=>{if(active)setBusy(false);});return()=>{active=false;};},[route.params?.id,user?.uid,retry]);
+ useEffect(()=>{let active=true;setBusy(true);setPost(null);setError('');postsApi('get',{id:route.params?.id},user?.uid).then(result=>{if(active)setPost({uid:user?.uid,id:route.params?.id,post:result.post});}).catch(e=>{if(active)setError(e.message||failure(e));}).finally(()=>{if(active)setBusy(false);});return()=>{active=false;};},[route.params?.id,user?.uid,retry]);
  const photos=(Array.isArray(post?.images)?post.images:[]).map(image=>typeof image==='string'?{url:image}:image).filter(hasPostImage),vehicle=post?.vehicle;
  useEffect(()=>setSelected(0),[post?.id]);
  const date=typeof post?.createdAt==='number'&&Number.isFinite(post.createdAt)?new Date(post.createdAt).toLocaleDateString('en-ZA'):null;
@@ -159,6 +170,9 @@ export function PostDetailScreen({navigation,route}){
    {!!post.description&&<Text style={ui.body}>{post.description}</Text>}
    {(vehicle?.make||vehicle?.model||vehicle?.year)&&<Text style={ui.muted}>{[vehicle.year,vehicle.make,vehicle.model].filter(Boolean).join(' ')}</Text>}
    {!!date&&<Text style={ui.muted}>Published {date}</Text>}</View>
+   <CustomerAction title={bookmark.saved?'Unsave post':'Save post'} icon={bookmark.saved?'bookmark':'bookmark-outline'} accessibilityState={{selected:bookmark.saved}} loading={bookmark.busy} disabled={bookmark.disabled||bookmark.busy} onPress={()=>void bookmark.toggle()}/>
+   {!!bookmark.error&&<Text accessibilityRole="alert">{bookmark.error}</Text>}
+   {!!bookmark.message&&<Text accessibilityLiveRegion="polite">{bookmark.message}</Text>}
    {!!post.shop&&<><WorkshopIdentity shop={post.shop}/><Button title="View workshop portfolio" outline onPress={()=>navigation.navigate('ShopProfile',{shop:post.shop})}/></>}
   </>}
  </ShowcasePage>;

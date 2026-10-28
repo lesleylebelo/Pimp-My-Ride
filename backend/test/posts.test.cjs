@@ -17,7 +17,8 @@ function fixture({privateMedia=false}={}){
  const ref=path=>({path,id:path.split('/').at(-1),get:async()=>snapshot(path),update:async changes=>{rows.set(path,{...rows.get(path),...Object.fromEntries(Object.entries(changes).map(([key,value])=>[key,normalize(value)]))});}});
  const db={rows,queryReads:[],doc:ref,collection(name){return {
   doc(id){return ref(`${name}/${id||`post-${++sequence}`}`);},
-  where(field,operator,value){return query(name,[[field,operator,value]]);}
+  where(field,operator,value){return query(name,[[field,operator,value]]);},
+  orderBy(field,direction){return query(name).orderBy(field,direction);}
  };},async runTransaction(work){
   const writes=[];
   const tx={
@@ -26,6 +27,7 @@ function fixture({privateMedia=false}={}){
     if(rows.has(document.path))throw Error('already exists');
     rows.set(document.path,Object.fromEntries(Object.entries(value).map(([key,item])=>[key,normalize(item)])));
    }),
+   delete:document=>writes.push(()=>rows.delete(document.path)),
    update:(document,value)=>writes.push(()=>rows.set(document.path,{...rows.get(document.path),...Object.fromEntries(Object.entries(value).map(([key,item])=>[key,normalize(item)]))}))
   };
   const result=await work(tx);
@@ -37,7 +39,7 @@ function fixture({privateMedia=false}={}){
  function query(name,filters=[],sort=[],after=null,take=20){
   const q={
    where(field,operator,value){return query(name,[...filters,[field,operator,value]],sort,after,take);},
-   orderBy(field,direction='asc'){return query(name,filters,[...sort,[field,direction]],after,take);},
+   orderBy(field,direction='asc'){return query(name,filters,[...sort,[typeof field==='string'?field:'__name__',direction]],after,take);},
    startAfter(...values){return query(name,filters,sort,values,take);},
    limit(value){return query(name,filters,sort,after,value);},
    async get(){
@@ -45,12 +47,16 @@ function fixture({privateMedia=false}={}){
     for(const [field,operator,value] of filters)docs=docs.filter(doc=>operator==='=='&&doc.get(field)===value);
     for(const [field,direction] of [...sort].reverse())docs.sort((a,b)=>{
      const left=field==='__name__'?a.id:a.get(field),right=field==='__name__'?b.id:b.get(field);
+     if(left instanceof Timestamp&&right instanceof Timestamp)return (left.seconds-right.seconds||left.nanoseconds-right.nanoseconds)*(direction==='desc'?-1:1);
      const l=left?.toMillis?.()??left,r=right?.toMillis?.()??right;
      return (l<r?-1:l>r?1:0)*(direction==='desc'?-1:1);
     });
     if(after){
+     if(sort[0]?.[0]==='__name__')docs=docs.filter(doc=>doc.id>(typeof after[0]==='string'?after[0]:after[0].id));
+     else {
      const [time,id]=after;
      docs=docs.filter(doc=>{const created=doc.get('createdAt'),comparison=created.seconds-time.seconds||created.nanoseconds-time.nanoseconds;return comparison<0||comparison===0&&doc.id<id;});
+     }
     }
     const selected=docs.slice(0,take);db.queryReads.push({name,documents:selected.length});
     return {docs:selected,size:selected.length};
@@ -68,7 +74,7 @@ function fixture({privateMedia=false}={}){
  const actor=async({auth:identity})=>({uid:identity.uid,profile:(await db.doc(`users/${identity.uid}`).get()).data()});
  const api=createPosts({db,auth,actor,storage}),services={postsList:api.postsList,postDetail:api.postDetail,createShowcase:api.createShowcase,updateShowcase:api.updateShowcase,deleteShowcase:api.deleteShowcase,postsApi:api.postsApi,viewPostImage:api.viewPostImage};
  const app=createApp({auth,services}),token=uid=>`Bearer ${uid}`,image=(uid,name)=>{const path=`posts/${uid}/${name}`;files.set(path,{size:128,contentType:'image/png'});return path;};
- return {app,db,files,removals,storage,api,token,image};
+ return {app,db,files,removals,storage,api,auth,token,image};
 }
 
 test('showcase REST CRUD enforces role/ownership, validates fields and updates the public feed',async()=>{
@@ -322,4 +328,90 @@ test('sparse search bounds each request to 200 documents and continues without s
  f.db.queryReads.length=0;
  const next=await request(f.app).get('/api/posts').query({q:'needle',limit:20,cursor:first.body.data.cursor}).set('Authorization',f.token('customer')).expect(200);
  assert.deepEqual(next.body.data.items.map(item=>item.id),['scan-220']);assert.equal(next.body.data.cursor,null);assert.equal(f.db.queryReads.reduce((sum,r)=>sum+r.documents,0),50);
+});
+
+
+const bookmark=(f,uid,id,saved)=>f.api.postsApi({auth:{uid},data:{op:'save',id,saved}});
+const savedPosts=(f,uid='customer',cursor)=>f.api.postsApi({auth:{uid},data:{op:'saved',...(cursor?{cursor}:{})}});
+function seedBookmark(f,id,{status='published',authorRole='shop',type='showcase',shopId='shop'}={}){
+ f.db.rows.set('posts/'+id,{authorId:shopId,shopId,authorRole,type,status,title:id,description:'Shared work',images:[],vehicle:{year:2024,make:'Honda',model:'Civic'},createdAt:Timestamp.now()});
+ f.db.rows.set('users/customer/savedPosts/'+id,{postId:id,createdAt:Timestamp.now()});
+}
+
+test('bookmarks persist idempotently by authenticated identity and REST reads restore the saved state',async()=>{
+ const f=fixture();seedBookmark(f,'saved-one');f.db.rows.delete('users/customer/savedPosts/saved-one');
+ for(let i=0;i<3;i++)assert.deepEqual(await bookmark(f,'customer','saved-one',true),{id:'saved-one',saved:true});
+ assert.equal([...f.db.rows.keys()].filter(path=>path.startsWith('users/customer/savedPosts/')).length,1);
+ assert.equal((await savedPosts(f)).items[0].shop.name,'North Garage');
+ assert.equal((await f.api.postsList({auth:{uid:'customer'},query:{}})).items[0].saved,true);
+ assert.equal((await f.api.postDetail({auth:{uid:'customer'},id:'saved-one'})).post.saved,true);
+ assert.equal((await f.api.postDetail({auth:{uid:'other'},id:'saved-one'})).post.saved,false);
+ assert.equal((await savedPosts(f,'other')).items.length,0);
+ await bookmark(f,'customer','saved-one',false);await bookmark(f,'customer','saved-one',false);
+ assert.equal((await savedPosts(f)).items.length,0);
+ assert.equal((await f.api.postDetail({auth:{uid:'customer'},id:'saved-one'})).post.saved,false);
+});
+
+test('bookmark HTTP operations reject unauthenticated and forged owner fields without touching other accounts',async()=>{
+ const f=fixture();seedBookmark(f,'own');
+ await request(f.app).post('/api/posts').send({op:'saved'}).expect(401);
+ for(const data of [{op:'save',id:'own',saved:true,uid:'other'},{op:'saved',authorId:'customer'},{op:'saved',uid:'customer'},{op:'save',id:'own',saved:'true'}]){
+  await request(f.app).post('/api/posts').set('Authorization',f.token('other')).send(data).expect(400);
+ }
+ const own=await request(f.app).post('/api/posts').set('Authorization',f.token('customer')).send({op:'saved'}).expect(200);
+ assert.equal(own.body.data.items.length,1);
+ assert.equal(f.db.rows.has('users/other/savedPosts/own'),false);
+ for(const profile of [{role:'admin',accountStatus:'active'},{role:'owner',accountStatus:'suspended'},{role:'owner',accountStatus:'active',statusOperation:'pending'}]){
+  f.db.rows.set('users/restricted',profile);
+  await assert.rejects(()=>savedPosts(f,'restricted'),{code:'permission-denied'});
+  await assert.rejects(()=>bookmark(f,'restricted','own',true),{code:'permission-denied'});
+ }
+});
+
+test('saved views reject unpublished, deleted, customer builds and unavailable workshops, but stale bookmarks remain removable',async()=>{
+ const f=fixture();
+ seedBookmark(f,'visible');seedBookmark(f,'removed',{status:'removed'});seedBookmark(f,'draft',{status:'draft'});seedBookmark(f,'build',{authorRole:'customer',type:'build',shopId:'customer'});seedBookmark(f,'deleted');f.db.rows.delete('posts/deleted');
+ assert.deepEqual((await savedPosts(f)).items.map(post=>post.id),['visible']);
+ for(const id of ['removed','draft','build','deleted']){await assert.rejects(()=>bookmark(f,'customer',id,true),{code:'not-found'});await bookmark(f,'customer',id,false);}
+ for(const changes of [{accountStatus:'suspended'},{accountStatus:'archived'},{verificationStatus:'pending'},{reviewOperation:'pending'},{statusOperation:'pending'}]){
+  const original=f.db.rows.get('users/shop');f.db.rows.set('users/shop',{...original,...changes});
+  assert.equal((await savedPosts(f)).items.length,0);assert.equal((await f.api.postsList({auth:{uid:'customer'},query:{}})).items.length,0);
+  await assert.rejects(()=>f.api.postDetail({auth:{uid:'customer'},id:'visible'}),{code:'not_found'});
+  await assert.rejects(()=>bookmark(f,'customer','visible',true),{code:'not-found'});f.db.rows.set('users/shop',original);
+ }
+ f.auth.getUser=async()=>({emailVerified:true,disabled:true});assert.equal((await savedPosts(f)).items.length,0);
+ await bookmark(f,'customer','visible',false);assert.equal(f.db.rows.has('users/customer/savedPosts/visible'),false);
+});
+
+test('saved public snapshots omit private post, vehicle and media metadata',async()=>{
+ const f=fixture();seedBookmark(f,'public');const post=f.db.rows.get('posts/public');
+ Object.assign(post,{email:'private@example.invalid',phone:'private',cleanupImages:['private'],ownerId:'private',vehicle:{...post.vehicle,registration:'PRIVATE123'},images:[{path:'posts/shop/public',bucket:'showcase-images',privateToken:'private'}]});
+ const publicPost=(await savedPosts(f)).items[0];
+ assert.deepEqual(publicPost.vehicle,{make:'Honda',model:'Civic',year:2024});assert.deepEqual(publicPost.images,[{path:'posts/shop/public',bucket:'showcase-images'}]);
+ for(const key of ['email','phone','cleanupImages','ownerId'])assert.equal(publicPost[key],undefined);
+});
+
+test('saved pagination survives removal of the cursor document and fills pages across inaccessible references',async()=>{
+ const f=fixture();for(let i=0;i<25;i++)seedBookmark(f,'saved-'+String(i).padStart(3,'0'));
+ const page=await savedPosts(f);assert.equal(page.items.length,20);assert.equal(page.cursor,'saved-019');
+ await bookmark(f,'customer',page.cursor,false);
+ assert.deepEqual((await savedPosts(f,'customer',page.cursor)).items.map(post=>post.id),['saved-020','saved-021','saved-022','saved-023','saved-024']);
+ f.db.rows.get('posts/saved-000').status='removed';const filtered=await savedPosts(f);assert.equal(filtered.items.length,20);assert.equal(filtered.items.some(post=>post.id==='saved-000'),false);
+});
+
+test('a saved page bounds unavailable-reference scans and provides a continuation rather than a false end',async()=>{
+ const f=fixture();for(let i=0;i<220;i++)seedBookmark(f,'gap-'+String(i).padStart(3,'0'),{status:'removed'});seedBookmark(f,'zz-visible');
+ const first=await savedPosts(f);assert.equal(first.items.length,0);assert.equal(first.cursor,'gap-199');
+ const scans=f.db.queryReads.filter(read=>read.name==='users/customer/savedPosts').reduce((sum,read)=>sum+read.documents,0);assert.equal(scans,200);
+ assert.deepEqual((await savedPosts(f,'customer',first.cursor)).items.map(post=>post.id),['zz-visible']);
+});
+
+
+test('a lost save acknowledgement retries the desired state without duplicate bookmark records',async()=>{
+ const f=fixture();seedBookmark(f,'lost-save');f.db.rows.delete('users/customer/savedPosts/lost-save');
+ f.db.afterCommit=async()=>{throw Error('Synthetic bookmark acknowledgement lost');};
+ await assert.rejects(()=>bookmark(f,'customer','lost-save',true),/lost/);
+ assert.equal(f.db.rows.has('users/customer/savedPosts/lost-save'),true);
+ await bookmark(f,'customer','lost-save',true);
+ assert.equal([...f.db.rows.keys()].filter(path=>path.startsWith('users/customer/savedPosts/')).length,1);
 });

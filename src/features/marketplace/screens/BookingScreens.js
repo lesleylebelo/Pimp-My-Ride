@@ -2,6 +2,9 @@ import React, {useEffect, useRef, useState} from 'react';
 import {ActivityIndicator, RefreshControl, useWindowDimensions, View} from 'react-native';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
 import ConfirmationButton from '../../../shared/components/ConfirmationButton';
+import AppDatePicker from '../../../shared/components/AppDatePicker';
+import AppTimePicker from '../../../shared/components/AppTimePicker';
+import {sastToday} from '../../../shared/utils/dateTime';
 import {useTheme} from '../../../shared/theme/ThemeContext';
 import {useAuth} from '../../auth/context/AuthContext';
 import {marketApi} from '../services/marketApi';
@@ -219,8 +222,8 @@ function BookingDetail({navigation, id}) {
       {canConfirm && <Card>
         <Text weight="semibold" style={styles.heading}>Confirm appointment</Text>
         <Text style={styles.muted}>All appointments use South African Standard Time (SAST, UTC+02:00). Choose a future date and time.</Text>
-        <Field label="Appointment date (YYYY-MM-DD)" value={form.appointmentDate} onChangeText={value => change('appointmentDate', value)} onBlur={() => touch('appointmentDate')} error={fieldError('appointmentDate')} placeholder="YYYY-MM-DD" autoCapitalize="none" maxLength={10} editable={!disabled}/>
-        <Field label="Appointment time (HH:mm, SAST)" value={form.appointmentTime} onChangeText={value => change('appointmentTime', value)} onBlur={() => touch('appointmentTime')} error={fieldError('appointmentTime')} placeholder="14:30" autoCapitalize="none" maxLength={5} editable={!disabled}/>
+        <AppDatePicker label="Appointment date" value={form.appointmentDate} onChange={value => change('appointmentDate', value)} onBlur={() => touch('appointmentDate')} error={fieldError('appointmentDate')} minimumDate={sastToday()} disabled={disabled}/>
+        <AppTimePicker label="Appointment time (SAST)" value={form.appointmentTime} onChange={value => change('appointmentTime', value)} onBlur={() => touch('appointmentTime')} error={fieldError('appointmentTime')} disabled={disabled}/>
         {Object.keys(errors).length?<Button title="Confirm booking" disabled={disabled} onPress={confirmAppointment}/>:<ConfirmationButton palette={theme} title="Confirm booking" message={`Confirm ${booking.requestTitle||'this service booking'} for ${form.appointmentDate} at ${form.appointmentTime} SAST? This sets the appointment; it does not change payment status.`} disabled={disabled} onConfirm={confirmAppointment}/>}
       </Card>}
       {canComplete&&<Card>

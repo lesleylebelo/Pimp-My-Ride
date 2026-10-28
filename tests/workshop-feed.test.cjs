@@ -4,7 +4,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const flat=value=>Object.assign({},...[value].flat(Infinity).filter(Boolean));
 const button=(tree,label)=>tree.root.findAllByType('Pressable').find(n=>n.props.accessibilityLabel===label);
 function setup(width=390){
- const state={moves:[],saves:[],photos:[],auth:{user:{uid:'fixture-shop'},profile:{role:'shop'},offline:false}};
+ const state={moves:[],saves:[],photos:[],auth:{user:{uid:'fixture-shop'},profile:{role:'shop',verificationStatus:'approved',accountStatus:'active'},offline:false}};
  const {palettes}=loadUI('src/shared/theme/colors.js');
  const mocks={'react-native':{Platform:{OS:'web'},useWindowDimensions:()=>({width,height:900,fontScale:1,scale:1})},'react-native-safe-area-context':{SafeAreaView:'SafeAreaView',useSafeAreaInsets:()=>({top:0,bottom:34,left:0,right:0})},'@expo-google-fonts/space-grotesk':{},'@expo-google-fonts/manrope':{},
   '../../auth/context/AuthContext':{useAuth:()=>state.auth},'../../../shared/theme/ThemeContext':{useTheme:()=>({theme:palettes.dark,isDark:true})},
