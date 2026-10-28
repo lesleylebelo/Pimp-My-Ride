@@ -148,6 +148,24 @@ test('an upload disconnected during authorization never starts either service wh
  assert.equal(calls,1);
 });
 
+test('profile photos share the existing 60/account budget; 429 exposes Retry-After across origins',async()=>{
+ let calls=0;const app=createApp({auth:{verifyIdToken:async uid=>({uid})},allowedOrigins:['https://frontend.example.test'],services:{profilePhotos:async()=>{calls++;return {url:null};},marketplace:async()=>({ok:true})}});
+ for(let i=0;i<60;i++)await request(app).post('/api/profile/photos').set('Authorization','Bearer owner').send({op:'view',context:'post',id:`post${i%31}`}).expect(200);
+ const limited=await request(app).post('/api/profile/photos').set('Authorization','Bearer owner').set('Origin','https://frontend.example.test').send({op:'view',context:'self'}).expect(429);
+ assert.equal(limited.body.error.message,'Too many requests. Wait a minute.');assert.equal(calls,60);
+ assert.ok(Number(limited.headers['retry-after'])>0);assert.match(limited.headers['access-control-expose-headers'],/Retry-After/);
+ assert.match(limited.headers['ratelimit-policy'],/60/);
+ await request(app).post('/api/marketplace').set('Authorization','Bearer owner').send({op:'dashboard'}).expect(429);
+ await request(app).post('/api/marketplace').set('Authorization','Bearer other').send({op:'dashboard'}).expect(200);
+});
+
+test('the unchanged 90/IP limiter also protects profile photos across accounts',async()=>{
+ let verified=0;const app=createApp({auth:{verifyIdToken:async uid=>{verified++;return {uid};}},services:{profilePhotos:async()=>({url:null})}});
+ for(let i=0;i<90;i++)await request(app).post('/api/profile/photos').set('Authorization',`Bearer viewer${i}`).send({op:'view',context:'self'}).expect(200);
+ const limited=await request(app).post('/api/profile/photos').set('Authorization','Bearer another').send({op:'status'}).expect(429);
+ assert.equal(verified,90,'the IP limiter rejects before token verification');assert.ok(Number(limited.headers['retry-after'])>0);assert.match(limited.headers['ratelimit-policy'],/90/);
+});
+
 test('shared-network heartbeats have independent per-account limits and preserve the normal API budget',async()=>{
  const s=setup(),app=createApp({auth:{verifyIdToken:async uid=>({uid})},services:s.services});
  for(let i=0;i<100;i++)await request(app).post('/api/session').set('Authorization',`Bearer user${i}`).send({state:'heartbeat'}).expect(200);

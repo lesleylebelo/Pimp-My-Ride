@@ -12,6 +12,7 @@ function createApp({services,auth,googleExchange,emailDelivery,trustProxy=false,
   origin: allowedOrigins,
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Authorization', 'Content-Type'],
+  exposedHeaders: ['Retry-After', 'RateLimit', 'RateLimit-Policy'],
 }));
  app.use((req,res,next)=>{res.set('Cache-Control','no-store');next();});
  app.get('/health',(_,res)=>res.json({ok:true}));

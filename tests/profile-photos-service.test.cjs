@@ -26,8 +26,42 @@ test('malformed, remote and unsupported files are rejected before upload transpo
  const c=client();for(const file of [{...c.file,uri:'https://remote.invalid/photo'},{...c.file,size:0},{...c.file,mimeType:'image/gif'},{...c.file,size:6*1024*1024}])await assert.rejects(()=>c.uploadProfilePhoto(file,0,'first'));assert.equal(c.calls.length,0);
 });
 
-test('re-entering a focused screen bypasses stale previews, while same-UID new sessions clear cached URLs',async()=>{
+test('re-entering a focused screen reuses valid previews, while same-UID new sessions clear cached URLs',async()=>{
  const c=client();await c.viewProfilePhoto('request','job','first',1);await c.viewProfilePhoto('request','job','first',1);assert.equal(c.calls.length,1);
- await c.viewProfilePhoto('request','job','first',1,true);assert.equal(c.calls.length,2);
- c.auth.currentUser={uid:'first'};await c.viewProfilePhoto('request','job','first',1);assert.equal(c.calls.length,3);
+ await c.viewProfilePhoto('request','job','first',1,true);assert.equal(c.calls.length,1);
+ c.auth.currentUser={uid:'first'};await c.viewProfilePhoto('request','job','first',1);assert.equal(c.calls.length,2);
+});
+
+test('status reads coalesce and cache, then invalidate after a photo change',async()=>{
+ const c=client();c.state.reply=()=>({version:0,photoId:null});
+ await Promise.all(Array.from({length:10},()=>c.profilePhotoStatus('first')));
+ await c.profilePhotoStatus('first');assert.equal(c.calls.length,1);
+ c.invalidateProfilePhotos();await c.profilePhotoStatus('first');assert.equal(c.calls.length,2);
+});
+
+test('429 backs off every photo operation across contexts, refresh and invalidation until Retry-After',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout'],now:1800000000000});
+ const c=client(),error=Object.assign(Error('Wait'),{status:429,retryAt:Date.now()+120000});
+ c.state.reply=()=>{throw error;};
+ await assert.rejects(()=>c.viewProfilePhoto('shop','one','first'),{status:429});
+ c.invalidateProfilePhotos();
+ for(let i=0;i<5;i++){
+  await assert.rejects(()=>c.viewProfilePhoto('shop','two','first',i,true),{status:429});
+  await assert.rejects(()=>c.profilePhotoStatus('first'),{status:429});
+  await assert.rejects(()=>c.removeProfilePhoto(0,'first'),{status:429});
+  await assert.rejects(()=>c.uploadProfilePhoto(c.file,0,'first'),{status:429});
+ }
+ assert.equal(c.calls.length,1);t.mock.timers.tick(119999);
+ await assert.rejects(()=>c.profilePhotoStatus('first'),{status:429});assert.equal(c.calls.length,1);
+ c.state.reply=()=>({version:0});t.mock.timers.tick(1);
+ assert.deepEqual(await c.profilePhotoStatus('first'),{version:0});assert.equal(c.calls.length,2);
+});
+
+test('failed reads briefly coalesce without timers, and cached missing photos survive navigation',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout'],now:1800000000000});
+ const c=client();c.state.reply=()=>{throw Error('Unavailable');};
+ for(let i=0;i<10;i++)await assert.rejects(()=>c.viewProfilePhoto('post','one','first'),/Unavailable/);
+ assert.equal(c.calls.length,1);t.mock.timers.tick(5000);
+ c.state.reply=()=>({url:null,expiresAt:null});await c.viewProfilePhoto('post','one','first');
+ t.mock.timers.tick(11000);await c.viewProfilePhoto('post','one','first',0,true);assert.equal(c.calls.length,2);
 });

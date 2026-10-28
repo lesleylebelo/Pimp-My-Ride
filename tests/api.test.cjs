@@ -7,6 +7,20 @@ function setup(fetcher,{dev=false,base='https://api.example.test'}={}){
  return {...mod.exports,calls,auth,warnings,errors};
 }
 
+test('429 preserves Retry-After seconds, HTTP dates and a safe fallback without automatic retries',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout'],now:1800000000000});
+ for(const [kind,delay] of [['120',120000],['date',90000],[null,60000],['invalid',60000]]){
+  for(const malformed of [false,true]){
+   const header=kind==='date'?new Date(Date.now()+delay).toUTCString():kind;
+   const s=setup(async url=>url.endsWith('/health')?{ok:true,json:async()=>({ok:true})}:{ok:false,status:429,headers:{get:()=>header},text:async()=>malformed?'Too many requests':JSON.stringify({error:{code:'resource-exhausted',message:'Wait'}})});
+   await assert.rejects(()=>s.apiRequest('profile/photos',{op:'status'}),error=>{
+    assert.equal(error.status,429);assert.equal(error.retryAfterMs,delay);assert.equal(error.retryAt,Date.now()+delay);return true;
+   });
+   t.mock.timers.tick(1000);assert.equal(s.calls.length,2,'no automatic retry');
+  }
+ }
+});
+
 test('missing configuration fails before health or authentication requests and differs from connectivity errors',async()=>{
  const s=setup(async()=>assert.fail('No fetch without configuration'),{base:''});
  for(const request of [()=>s.apiRequest('admin',{}),()=>s.apiRequest('marketplace',{}),()=>s.apiMethodRequest('posts')]){

@@ -34,9 +34,13 @@ test('format handling preserves grounding, non-AI runtime, dependencies, rules a
  // and connection diagnostics, covered by tests/api.test.cjs. Keep configuration,
  // fetch deadlines, authenticated operations and uploads byte-for-byte protected.
  const apiFile='src/shared/services/api.js',previousAPI=baseline(apiFile),nextAPI=current(apiFile);
+ // The HTTP 429 fix adds Retry-After metadata only. Keep every other byte of
+ // authenticated request/upload handling protected by the existing boundary.
+ const compatibleAPI=nextAPI.replaceAll("throw retryAfter(error,response.status,response.headers?.get('Retry-After'));",'throw error;')
+  .replaceAll("finish(reject,retryAfter(error,xhr.status,xhr.getResponseHeader?.('Retry-After')));",'finish(reject,error);');
  const section=(source,start,end)=>source.slice(source.indexOf(start),end?source.indexOf(end):undefined);
  for(const [start,end] of [['function baseURL()','function connectionError('],['async function fetchWithTimeout(','async function ready('],['export async function apiRequest(']]){
-  assert.equal(section(nextAPI,start,end),section(previousAPI,start,end),`${apiFile}: ${start}`);
+  assert.equal(section(compatibleAPI,start,end),section(previousAPI,start,end),`${apiFile}: ${start}`);
  }
  const old=JSON.parse(baseline('backend/package.json')),next=JSON.parse(current('backend/package.json'));delete old.scripts.test;delete next.scripts.test;
  assert.equal(next.scripts['check:ai-config'],'node check-ai-config.cjs');delete next.scripts['check:ai-config'];

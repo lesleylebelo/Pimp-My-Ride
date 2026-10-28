@@ -8,6 +8,7 @@ function setup(){
   constructor(){this.upload={};this.headers={};}
   open(method,url){this.method=method;this.url=url;}
   setRequestHeader(key,value){this.headers[key]=value;}
+  getResponseHeader(key){return key==='Retry-After'?state.retryAfter:null;}
   send(body){sent.push({xhr:this,body});this.upload.onprogress?.({lengthComputable:true,loaded:512,total:1024});if(state.mode==='stall')return;
    queueMicrotask(()=>{if(state.mode==='network'){this.onerror();return;}
     this.status=state.status;this.responseText=state.raw??JSON.stringify(state.result);state.beforeLoad?.();this.onload();});}
@@ -20,6 +21,13 @@ function setup(){
  return {api,photos,auth,sent,fetched,state,warnings};
 }
 const file={uri:'file:///cache/prepared.jpg',name:'prepared.jpg',mimeType:'image/jpeg',size:1024};
+
+test('XHR exposes 429 Retry-After metadata without replaying an upload',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout'],now:1800000000000});
+ const s=setup();s.state.status=429;s.state.retryAfter='90';s.state.result={error:{code:'resource-exhausted',message:'Wait'}};
+ await assert.rejects(()=>s.api.uploadRequest('profile/photos/upload?version=0&requestId=one',{}, {expectedUid:'owner'}),{status:429,retryAfterMs:90000,retryAt:Date.now()+90000});
+ t.mock.timers.tick(90000);assert.equal(s.sent.length,1);
+});
 
 test('vehicle and request photos use the working showcase XHR transport, preserving native multipart and query contracts',async()=>{
  for(const target of ['vehicle','request']){
