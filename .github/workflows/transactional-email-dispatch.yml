@@ -1,0 +1,41 @@
+name: Transactional email dispatch
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+
+permissions: {}
+
+concurrency:
+  group: transactional-email-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    # Repository variable: leave unset or set to 'false' until ready to enable.
+    if: ${{ vars.PMR_EMAIL_SCHEDULER_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Process queued transactional emails
+        shell: bash
+        env:
+          PMR_EMAIL_DISPATCH_TOKEN: ${{ secrets.PMR_EMAIL_DISPATCH_TOKEN }}
+        run: |
+          set +x
+          set -euo pipefail
+          if [[ -z "${PMR_EMAIL_DISPATCH_TOKEN}" ]]; then
+            echo '::error::Required repository secret PMR_EMAIL_DISPATCH_TOKEN is not configured.'
+            exit 1
+          fi
+
+          # The backend owns eligibility, retries, and idempotency. Do not retry here.
+          # Suppress the response body and never log request headers.
+          curl --disable \
+            --silent --show-error --fail \
+            --connect-timeout 15 \
+            --max-time 120 \
+            --output /dev/null \
+            --request POST \
+            --header "Authorization: Bearer ${PMR_EMAIL_DISPATCH_TOKEN}" \
+            'https://pimp-my-ride.onrender.com/internal/email/dispatch'
