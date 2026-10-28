@@ -1,5 +1,6 @@
 import React,{useEffect,useState} from 'react';
-import {RefreshControl,View,ScrollView} from 'react-native';
+import {Platform,RefreshControl,StyleSheet,View,ScrollView} from 'react-native';
+import {Ionicons} from '@expo/vector-icons';
 import {CustomerAction as Action,CustomerCard,CustomerChip as Chip,CustomerField,CustomerGrid,CustomerModal,CustomerPage,CustomerPressable,CustomerState,CustomerText as Text} from '../components/CustomerUI';
 import {usePostsFeed} from '../../marketplace/hooks/usePostsFeed';
 import {useMarketData} from '../../marketplace/hooks/useMarketData';
@@ -11,6 +12,9 @@ import {useTheme} from '../../../shared/theme/ThemeContext';
 
 // Existing /api/posts filter vocabulary; not invented workshop listings.
 const services=['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
+// React Native Web filters the title prop; attach its native browser tooltip.
+const studioTooltip=node=>node?.setAttribute('title','Open PimpPilot Studio');
+
 export default function CustomerDiscoverScreen({navigation}){
  const {theme}=useTheme();
  const [query,setQuery]=useState(''),[normalized,setNormalized]=useState(''),[category,setCategory]=useState('All');
@@ -27,15 +31,15 @@ export default function CustomerDiscoverScreen({navigation}){
  const clear=()=>{setQuery('');setNormalized('');setCategory('All');setLocation('');setFiltersOpen(false);};
  const onScroll=event=>{const {contentOffset,contentSize,layoutMeasurement}=event.nativeEvent;if(view==='work'&&contentOffset.y+layoutMeasurement.height>=contentSize.height-400)feed.loadNext();};
  return <CustomerPage title="Discover" subtitle="Explore workshops and their work" navigation={navigation} activeRoute="Discover"
-  headerRight={<><NotificationsHeaderButton navigation={navigation}/><MessagesHeaderButton navigation={navigation}/></>}
+  headerRight={<><NotificationsHeaderButton navigation={navigation}/><MessagesHeaderButton navigation={navigation}/>
+   <CustomerPressable accessibilityRole="button" accessibilityLabel="Open PimpPilot Studio" accessibilityHint="Plan your next build"
+    ref={Platform.OS==='web'?studioTooltip:undefined} hitSlop={6} onPress={()=>navigation.navigate('PimpPilotStudio')}
+    style={[styles.studioButton,{backgroundColor:theme.surfaceCard,borderColor:theme.accent}]}>
+    <Ionicons name="sparkles-outline" size={24} color={theme.accent}/>
+   </CustomerPressable>
+  </>}
   onScroll={onScroll} onContentSizeChange={(_,height)=>{if(view==='work'&&height<650)feed.loadNext();}}
   refreshControl={view==='work'?<RefreshControl refreshing={feed.refreshing} onRefresh={()=>void feed.refresh()} tintColor={theme.textPrimary}/>:undefined}>
-  <CustomerCard style={{borderColor:theme.accent,gap:12}}>
-   <Text style={{color:theme.accent,fontSize:11,fontWeight:'700',letterSpacing:2}}>PIMPPILOT STUDIO</Text>
-   <Text heading>Your next build starts with an idea.</Text>
-   <Text muted>Choose your car, explore a direction and shape a plan for your workshop.</Text>
-   <Action title="Open PimpPilot Studio" icon="sparkles-outline" onPress={()=>navigation.navigate('PimpPilotStudio')}/>
-  </CustomerCard>
   <View style={{flexDirection:'row',flexWrap:'wrap',alignItems:'center',gap:12}}>
    <View style={{flexGrow:1,flexBasis:300}}><CustomerField icon="search-outline" accessibilityLabel="Search workshops or services" placeholder="Search workshops or services" value={query} onChangeText={setQuery} maxLength={120}/></View>
    <Action title="Saved posts" icon="bookmark-outline" onPress={()=>navigation.navigate('SavedPosts')}/>
@@ -50,7 +54,7 @@ export default function CustomerDiscoverScreen({navigation}){
    {feed.busy&&!feed.items.length&&<CustomerState busy title="Loading showcases…"/>}
    {!!feed.error&&<CustomerState error={feed.error} onRetry={()=>void feed.refresh()}/>}
    {!feed.busy&&!feed.error&&!visible.length&&<CustomerState title={hasFilters?'No showcases match':'No showcases yet'} description={hasFilters?'Try another service or clear your filters.':'Work shared by workshops will appear here.'} icon="images-outline" action={hasFilters?<Action title="Clear filters" onPress={clear}/>:null}/>}
-   <View style={{width:'100%',maxWidth:680,alignSelf:'center',gap:24}}>{visible.map(post=><PostCard key={post.id} post={post} presentation="feed" onOpen={()=>navigation.navigate('PostDetail',{id:post.id})}/>)}</View>
+   <View style={{width:'100%',maxWidth:680,alignSelf:'center',gap:24}}>{visible.map(post=><PostCard key={post.id} post={post} presentation="feed" onOpen={()=>navigation.navigate('PostDetail',{id:post.id})} onProfile={post.shop?.id?()=>navigation.navigate('ShopProfile',{shop:post.shop}):undefined}/>)}</View>
    {!!feed.cursor&&<Action title="Load more showcases" loading={feed.busy} onPress={()=>feed.loadNext()}/>}
   </>}
   <CustomerModal visible={filtersOpen} transparent animationType="fade" onRequestClose={()=>setFiltersOpen(false)}>
@@ -62,6 +66,9 @@ export default function CustomerDiscoverScreen({navigation}){
   </CustomerModal>
  </CustomerPage>;
 }
+const styles=StyleSheet.create({
+ studioButton:{width:44,height:44,borderRadius:22,borderWidth:1,alignItems:'center',justifyContent:'center',flexShrink:0},
+});
 export function WorkshopDirectory({navigation,query=''}){
  const {theme}=useTheme();
  const [cursor,setCursor]=useState(null),state=useMarketData('shops',{cursor},setCursor);

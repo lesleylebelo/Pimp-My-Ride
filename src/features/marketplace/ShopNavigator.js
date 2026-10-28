@@ -5,7 +5,7 @@ import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import AccountScreen from '../auth/screens/AccountScreen';
 import {BookingsScreen,BookingDetailScreen} from './screens/BookingScreens';
 import {ShopJobsScreen,ShopRequestsScreen,ShopRequestScreen,QuoteFormScreen,ShopQuotesScreen} from './screens/ShopMarketplaceScreens';
-import {MyPostsScreen,PostFormScreen,PostDetailScreen,ShopProfileScreen} from './screens/PostScreens';
+import {MyPostsScreen,PostFormScreen,PostDetailScreen,ShopProfileScreen,SavedPostsScreen} from './screens/PostScreens';
 import {useTheme} from '../../shared/theme/ThemeContext';
 
 const Stack = createNativeStackNavigator();
@@ -38,6 +38,7 @@ export default function ShopNavigator(){
       <Stack.Screen name="PostForm" component={PostFormScreen} options={{presentation:'modal'}}/>
       <Stack.Screen name="PostDetail" component={PostDetailScreen}/>
       <Stack.Screen name="ShopProfile" component={ShopProfileScreen}/>
+      <Stack.Screen name="SavedPosts" component={SavedPostsScreen}/>
     </Stack.Navigator>
   );
 }

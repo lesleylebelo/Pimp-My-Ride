@@ -38,12 +38,13 @@ function loadUI(file,mocks={}) {
    'expo-image-picker': { launchImageLibraryAsync: async () => ({canceled: true, assets: []}), MediaTypeOptions: {Images: 'Images'} },
    'expo-document-picker': { getDocumentAsync: async () => ({canceled: true}) },
    'expo-font': { useFonts: () => [true], loadAsync: async () => true },
+   '@react-native-community/datetimepicker': {default: 'NativeDateTimePicker', __esModule: true, DateTimePickerAndroid: {open(){}, dismiss: async () => true}},
    'expo-secure-store': { getItemAsync: async () => null, setItemAsync: async () => undefined, deleteItemAsync: async () => undefined },
    'expo-status-bar': { StatusBar: () => null },
    'expo-splash-screen': {preventAutoHideAsync:async()=>true,hideAsync:async()=>{}},
    'expo-web-browser': { openBrowserAsync: async () => ({type: 'success'}), warmUpAsync: async () => undefined, coolDownAsync: async () => undefined },
  };
- function load(f){f=path.resolve(f);if(/\.(png|jpg|jpeg|webp)$/.test(f)){if(!fs.existsSync(f))throw Error('Missing image asset: '+f);return f;}if(cache[f])return cache[f].exports;
+ function load(f){f=path.resolve(f);if(!fs.existsSync(f)&&f.endsWith('.js')){const base=f.slice(0,-3);f=[`${base}.${native.Platform.OS}.js`,...(native.Platform.OS==='web'?[]:[`${base}.native.js`]),f].find(fs.existsSync)||f;}if(/\.(png|jpg|jpeg|webp)$/.test(f)){if(!fs.existsSync(f))throw Error('Missing image asset: '+f);return f;}if(cache[f])return cache[f].exports;
  const mod={exports:{}};cache[f]=mod;
  const {code}=babel.transformSync(fs.readFileSync(f,'utf8'),{configFile:false,babelrc:false,plugins:[[require.resolve('@babel/plugin-transform-react-jsx'),{runtime:'automatic'}],require.resolve('@babel/plugin-transform-modules-commonjs')]});
  new Function('require','module','exports',code)(name=>{if(name==='react-native')return native;if(Object.hasOwn(mocks,name))return mocks[name];const matched=Object.keys(expoStubs).find(prefix=>name===prefix||name.startsWith(prefix+'/'));if(matched)return expoStubs[matched];if(name==='@expo/vector-icons')return {Ionicons:'Icon',MaterialCommunityIcons:'Icon'};if(name==='react-native-safe-area-context')return {SafeAreaView:'SafeAreaView'};if(name.startsWith('.')&&Object.hasOwn(resolvedMocks,path.resolve(path.dirname(f),name+'.js')))return resolvedMocks[path.resolve(path.dirname(f),name+'.js')];if(name.startsWith('.'))return load(path.resolve(path.dirname(f),/\.(png|jpg|jpeg|webp)$/.test(name)?name:name+'.js'));return require(name);},mod,mod.exports);return mod.exports;}

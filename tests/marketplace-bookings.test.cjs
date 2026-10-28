@@ -21,7 +21,7 @@ function setup(overrides = {}) {
   return {state, screens, navigation};
 }
 const button = (tree, title) => tree.root.findAllByType('Pressable').find(node => node.findAllByType('Text').some(text => text.props.children === title));
-const input = (tree, label) => tree.root.findAllByType('TextInput').find(node => node.props.accessibilityLabel === label);
+const input=(tree,label)=>tree.root.findAll(node=>['AppDatePicker','AppTimePicker'].includes(node.type?.name)).find(node=>node.props.label===label)||tree.root.findAllByType('TextInput').find(node=>node.props.accessibilityLabel===label);
 const text = tree => tree.root.findAllByType('Text').map(node => Array.isArray(node.props.children) ? node.props.children.join('') : node.props.children).join('\n');
 const lastRead = (state, op) => state.reads.filter(read => read.op === op).at(-1);
 async function confirmPayment(tree,title){await act(async()=>button(tree,title).props.onPress());await act(async()=>button(tree,'Confirm').props.onPress());}
@@ -53,12 +53,12 @@ test('an acknowledged simulated result survives a failed subsequent refresh with
  const {state,screens,navigation}=setup({auth:{user:{uid:'owner-1'},profile:{role:'owner'},offline:false},data:{booking:pending,currentPaymentAttempt:{id:'attempt',status:'pending',amountCents:12345,currency:'ZAR'},paymentAttempts:[]},refresh:async()=>{throw Error('Offline refresh');}}),tree=await mount(screens.BookingDetailScreen,detailProps(navigation));
  try{await confirmPayment(tree,'Simulate successful payment');assert.equal(state.calls.length,1);assert.match(text(tree),/simulated result was confirmed, but the booking could not refresh/);assert.doesNotMatch(text(tree),/Payment failed/);}finally{await act(async()=>tree.unmount());}
 });
-async function change(tree, label, value) {await act(async () => input(tree, label).props.onChangeText(value));}
+async function change(tree, label, value) {await act(async () => (input(tree,label).props.onChange||input(tree,label).props.onChangeText)(value));}
 async function mount(Screen, props) {let tree; await act(async () => {tree = Renderer.create(React.createElement(Screen, props));}); return tree;}
 const detailProps = navigation => ({navigation, route: {params: {id: booking.id}}});
 async function appointment(tree) {
-  await change(tree, 'Appointment date (YYYY-MM-DD)', '2099-01-02');
-  await change(tree, 'Appointment time (HH:mm, SAST)', '14:30');
+  await change(tree, 'Appointment date', '2099-01-02');
+  await change(tree, 'Appointment time (SAST)', '14:30');
 }
 
 test('bookings list loads on scroll, navigates by identifier, resets across accounts and handles empty, offline, loading and retry', async () => {
@@ -184,14 +184,14 @@ test('appointment confirmation validates calendar, time and future SAST instant,
   assert.equal(state.calls.length, 0);
   assert.match(text(tree), /Appointment date is required/);
   assert.match(text(tree), /Appointment time is required/);
-  await change(tree, 'Appointment date (YYYY-MM-DD)', '2099-02-30');
-  await change(tree, 'Appointment time (HH:mm, SAST)', '25:61');
+  await change(tree, 'Appointment date', '2099-02-30');
+  await change(tree, 'Appointment time (SAST)', '25:61');
   assert.match(text(tree), /Enter a valid date/);
   assert.match(text(tree), /valid 24-hour time/);
   await act(async () => button(tree, 'Confirm booking').props.onPress());
   assert.equal(state.calls.length, 0);
-  await change(tree, 'Appointment date (YYYY-MM-DD)', '2000-01-01');
-  await change(tree, 'Appointment time (HH:mm, SAST)', '14:30');
+  await change(tree, 'Appointment date', '2000-01-01');
+  await change(tree, 'Appointment time (SAST)', '14:30');
   assert.match(text(tree), /Choose a future appointment/);
   await act(async () => button(tree, 'Confirm booking').props.onPress());
   assert.equal(state.calls.length, 0);
@@ -204,8 +204,8 @@ test('appointment confirmation validates calendar, time and future SAST instant,
   assert.equal(input(tree, 'Cancellation reason').props.editable, false);
   await act(async () => {reject(Error('The other account is unavailable.')); await pending;});
   assert.match(text(tree), /The other account is unavailable/);
-  assert.equal(input(tree, 'Appointment date (YYYY-MM-DD)').props.value, '2099-01-02');
-  assert.equal(input(tree, 'Appointment time (HH:mm, SAST)').props.value, '14:30');
+  assert.equal(input(tree, 'Appointment date').props.value, '2099-01-02');
+  assert.equal(input(tree, 'Appointment time (SAST)').props.value, '14:30');
   state.api = async () => ({id: booking.id});
   state.refresh = async () => {state.data = null; throw Error('Reload failed');};
   await act(async () => button(tree, 'Confirm booking').props.onPress());
@@ -286,7 +286,7 @@ test('offline details hide terms, block stale handlers, and recover the draft on
   assert.equal(state.calls.length, 0);
   state.auth = {...state.auth, offline: false};
   await act(async () => tree.update(React.createElement(screens.BookingDetailScreen, props)));
-  assert.equal(input(tree, 'Appointment date (YYYY-MM-DD)').props.value, '2099-01-02');
+  assert.equal(input(tree, 'Appointment date').props.value, '2099-01-02');
   assert.equal(input(tree, 'Cancellation reason').props.value, 'Draft reason');
   await act(async () => tree.unmount());
 });
@@ -303,7 +303,7 @@ test('account and booking changes reset drafts and suppress a delayed mutation r
   state.auth = {...state.auth, user: {uid: 'another-shop'}};
   await act(async () => tree.update(React.createElement(screens.BookingDetailScreen, props)));
   await act(async () => {release({id: booking.id}); await pending;});
-  assert.equal(input(tree, 'Appointment date (YYYY-MM-DD)').props.value, '');
+  assert.equal(input(tree, 'Appointment date').props.value, '');
   assert.equal(input(tree, 'Cancellation reason').props.value, '');
   assert.doesNotMatch(text(tree), /Booking confirmed\./);
   await appointment(tree);
@@ -312,7 +312,7 @@ test('account and booking changes reset drafts and suppress a delayed mutation r
   state.data = {booking: {...booking, id: 'booking-2'}};
   await act(async () => tree.update(React.createElement(screens.BookingDetailScreen, another)));
   assert.equal(state.reads.at(-1).input.id, 'booking-2');
-  assert.equal(input(tree, 'Appointment date (YYYY-MM-DD)').props.value, '');
+  assert.equal(input(tree, 'Appointment date').props.value, '');
   assert.equal(input(tree, 'Cancellation reason').props.value, '');
   await act(async () => tree.unmount());
 });

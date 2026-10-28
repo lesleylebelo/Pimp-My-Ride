@@ -15,13 +15,13 @@ const fixture = {
   images: [{url: 'https://fixture.invalid/photo.png'}], createdAt: Date.now(),
 };
 
-function setup(width = 390) {
+function setup(width = 390, platform = 'web') {
   const state = {moves: [], saves: [], offline: false, save: async () => ({}), feed: {items: [fixture, {...fixture, id: 'second', title: 'Second post'}], busy: false, refreshing: false, error: '', cursor: null, refresh() {}, loadNext() {}}};
   const {palettes} = loadUI('src/shared/theme/colors.js');
   const mocks = {
     '@expo-google-fonts/space-grotesk': {},
     '@expo-google-fonts/manrope': {},
-    'react-native': {Platform: {OS: 'web'}, useWindowDimensions: () => ({width, height: 900, fontScale: 1, scale: 1})},
+    'react-native': {Platform: {OS: platform}, useWindowDimensions: () => ({width, height: 900, fontScale: 1, scale: 1})},
     '../../auth/context/AuthContext': {useAuth: () => ({user: {uid: 'fixture-owner'}, profile: {role: 'owner'}, offline: state.offline})},
     '../../../shared/theme/ThemeContext': {useTheme: () => ({theme: palettes.dark, isDark: true})},
     '../../../shared/components/ProfileAvatar': () => React.createElement('View', {testID: 'workshop-avatar'}),
@@ -30,8 +30,8 @@ function setup(width = 390) {
       default: ({style}) => React.createElement('Image', {style, accessibilityLabel: 'Showcase photo'}),
       hasPostImage: image => !!(image?.path || image?.url),
     },
-    '../../marketplace/components/MessagesHeaderButton': () => null,
-    '../../marketplace/components/NotificationsHeaderButton': () => null,
+    '../../marketplace/components/MessagesHeaderButton': () => React.createElement('Pressable', {accessibilityLabel: 'Messages'}),
+    '../../marketplace/components/NotificationsHeaderButton': () => React.createElement('Pressable', {accessibilityLabel: 'Notifications'}),
     '../../marketplace/hooks/usePostsFeed': {usePostsFeed: () => state.feed},
     '../services/postsApi': {postsApi: async (...args) => { state.saves.push(args); return state.save(); }},
   };
@@ -59,6 +59,45 @@ test('Discover stacks full-width feed posts in one bounded column at phone, tabl
       assert.notEqual(flatten(columns[0].props.style).flexDirection, 'row');
       await act(async () => first.props.onPress());
       assert.deepEqual(s.state.moves, [['PostDetail', {id: fixture.id}]]);
+    });
+  }
+});
+
+test('Discover Studio header action follows notifications and messages, leaves search first in the feed and opens the existing route', async () => {
+  for (const [width, platform] of [[320, 'web'], [390, 'web'], [768, 'web'], [1440, 'web'], [320, 'ios'], [390, 'android']]) {
+    const s = setup(width, platform), Screen = s.load('src/features/customer/screens/CustomerDiscoverScreen.js').default;
+    await mount(Screen, {navigation: s.navigation}, async tree => {
+      const studio = button(tree, 'Open PimpPilot Studio');
+      assert.ok(studio);
+      // CustomerPressable supplies hover, keyboard focus and pressed feedback.
+      const style = flatten(studio.props.style({pressed: false}));
+      assert.deepEqual([style.width, style.height, style.borderRadius, style.flexShrink], [44, 44, 22, 0]);
+      const icon = studio.findByType('Icon');
+      assert.equal(icon.props.name, 'sparkles-outline');
+      assert.equal(icon.props.size, 24);
+      assert.equal(icon.props.color, style.borderColor);
+      assert.equal(studio.props.accessibilityRole, 'button');
+      assert.equal(studio.findAllByType('Text').length, 0);
+      const header = tree.root.findAllByType('View').find(node => {
+        const labels = node.findAllByType('Pressable').map(item => item.props.accessibilityLabel);
+        return labels.join('|') === 'Notifications|Messages|Open PimpPilot Studio';
+      });
+      assert.ok(header, 'all three controls share the header row in the required order');
+      const scroll = tree.root.findAllByType('ScrollView').find(node => node.findAllByType('TextInput').some(input => input.props.accessibilityLabel === 'Search workshops or services'));
+      assert.equal(scroll.findAllByType('Pressable').includes(studio), false);
+      assert.equal(scroll.children[0].findByType('TextInput').props.accessibilityLabel, 'Search workshops or services');
+      const copy = tree.root.findAllByType('Text').map(node => node.props.children).join(' ');
+      assert.doesNotMatch(copy, /PimpPilot Studio|Plan your next build|Your next build starts with an idea/);
+      if (platform === 'web') {
+        const attributes = {};
+        studio.props.ref({setAttribute: (key, value) => { attributes[key] = value; }});
+        assert.equal(attributes.title, 'Open PimpPilot Studio');
+        studio.props.ref(null);
+        await act(async () => studio.props.onFocus({}));
+        assert.equal(flatten(studio.props.style({pressed: false})).outlineStyle, 'solid');
+      } else assert.equal(studio.props.ref, undefined);
+      await act(async () => studio.props.onPress());
+      assert.deepEqual(s.state.moves, [['PimpPilotStudio']]);
     });
   }
 });
@@ -132,8 +171,9 @@ test('default Customer post presentation stays image-first for saved posts and w
 test('real posts transport sends only the existing save fields and keeps account checks on retry', async () => {
   let uid = 'fixture-owner', fail = true;
   const calls = [];
+  const users = new Map();
   const {postsApi} = loadUI('src/features/marketplace/services/postsApi.js', {
-    '../../../shared/services/firebase': {firebase: () => ({auth: {currentUser: uid ? {uid} : null}})},
+    '../../../shared/services/firebase': {firebase: () => {if(uid&&!users.has(uid))users.set(uid,{uid});return {auth:{currentUser:users.get(uid)||null}};}},
     '../../../shared/services/api': {apiRequest: async (path, payload, options) => {
       assert.equal(path, 'posts');
       assert.deepEqual(Object.keys(payload).sort(), ['id', 'op', 'saved']);

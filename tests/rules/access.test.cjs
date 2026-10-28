@@ -6,6 +6,25 @@ const {doc,setDoc,getDoc,updateDoc,deleteDoc,collection,getDocs}=require('fireba
 let env;before(async()=>{env=await initializeTestEnvironment({projectId:'demo-pmr-security',firestore:{rules:fs.readFileSync('firestore.rules','utf8')}});});after(async()=>env?.cleanup());beforeEach(async()=>env.clearFirestore());
 const ctx=(uid,verified=true,admin=false)=>env.authenticatedContext(uid,{email_verified:verified,admin});
 
+test('bookmark metadata is private to its verified active owner and cannot bypass API validation with direct writes',async()=>{
+ await env.withSecurityRulesDisabled(async c=>{
+  await setDoc(doc(c.firestore(),'users','bookmark-owner'),{role:'owner',accountStatus:'active'});
+  await setDoc(doc(c.firestore(),'users','bookmark-other'),{role:'owner',accountStatus:'active'});
+  await setDoc(doc(c.firestore(),'users/bookmark-owner/savedPosts/post'),{postId:'post',createdAt:new Date()});
+  await setDoc(doc(c.firestore(),'posts','post'),{authorId:'unavailable-shop',authorRole:'shop',status:'published',internalMetadata:'private'});
+ });
+ const path='users/bookmark-owner/savedPosts/post',own=ctx('bookmark-owner').firestore();
+ await assertSucceeds(getDoc(doc(own,path)));await assertSucceeds(getDocs(collection(own,'users/bookmark-owner/savedPosts')));
+ await assertFails(getDoc(doc(own,'posts','post')));await assertFails(getDocs(collection(own,'posts')));
+ for(const client of [ctx('bookmark-other').firestore(),ctx('bookmark-owner',false).firestore(),env.unauthenticatedContext().firestore()]){
+  await assertFails(getDoc(doc(client,path)));await assertFails(getDocs(collection(client,'users/bookmark-owner/savedPosts')));
+ }
+ await assertFails(setDoc(doc(own,'users/bookmark-owner/savedPosts/forged'),{postId:'forged',createdAt:new Date()}));
+ await assertFails(updateDoc(doc(own,path),{postId:'forged'}));await assertFails(deleteDoc(doc(own,path)));
+ await env.withSecurityRulesDisabled(c=>updateDoc(doc(c.firestore(),'users','bookmark-owner'),{accountStatus:'suspended'}));
+ await assertFails(getDoc(doc(own,path)));
+});
+
 test('email dispatcher queues and claims real emulator documents with its production query',async()=>{
  const backendRequire=require('node:module').createRequire(require('node:path').resolve('backend/package.json'));
  const {initializeApp,deleteApp}=backendRequire('firebase-admin/app'),{getFirestore}=backendRequire('firebase-admin/firestore');

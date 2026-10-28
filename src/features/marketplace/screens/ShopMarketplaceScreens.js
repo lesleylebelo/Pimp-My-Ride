@@ -1,6 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {Keyboard, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
+import {calendarDateLabel} from '../../../shared/utils/dateTime';
 import {LandingText as Text} from '../../../shared/components/landing/LandingUI';
 import {FeedSearchInput, FeedSourceSelector} from '../../../shared/components/landing/FeedControls';
 import {useAuth} from '../../auth/context/AuthContext';
@@ -26,7 +27,7 @@ import {CustomerPressable,CustomerAction,CustomerChip as FeedServicePill} from '
 
 const offlineMessage = 'Connect to the internet to view requests and manage quotations.';
 const errorMessage = error => error?.message || 'Unable to complete this action. Please retry.';
-const dateLabel = value => value ? new Date(value).toLocaleDateString() : 'Not specified';
+const dateLabel = value => value ? calendarDateLabel(value) : 'Not specified';
 const reload = refresh => () => { void refresh().catch(() => {}); };
 const requestTermsVersion = request => Number.isSafeInteger(request?.termsVersion) ? request.termsVersion : Number.isSafeInteger(request?.version) ? request.version : 1;
 const quoteMatchesRequest = (quote, request) => {

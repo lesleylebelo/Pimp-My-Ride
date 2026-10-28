@@ -9,6 +9,7 @@ const serialize=value=>value instanceof Timestamp?value.toMillis():Array.isArray
 const row=doc=>({id:doc.id,...serialize(doc.data())});
 const categories=['Tuning','Performance','Exhaust','Lighting','Body Kit','Wheels','Interior','Wrap & Paint','Other'];
 function eligible(profile,role){return P.eligible(profile,role);}
+const showcase=data=>data?.status==='published'&&data.authorRole==='shop'&&(!data.type||data.type==='showcase')&&(!data.shopId||!data.authorId||data.shopId===data.authorId);
 function validation(fields){
  const error=new ApiError('validation_error','Please correct the highlighted fields.');
  error.fields=fields;throw error;
@@ -53,6 +54,22 @@ function authorName(profile,role){
  return rest.length?`${first} ${rest[0][0]}.`:first;
 }
 function createPosts({db,auth,actor,storage}){
+ async function shopProfiles(documents,cache=new Map()){
+  const ids=[...new Set(documents.map(doc=>doc.data()?.shopId||doc.data()?.authorId).filter(id=>typeof id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(id)&&!cache.has(id)))];
+  await Promise.all(ids.map(async id=>{
+   const profile=(await db.doc(`users/${id}`).get()).data();
+   if(!eligible(profile,'shop')){cache.set(id,null);return;}
+   const user=await auth.getUser(id).catch(error=>{if(error.code==='auth/user-not-found')return null;throw error;});
+   cache.set(id,user?.emailVerified&&!user.disabled?profile:null);
+  }));
+  return cache;
+ }
+ async function savedIds(uid,ids){
+  const refs=ids.map(id=>db.doc(`users/${uid}/savedPosts/${id}`));
+  const documents=refs.length?(db.getAll?await db.getAll(...refs):await Promise.all(refs.map(ref=>ref.get()))):[];
+  return new Set(documents.filter(doc=>doc.exists).map(doc=>doc.id));
+ }
+ function bookmarkActor(a){if(!['owner','shop'].includes(a.profile?.role)||!eligible(a.profile,a.profile.role))D.fail('An active customer or approved workshop account is required.','permission-denied');}
  const audit=(tx,uid,op,id)=>tx.create(db.collection('auditLogs').doc(),{actor:uid,action:`posts.${op}`,target:id,details:{},createdAt:stamp()});
  async function avatarRevisions(documents){
   const ids=[...new Set(documents.map(doc=>doc.data()?.authorId||doc.data()?.shopId).filter(id=>typeof id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(id)))];
@@ -116,12 +133,15 @@ function createPosts({db,auth,actor,storage}){
  }
  function publicPost(id,data,profile){
   const shop=shopSnapshot(data.shopId||data.authorId,profile,data);
-  const serialized=serialize(data);delete serialized.cleanupImages;
+  // Public showcase fields only: bookmarks must never expose internal post data.
+  const serialized=serialize(Object.fromEntries(['authorId','authorRole','type','title','description','category','serviceCategory','projectStatus','images','status','createdAt','updatedAt'].filter(key=>Object.hasOwn(data,key)).map(key=>[key,data[key]])));
+  serialized.images=(Array.isArray(data.images)?data.images:[]).map(image=>typeof image==='string'?image:Object.fromEntries(['path','bucket','url','contentType','size'].filter(key=>Object.hasOwn(image||{},key)).map(key=>[key,image[key]])));
   return {id,...serialized,shopId:shop.id,shop,serviceCategory:data.serviceCategory||data.category,
-   vehicle:postVehicle(data.vehicle),authorName:shop.name,authorAvatar:shop.avatar,city:shop.city,province:shop.province};
+   vehicle:postVehicle(data.vehicle),authorName:shop.name,authorAvatar:shop.avatar,authorPhotoRevision:profile?.profilePhotoRevision||0,city:shop.city,province:shop.province};
  }
  async function postsList(request){
   const a=await actor(request);
+  bookmarkActor(a);
   if(!['owner','shop'].includes(a.profile.role))D.fail('Only customers and shops can view showcase posts.','forbidden');
   const query=request.query||{},allowed=new Set(['service','q','cursor','page','limit','shop_id']);
   if(Object.keys(query).some(key=>!allowed.has(key)))validation({query:'Only service, q, cursor, page, limit and shop_id are supported.'});
@@ -148,13 +168,12 @@ function createPosts({db,auth,actor,storage}){
    const take=Math.min(scanSize,MAX_SCAN-scanned),snapshot=await queryRef.limit(take).get();
    scanned+=snapshot.docs.length;
    if(!snapshot.docs.length)break;
-   await Promise.all([...new Set(snapshot.docs.map(doc=>doc.data().shopId||doc.data().authorId))].filter(id=>!profiles.has(id)).map(async id=>{
-    const profile=(await db.doc(`users/${id}`).get()).data();profiles.set(id,profile||null);
-   }));
+   await shopProfiles(snapshot.docs,profiles);
    for(let index=0;index<snapshot.docs.length;index++){
     const doc=snapshot.docs[index],data=doc.data(),id=data.shopId||data.authorId,shop=shopSnapshot(id,profiles.get(id),data),vehicle=postVehicle(data.vehicle);
     const created=doc.get('createdAt');
     current={createdAt:created.toMillis(),seconds:created.seconds,nanoseconds:created.nanoseconds,id:doc.id};
+    if(!showcase(data)||!profiles.get(id))continue;
     if(q&&!`${data.title||''} ${data.description||''} ${shop.name} ${vehicle.make} ${vehicle.model}`.toLocaleLowerCase().includes(q))continue;
     if(matched++<skip)continue;
     items.push(publicPost(doc.id,data,profiles.get(id)));
@@ -165,15 +184,18 @@ function createPosts({db,auth,actor,storage}){
    hasMore=true;
   }
   if(query.page!==undefined&&scanned>=MAX_SCAN&&matched<skip)validation({page:'Use cursor pagination to continue this search.'});
-  return {items,cursor:hasMore&&current?Buffer.from(JSON.stringify(current)).toString('base64url'):null};
+  const saved=await savedIds(a.uid,items.map(item=>item.id));
+  return {items:items.map(item=>({...item,saved:saved.has(item.id)})),cursor:hasMore&&current?Buffer.from(JSON.stringify(current)).toString('base64url'):null};
  }
  async function postDetail(request){
   const a=await actor(request);
+  bookmarkActor(a);
   if(!['owner','shop'].includes(a.profile.role))D.fail('Only customers and shops can view showcase posts.','forbidden');
   const id=validPostId(request.id),snapshot=await db.doc(`posts/${id}`).get(),data=snapshot.data();
-  if(!data||data.status!=='published'||data.authorRole!=='shop')D.fail('Post not found.','not_found');
-  const shopId=data.shopId||data.authorId,profile=(await db.doc(`users/${shopId}`).get()).data();
-  return {post:publicPost(id,data,profile)};
+  if(!showcase(data))D.fail('Post not found.','not_found');
+  const shopId=data.shopId||data.authorId,profile=(await shopProfiles([snapshot])).get(shopId);
+  if(!profile)D.fail('Post not found.','not_found');
+  return {post:{...publicPost(id,data,profile),saved:(await savedIds(a.uid,[id])).has(id)}};
  }
  async function createShowcase(request){
   const a=await requireShop(request),input=request.data||{};
@@ -232,11 +254,17 @@ function createPosts({db,auth,actor,storage}){
    update:['id','title','description','images','category','projectStatus','vehicle','requestId'],remove:['id','requestId'],removeImage:['path']
   };
   M.fields(input,['op',...allowed[op],...(['save'].includes(op)?[]:['feed','mine','saved'].includes(op)?[]:['requestId'])]);
+  if(['feed','mine','get'].includes(op))bookmarkActor(a);
   const posts=db.collection('posts');
   if(op==='get'){
    const id=D.id(input.id),document=await posts.doc(id).get(),post=document.data();
    if(!post||post.status!=='published')D.fail('Post not found.','not-found');
    const saved=(await db.doc(`users/${a.uid}/savedPosts/${id}`).get()).exists;
+   if(post.authorRole==='shop'){
+    const profile=(await shopProfiles([document])).get(post.shopId||post.authorId);
+    if(!showcase(post)||!profile)D.fail('Post not found.','not-found');
+    return {post:{...publicPost(id,post,profile),saved}};
+   }
    const revisions=await avatarRevisions([document]);
    return {post:{id,...serialize(post),saved,authorPhotoRevision:revisions.get(post.authorId||post.shopId)||0}};
   }
@@ -257,24 +285,46 @@ function createPosts({db,auth,actor,storage}){
    const savedSnapshot=docs.length?await db.collection(`users/${a.uid}/savedPosts`).where(FieldPath.documentId(),'in',docs.map(doc=>doc.id)).get():{docs:[]};
    const saved=new Set(savedSnapshot.docs.map(doc=>doc.id));
    const revisions=await avatarRevisions(docs);
-   return {items:docs.map(doc=>({...row(doc),saved:saved.has(doc.id),authorPhotoRevision:revisions.get(doc.data().authorId||doc.data().shopId)||0})),cursor:snapshot.docs.length>PAGE_SIZE?docs[PAGE_SIZE-1].id:null};
+   const profiles=await shopProfiles(docs.filter(doc=>doc.data().authorRole==='shop'));
+   return {items:docs.flatMap(doc=>{const data=doc.data();if(data.authorRole!=='shop')return [{...row(doc),saved:saved.has(doc.id),authorPhotoRevision:revisions.get(data.authorId)||0}];const profile=profiles.get(data.shopId||data.authorId);return showcase(data)&&profile?[{...publicPost(doc.id,data,profile),saved:saved.has(doc.id)}]:[];}),cursor:snapshot.docs.length>PAGE_SIZE?docs[PAGE_SIZE-1].id:null};
   }
   if(op==='saved'){
+   bookmarkActor(a);
    const savedRef=db.collection(`users/${a.uid}/savedPosts`);
-   let savedQuery=savedRef.orderBy(FieldPath.documentId());
-   if(input.cursor){const cursor=await savedRef.doc(D.id(input.cursor)).get();if(!cursor.exists)D.fail('Saved posts changed. Refresh the list.','failed-precondition');savedQuery=savedQuery.startAfter(cursor);}
-   const savedPage=await savedQuery.limit(PAGE_SIZE+1).get(),ids=savedPage.docs.slice(0,PAGE_SIZE).map(doc=>doc.id);
-   const docs=await Promise.all(ids.map(id=>posts.doc(id).get()));
-   const revisions=await avatarRevisions(docs);
-   return {items:docs.filter(doc=>doc.exists&&doc.data().status==='published').map(doc=>({...row(doc),saved:true,authorPhotoRevision:revisions.get(doc.data().authorId||doc.data().shopId)||0})),cursor:savedPage.docs.length>PAGE_SIZE?ids.at(-1):null};
+   let current=input.cursor?D.id(input.cursor):null,scanned=0,hasMore=false;
+   const items=[],profiles=new Map();
+   while(items.length<PAGE_SIZE&&scanned<MAX_SCAN){
+    let query=savedRef.orderBy(FieldPath.documentId());
+    if(current)query=query.startAfter(current);
+    const take=Math.min(40,MAX_SCAN-scanned),page=await query.limit(take).get();
+    scanned+=page.docs.length;if(!page.docs.length){hasMore=false;break;}
+    const docs=await Promise.all(page.docs.map(doc=>posts.doc(doc.id).get()));
+    await shopProfiles(docs.filter(doc=>showcase(doc.data())),profiles);
+    for(let index=0;index<docs.length;index++){
+     const doc=docs[index],data=doc.data();current=page.docs[index].id;
+     const profile=profiles.get(data?.shopId||data?.authorId);
+     if(showcase(data)&&profile)items.push({...publicPost(doc.id,data,profile),saved:true});
+     hasMore=index<docs.length-1||page.docs.length===take;
+     if(items.length===PAGE_SIZE)break;
+    }
+    if(page.docs.length<take&&items.length<PAGE_SIZE){hasMore=false;break;}
+   }
+   return {items,cursor:hasMore?current:null};
   }
   if(op==='save'){
+   bookmarkActor(a);
    const id=D.id(input.id),saved=input.saved===true;
    if(typeof input.saved!=='boolean')D.fail('Choose whether to save this post.');
    const postRef=posts.doc(id),savedRef=db.doc(`users/${a.uid}/savedPosts/${id}`);
    return db.runTransaction(async tx=>{
-    const post=(await tx.get(postRef)).data();
-    if(!post||post.status!=='published')D.fail('Post not found.','not-found');
+    const currentActor=(await tx.get(db.doc(`users/${a.uid}`))).data();bookmarkActor({uid:a.uid,profile:currentActor});
+    if(saved){
+     const post=(await tx.get(postRef)).data();
+     if(!showcase(post))D.fail('Post not found.','not-found');
+     const shopId=post.shopId||post.authorId,profile=(await tx.get(db.doc(`users/${shopId}`))).data();
+     const shopUser=eligible(profile,'shop')?await auth.getUser(shopId).catch(error=>{if(error.code==='auth/user-not-found')return null;throw error;}):null;
+     if(!eligible(profile,'shop')||!shopUser?.emailVerified||shopUser.disabled)D.fail('Post not found.','not-found');
+    }
     const previous=await tx.get(savedRef);
     if(saved&&!previous.exists)tx.create(savedRef,{postId:id,createdAt:stamp()});
     if(!saved&&previous.exists)tx.delete(savedRef);
@@ -344,7 +394,9 @@ function createPosts({db,auth,actor,storage}){
   const id=validPostId(request.id),input=request.data||{};
   if(Object.keys(input).some(key=>key!=='path'))validation({image:'Only the saved photo path is accepted.'});
   const post=(await db.doc('posts/'+id).get()).data();
-  if(!post||post.status!=='published'||post.authorRole!=='shop')D.fail('Post not found.','not_found');
+  if(!showcase(post))D.fail('Post not found.','not_found');
+  const profile=(await shopProfiles([{data:()=>post}])).get(post.shopId||post.authorId);
+  if(!profile)D.fail('Post not found.','not_found');
   const asset=Array.isArray(post.images)&&post.images.find(item=>item?.path===input.path);
   if(!asset||typeof asset.path!=='string'||!asset.path.startsWith('posts/'+(post.shopId||post.authorId)+'/'))D.fail('Photo not found.','not_found');
   const store=storage.forReference?storage.forReference(asset):storage,issuedAt=Date.now();
