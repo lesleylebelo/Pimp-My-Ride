@@ -6,7 +6,7 @@ global.IS_REACT_ACT_ENVIRONMENT=true;
 test('private showcase previews renew, clear on account/blur/offline and reject late responses',async()=>{
  const state={uid:'owner',focused:true,offline:false,calls:0};let tree,renew,resolveLate;
  const realSet=global.setTimeout,realClear=global.clearTimeout;
- global.setTimeout=(fn,ms)=>{assert.ok(ms<=55000);renew=fn;return 777;};
+ global.setTimeout=(fn,ms)=>{assert.ok(ms>55000&&ms<=60000);renew=fn;return 777;};
  global.clearTimeout=id=>{if(id!==777)realClear(id);};
  const Photo=loadUI('src/features/marketplace/components/ShowcasePhoto.js',{
   '../../auth/context/AuthContext':{useAuth:()=>({user:{uid:state.uid},offline:state.offline})},
@@ -24,6 +24,22 @@ test('private showcase previews renew, clear on account/blur/offline and reject 
   await act(async()=>resolveLate({url:'https://late.example/secret',expiresAt:Date.now()+60000}));
   assert.equal(tree.root.findAllByType('Image').length,0);
  }finally{if(tree)await act(async()=>tree.unmount());global.setTimeout=realSet;global.clearTimeout=realClear;}
+});
+
+test('20 private feed images do not renew inside the first API minute and failures stop renewal',async t=>{
+ t.mock.timers.enable({apis:['Date','setTimeout'],now:1800000000000});
+ let calls=0,limited=false,tree;
+ const Photo=loadUI('src/features/marketplace/components/ShowcasePhoto.js',{
+  '../../auth/context/AuthContext':{useAuth:()=>({user:{uid:'owner'},offline:false})},
+  '../services/postsApi':{viewPostPhoto:async()=>{calls++;if(limited)throw Object.assign(Error('Wait'),{status:429});return {url:'https://signed.example/photo',expiresAt:Date.now()+60000};}},
+  './MarketplaceUI':{Button:'Button'},
+ }).default;
+ try{
+  await act(async()=>{tree=create(React.createElement(React.Fragment,null,Array.from({length:20},(_,i)=>React.createElement(Photo,{key:i,postId:`post${i}`,image:{bucket:'showcase-images',path:`posts/shop/image${i}`}}))));});
+  assert.equal(calls,20);await act(async()=>t.mock.timers.tick(55000));assert.equal(calls,20);
+  limited=true;await act(async()=>t.mock.timers.tick(5000));assert.equal(calls,40);
+  await act(async()=>t.mock.timers.tick(120000));assert.equal(calls,40,'no timer retries failed images');
+ }finally{if(tree)await act(async()=>tree.unmount());}
 });
 
 test('failed or expired showcase access stays unavailable and offers an explicit retry',async()=>{

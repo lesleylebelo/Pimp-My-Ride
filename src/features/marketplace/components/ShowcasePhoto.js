@@ -24,7 +24,8 @@ export default function ShowcasePhoto({postId,image,style,resizeMode='cover'}){
     if(!active)return;
     if(!isMediaUrl(result?.url)||!Number.isFinite(result.expiresAt)||result.expiresAt<=Date.now())throw Error('Photo access expired. Try again.');
     setAccess({key,url:result.url});setError('');
-    timer=setTimeout(()=>{setAccess(null);void load();},Math.max(1000,Math.min(55000,result.expiresAt-Date.now()-5000)));
+    // Avoid doubling feed image traffic inside the same 60-second API window.
+    timer=setTimeout(()=>{setAccess(null);void load();},Math.max(1000,result.expiresAt-Date.now()));
    }catch(e){if(active){setAccess(null);setError(e.message||'Photo unavailable. Try again.');}}
   }
   void load();return()=>{active=false;clearTimeout(timer);};
