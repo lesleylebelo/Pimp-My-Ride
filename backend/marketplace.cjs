@@ -17,7 +17,7 @@ const allowed={
  vehicles:['cursor','archived'],vehicleSave:['id','version','make','model','year','colour','registration'],vehicleArchive:['id','version','archived'],
  categories:['cursor'],shops:['cursor'],requestCreate:['vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','photoIds','mandatoryServices','serviceLocation'],requestUpdate:['id','version','vehicleId','title','description','categoryId','city','budgetMinCents','budgetMaxCents','preferredDate','visibility','shopId','photoIds','mandatoryServices','serviceLocation'],
  requests:['feed','cursor'],request:['id','quotesCursor','comparison'],requestClose:['id'],quoteSubmit:['serviceRequestId','termsVersion','scope','items','completionDays','warranty','validForDays','depositType','depositValue','scopeConfirmed','allChargesIncluded','coveredServices'],quotes:['cursor'],quoteWithdraw:['id'],
- quoteAccept:['id','paymentMethod'],paymentMockResult:['id','paymentAttemptId','expectedBookingId','expectedAmountCents','expectedCurrency','outcome'],paymentRetry:['id'],paymentStart:['id'],paymentRecordInStore:['id','method'],bookingComplete:['id'], bookings:['cursor'],booking:['id','paymentCursor'],notifications:['cursor'],notificationRead:['id'],receipt:['id'],bookingConfirm:['id','appointmentDate','appointmentTime'],bookingCancel:['id','reason'],
+ quoteAccept:['id','paymentMethod'],paymentMockResult:['id','paymentAttemptId','expectedBookingId','expectedAmountCents','expectedCurrency','outcome'],paymentRetry:['id'],paymentStart:['id'],paymentRecordInStore:['id','method'],bookingComplete:['id'], bookings:['cursor'],booking:['id','paymentCursor'],notificationSummary:[],notifications:['cursor'],notificationRead:['id'],receipt:['id'],bookingConfirm:['id','appointmentDate','appointmentTime'],bookingCancel:['id','reason'],
 };
 const mutations=new Set(['vehicleSave','vehicleArchive','requestCreate','requestUpdate','requestClose','quoteSubmit','quoteWithdraw','quoteAccept','paymentMockResult','paymentRetry','paymentStart','paymentRecordInStore','bookingComplete','bookingConfirm','bookingCancel','notificationRead']);
 function eligible(profile,role){return profile?.role===role&&D.active(profile)&&!profile.statusOperation&&!profile.provisioningOperation&&(role!=='shop'||(profile.verificationStatus==='approved'&&!profile.reviewOperation));}
@@ -207,6 +207,10 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
   if(op==='bookings'){
    const result=await page(db.collection('bookings').where(role==='owner'?'ownerId':'shopId','==',a.uid),input.cursor);
    return {items:result.docs.map(doc=>requestFor(row(doc),role)),cursor:result.cursor};
+  }
+  if(op==='notificationSummary'){
+   const result=await db.collection('notifications').where('recipientUid','==',a.uid).where('readAt','==',null).count().get();
+   return {unreadCount:result.data().count};
   }
   if(op==='notifications'){
    let query=db.collection('notifications').where('recipientUid','==',a.uid).orderBy('createdAt','desc').orderBy(FieldPath.documentId(),'desc');

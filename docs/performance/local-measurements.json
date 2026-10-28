@@ -1,0 +1,64 @@
+{
+  "fixtureOnly": true,
+  "baseline": "781b0c5dd15df8c9a72f540d592a82b36c8e3389",
+  "mixedJourney": {
+    "before": {
+      "requests": 70,
+      "statuses": {
+        "200": 60,
+        "429": 10
+      },
+      "p50Ms": 14.91,
+      "p95Ms": 37.87
+    },
+    "after": {
+      "requests": 70,
+      "statuses": {
+        "200": 70
+      },
+      "p50Ms": 14.09,
+      "p95Ms": 50.84
+    }
+  },
+  "twoUsersOneIP": {
+    "before": {
+      "requests": 92,
+      "statuses": {
+        "200": 90,
+        "429": 2
+      },
+      "p50Ms": 11.88,
+      "p95Ms": 42.11
+    },
+    "after": {
+      "requests": 92,
+      "statuses": {
+        "200": 92
+      },
+      "p50Ms": 13.28,
+      "p95Ms": 95.4
+    }
+  },
+  "badges": {
+    "before": {
+      "historyRowsPerType": 100,
+      "seconds": 60,
+      "apiRequests": 40
+    },
+    "after": {
+      "historyRowsPerType": 100,
+      "seconds": 60,
+      "apiRequests": 4
+    }
+  },
+  "rapidNavigation": {
+    "visits": 10,
+    "distinctPages": 5,
+    "before": 50,
+    "after": 5
+  },
+  "simultaneousSamePage": {
+    "before": 20,
+    "after": 1
+  }
+}

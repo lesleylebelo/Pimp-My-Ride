@@ -5,16 +5,17 @@ import {marketApi} from '../services/marketApi';
 
 export function useMarketData(op,input={},setCursor){
  const {user,offline}=useAuth(),uid=user?.uid,focused=useIsFocused();
- const key=JSON.stringify(input),generation=useRef(0),mounted=useRef(false),connection=useRef('');
+ const key=JSON.stringify(input),generation=useRef(0),mounted=useRef(false),connection=useRef(''),forceNext=useRef(false);
  const [state,setState]=useState({data:null,busy:true,error:''});
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;++generation.current;};},[]);
  const refresh=useCallback(async(reset=true)=>{
   const current=++generation.current;
-  if(reset&&setCursor&&JSON.parse(key).cursor){setCursor(null);return null;}
+  if(reset&&setCursor&&JSON.parse(key).cursor){forceNext.current=true;setCursor(null);return null;}
   if(!uid||offline){setState({data:null,busy:false,error:offline?'Connect to load marketplace data.':'Sign in to continue.'});return null;}
   setState(s=>({...s,busy:true,error:''}));
   try{
-   const data=await marketApi(op,JSON.parse(key));
+   const force=reset||forceNext.current;forceNext.current=false;
+   const data=await marketApi(op,JSON.parse(key),{force});
    if(op==='requests'&&!Array.isArray(data?.items))throw new Error('The server returned an unexpected requests response. Please try again.');
    if(mounted.current&&current===generation.current)setState({data,busy:false,error:''});
    return data;

@@ -1,5 +1,8 @@
 {
   "indexes": [
+    {"collectionGroup":"notifications","queryScope":"COLLECTION","fields":[{"fieldPath":"recipientUid","order":"ASCENDING"},{"fieldPath":"readAt","order":"ASCENDING"}]},
+    {"collectionGroup":"conversations","queryScope":"COLLECTION","fields":[{"fieldPath":"ownerId","order":"ASCENDING"},{"fieldPath":"receivedOwner","order":"ASCENDING"},{"fieldPath":"readOwner","order":"ASCENDING"}]},
+    {"collectionGroup":"conversations","queryScope":"COLLECTION","fields":[{"fieldPath":"shopId","order":"ASCENDING"},{"fieldPath":"receivedShop","order":"ASCENDING"},{"fieldPath":"readShop","order":"ASCENDING"}]},
     {
       "collectionGroup": "transactionalEmailJobs",
       "queryScope": "COLLECTION",
@@ -144,14 +147,6 @@
         {"fieldPath": "authorId", "order": "ASCENDING"},
         {"fieldPath": "createdAt", "order": "DESCENDING"},
         {"fieldPath": "__name__", "order": "DESCENDING"}
-      ]
-    },
-    {
-      "collectionGroup": "posts",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {"fieldPath": "authorId", "order": "ASCENDING"},
-        {"fieldPath": "__name__", "order": "ASCENDING"}
       ]
     },
     {

@@ -304,16 +304,16 @@ test('provider HTTP failures have safe distinct public classifications and never
  }
 });
 
-test('shared HTTP IP and user throttles classify AI rate limits without changing other endpoint envelopes',async()=>{
+test('shared HTTP policy preserves AI mutation protection and isolates valid users on one IP',async()=>{
  const services={aiAssist:async()=>({}),marketplace:async()=>({})};
  const auth={verifyIdToken:async token=>({uid:token})};
  for(const mode of ['ip','uid']){
   const app=createApp({services,auth});let response;
   const count=mode==='ip'?91:61;
   for(let i=0;i<count;i++)response=await http(app).post('/api/ai/assist').set('Authorization','Bearer '+(mode==='ip'?'uid-'+i:'same')).send({});
-  assert.equal(response.status,429);assert.equal(response.body.error.fields.aiReason,'rate_limit');
+  assert.equal(response.status,mode==='ip'?200:429);if(mode==='uid')assert.equal(response.body.error.fields.aiReason,'rate_limit');
   const other=await http(app).post('/api/marketplace').set('Authorization','Bearer same').send({});
-  assert.equal(other.status,429);assert.equal(other.body.error.fields,undefined);
+  assert.equal(other.status,mode==='ip'?200:429);assert.equal(other.body.error?.fields,undefined);
  }
 });
 

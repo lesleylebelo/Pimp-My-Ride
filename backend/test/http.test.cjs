@@ -19,7 +19,7 @@ test('malformed JSON and unexpected errors do not expose credentials',async()=>{
  s.services.adminApi=async()=>{throw Error('private secret');};const other=createApp({auth:{verifyIdToken:async()=>({uid:'u'})},services:s.services});
  const result=await request(other).post('/api/admin').set('Authorization','Bearer good').send({}).expect(500);assert.ok(!result.text.includes('private secret'));
 });
-test('unexpected posts failures log the original message and stack but return only the generic error',async()=>{
+test('unexpected posts failures log structured metadata without raw exception details',async()=>{
  const failure=Object.assign(Error('Firestore unavailable'),{code:9});
  const s=setup(),app=createApp({auth:{verifyIdToken:async()=>({uid:'real-user'})},services:{...s.services,postsApi:async()=>{throw failure;}}});
  const errors=[],original=console.error;console.error=(...args)=>errors.push(args);
@@ -29,11 +29,10 @@ test('unexpected posts failures log the original message and stack but return on
  assert.equal(response.status,500);
  assert.deepEqual(response.body,{error:{code:'internal',message:'The server could not complete this action. Refresh before retrying.'}});
  assert.equal(errors.length,1);
- const log=errors[0].join(' ');
- assert.match(log,/error\.code=9/);
- assert.match(log,/error\.message=Firestore unavailable/);
- assert.match(log,/error\.stack=Error: Firestore unavailable/);
- assert.match(log,/http\.test\.cjs/);
+ const log=JSON.parse(errors[0][0]);
+ assert.deepEqual(log,{event:'api_failure',category:'read',method:'POST',status:500,code:'internal'});
+ assert.ok(!errors[0][0].includes('Firestore unavailable'));
+
 });
 test('only a trusted API error can mark a definitively finished review for a new explicit request',async()=>{
  const s=setup();const error=Object.assign(new ApiError('failed-precondition','Review finished.'),{retryWithNewRequest:true});
@@ -148,22 +147,22 @@ test('an upload disconnected during authorization never starts either service wh
  assert.equal(calls,1);
 });
 
-test('profile photos share the existing 60/account budget; 429 exposes Retry-After across origins',async()=>{
+test('profile photos have a 60/account media budget; rejection preserves browsing and exposes retry information',async()=>{
  let calls=0;const app=createApp({auth:{verifyIdToken:async uid=>({uid})},allowedOrigins:['https://frontend.example.test'],services:{profilePhotos:async()=>{calls++;return {url:null};},marketplace:async()=>({ok:true})}});
  for(let i=0;i<60;i++)await request(app).post('/api/profile/photos').set('Authorization','Bearer owner').send({op:'view',context:'post',id:`post${i%31}`}).expect(200);
  const limited=await request(app).post('/api/profile/photos').set('Authorization','Bearer owner').set('Origin','https://frontend.example.test').send({op:'view',context:'self'}).expect(429);
  assert.equal(limited.body.error.message,'Too many requests. Wait a minute.');assert.equal(calls,60);
  assert.ok(Number(limited.headers['retry-after'])>0);assert.match(limited.headers['access-control-expose-headers'],/Retry-After/);
  assert.match(limited.headers['ratelimit-policy'],/60/);
- await request(app).post('/api/marketplace').set('Authorization','Bearer owner').send({op:'dashboard'}).expect(429);
+ await request(app).post('/api/marketplace').set('Authorization','Bearer owner').send({op:'dashboard'}).expect(200);
  await request(app).post('/api/marketplace').set('Authorization','Bearer other').send({op:'dashboard'}).expect(200);
 });
 
-test('the unchanged 90/IP limiter also protects profile photos across accounts',async()=>{
+test('valid authenticated users on a shared IP do not accumulate a common quota',async()=>{
  let verified=0;const app=createApp({auth:{verifyIdToken:async uid=>{verified++;return {uid};}},services:{profilePhotos:async()=>({url:null})}});
  for(let i=0;i<90;i++)await request(app).post('/api/profile/photos').set('Authorization',`Bearer viewer${i}`).send({op:'view',context:'self'}).expect(200);
- const limited=await request(app).post('/api/profile/photos').set('Authorization','Bearer another').send({op:'status'}).expect(429);
- assert.equal(verified,90,'the IP limiter rejects before token verification');assert.ok(Number(limited.headers['retry-after'])>0);assert.match(limited.headers['ratelimit-policy'],/90/);
+ const limited=await request(app).post('/api/profile/photos').set('Authorization','Bearer another').send({op:'status'}).expect(200);
+ assert.equal(verified,91);assert.match(limited.headers['ratelimit-policy'],/read/);
 });
 
 test('shared-network heartbeats have independent per-account limits and preserve the normal API budget',async()=>{

@@ -15,8 +15,8 @@ function setup(role='owner'){
   '@expo-google-fonts/space-grotesk':{},'@expo-google-fonts/manrope':{},
   '../../../features/auth/context/AuthContext':{useAuth:()=>state.auth},'../../auth/context/AuthContext':{useAuth:()=>state.auth},'../context/AuthContext':{useAuth:()=>state.auth},
   '@react-navigation/native':{useIsFocused:()=>state.focused},
-  '../services/marketApi':{marketApi:async(op,data)=>{state.calls.push({op,data});assert.equal(op,'notifications');return state.reply?state.reply(data):state.pages[data.cursor||'first'];}},
-  '../services/messageApi':{messageApi:async(op,data)=>{state.messages.push({op,data});return {items:[{id:'chat',unreadCount:7}],cursor:null};}},
+  '../services/marketApi':{marketApi:async(op,data)=>{state.calls.push({op,data});assert.equal(op,'notificationSummary');return state.reply?state.reply(data):{unreadCount:[...new Map(Object.values(state.pages).flatMap(page=>page.items).map(item=>[item.id,item])).values()].filter(item=>!item.readAt).length};}},
+  '../services/messageApi':{messageApi:async(op,data)=>{state.messages.push({op,data});return {unreadCount:7};}},
   '../hooks/useMarketData':{useMarketData:()=>({data:{items:[],cursor:null},busy:false,error:'',refresh:async()=>{}})},
   '../hooks/usePostsFeed':{usePostsFeed:()=>feed},'../../marketplace/hooks/usePostsFeed':{usePostsFeed:()=>feed},
   '../components/PostCard':{PostCard},'../../marketplace/components/PostCard':{PostCard},'../components/PhotoGallery':()=>null,
@@ -45,21 +45,21 @@ test('both feed headers place the bell beside unchanged Messages with matching a
    assert.equal(badge(tree).length,1);assert.ok(button(tree,'All'));assert.ok(button(tree,'More filters'));
    assert.ok(!tree.root.findAllByType('ScrollView').some(scroll=>scroll.findAllByType('Pressable').includes(bell)));
    await act(async()=>bell.props.onPress());await act(async()=>messages.props.onPress());assert.deepEqual(s.state.moves,[['Notifications'],['Messages']]);
-   assert.deepEqual(s.state.messages,[{op:'list',data:{}}]);assert.deepEqual(s.state.calls,[{op:'notifications',data:{cursor:null}},{op:'notifications',data:{cursor:'next'}}]);
+   assert.deepEqual(s.state.messages,[{op:'summary',data:{}}]);assert.deepEqual(s.state.calls,[{op:'notificationSummary',data:{}}]);
   }finally{await close(tree);}
   assert.equal(s.listeners.size,0);
  }
 });
 
-test('notification badge uses all pages, caps at 99+, updates read state and never acknowledges notifications',async t=>{
+test('notification badge uses the summary, caps at 99+, updates read state and never acknowledges notifications',async t=>{
  t.mock.timers.enable({apis:['setInterval']});const s=setup();
  s.state.pages={first:{items:Array.from({length:105},(_,id)=>({id:String(id),readAt:null})),cursor:null}};
  const Component=s.load('src/features/marketplace/components/NotificationsHeaderButton.js').default,tree=await mount(Component,{navigation:s.navigation});
  try{
   assert.match(text(tree),/99\+/);assert.equal(button(tree,'Notifications').props.accessibilityValue.text,'105 unread notifications');
-  s.state.pages.first.items.forEach(item=>{item.readAt=100;});await act(async()=>t.mock.timers.tick(15000));assert.equal(badge(tree).length,0);
-  s.state.reply=async()=>{throw Error('Unavailable');};await act(async()=>t.mock.timers.tick(15000));assert.equal(badge(tree).length,0);assert.equal(button(tree,'Notifications').props.accessibilityValue.text,'Unread status unavailable');
-  assert.ok(s.state.calls.every(call=>call.op==='notifications'));
+  s.state.pages.first.items.forEach(item=>{item.readAt=100;});await act(async()=>t.mock.timers.tick(30000));assert.equal(badge(tree).length,0);
+  s.state.reply=async()=>{throw Error('Unavailable');};await act(async()=>t.mock.timers.tick(30000));assert.equal(badge(tree).length,0);assert.equal(button(tree,'Notifications').props.accessibilityValue.text,'Unread status unavailable');
+  assert.ok(s.state.calls.every(call=>call.op==='notificationSummary'));
  }finally{await close(tree);}
 });
 

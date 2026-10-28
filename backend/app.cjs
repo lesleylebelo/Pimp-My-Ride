@@ -4,9 +4,10 @@ const {rateLimit}=require('express-rate-limit');
 const multer=require('multer');
 const {ApiError}=require('./errors.cjs');
 const cors = require('cors');
+const {policies,metrics,limiter}=require('./request-policy.cjs');
 const {corsOrigins}=require('./config.cjs');
 const STATUS={'invalid-argument':400,validation_error:400,unauthenticated:401,unauthorized:401,'permission-denied':403,forbidden:403,'not-found':404,not_found:404,'already-exists':409,'failed-precondition':409,'resource-exhausted':429,'unavailable':503,'internal':500};
-function createApp({services,auth,googleExchange,emailDelivery,trustProxy=false,allowedOrigins=corsOrigins()}){
+function createApp({services,auth,googleExchange,emailDelivery,trustProxy=false,allowedOrigins=corsOrigins(),metricsLogger=entry=>console.info(JSON.stringify(entry))}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',trustProxy);app.use(helmet());
  app.use(cors({
   origin: allowedOrigins,
@@ -18,7 +19,7 @@ function createApp({services,auth,googleExchange,emailDelivery,trustProxy=false,
  app.get('/health',(_,res)=>res.json({ok:true}));
  if(emailDelivery)require('./transactional-email.cjs').mountEmailDispatch(app,emailDelivery);
  // Pre-session exchange; existing /api Firebase token middleware stays intact.
- app.post(['/auth/google','/auth/google/android'],rateLimit({windowMs:60000,limit:12,standardHeaders:'draft-8',legacyHeaders:false}),express.json({limit:'32kb'}),async(req,res,next)=>{
+ app.post(['/auth/google','/auth/google/android'],limiter({name:'google-sign-in',limit:12}),express.json({limit:'32kb'}),async(req,res,next)=>{
   try{
    // Native HTTP has no Origin header or ambient browser cookies. Keep the web
    // origin gate unchanged and reject *all* browser origins on the native path.
@@ -28,13 +29,8 @@ function createApp({services,auth,googleExchange,emailDelivery,trustProxy=false,
    res.json({data:await googleExchange(req.body)});
   }catch(e){next(e instanceof ApiError?e:new ApiError('unavailable','Google sign-in could not complete. Try again or use email/password.'));}
  });
- const rateResponse=(req,res,next,options)=>res.status(options.statusCode).json(
-  req.path==='/ai/assist'?{error:{...options.message.error,fields:{aiReason:'rate_limit'}}}:options.message);
- const limits=rateLimit({windowMs:60000,limit:90,standardHeaders:'draft-8',legacyHeaders:false,message:{error:{code:'resource-exhausted',message:'Too many requests. Wait a minute.'}},handler:rateResponse});
- // Separate generous pre-authentication IP budget for heartbeats; ordinary
- // shared-network presence does not consume the administrative/API IP budget.
- const sessionIps=rateLimit({windowMs:60000,limit:600,standardHeaders:'draft-8',legacyHeaders:false,message:{error:{code:'resource-exhausted',message:'Too many session requests. Wait a minute.'}}});
- app.use('/api',(req,res,next)=>req.path==='/session'?sessionIps(req,res,next):limits(req,res,next),async(req,res,next)=>{
+ const policy=policies();
+ app.use('/api',metrics(app,metricsLogger),policy.authentication,async(req,res,next)=>{
   try{
    const match=/^Bearer (\S+)$/.exec(req.headers.authorization||'');
    if(!match)throw new ApiError('unauthenticated','Sign in to continue.');
@@ -42,12 +38,12 @@ function createApp({services,auth,googleExchange,emailDelivery,trustProxy=false,
    req.identity={uid:token.uid,token};next();
   }catch{next(new ApiError('unauthenticated','Your session expired. Sign in again.'));}
  });
- const limitMessage={error:{code:'resource-exhausted',message:'Too many requests. Wait a minute.'}};
- const perUser=rateLimit({windowMs:60000,limit:60,keyGenerator:req=>req.identity.uid,standardHeaders:'draft-8',legacyHeaders:false,message:limitMessage,handler:rateResponse});
- const heartbeats=rateLimit({windowMs:60000,limit:12,keyGenerator:req=>req.identity.uid,standardHeaders:'draft-8',legacyHeaders:false,message:limitMessage});
- app.use('/api',(req,res,next)=>req.path==='/session'?heartbeats(req,res,next):perUser(req,res,next));
  const studioJson=express.json({limit:'1600kb'}),ordinaryJson=express.json({limit:'32kb'});
- app.use('/api',(req,res,next)=>(req.path==='/ai/studio'?studioJson:ordinaryJson)(req,res,next));
+ app.use('/api',(req,res,next)=>(req.path==='/ai/studio'?studioJson:ordinaryJson)(req,res,error=>{
+  if(error)return policy.apply(req,res,()=>next(error));
+  next();
+ }));
+ app.use('/api',policy.apply);
  const action=(fn)=>async(req,res,next)=>{try{if(!req.body||Array.isArray(req.body)||typeof req.body!=='object')throw new ApiError('invalid-argument','Expected a JSON object.');res.json({data:await fn({auth:req.identity,data:req.body})});}catch(e){next(e);}};
  const postAction=(fn,status=200)=>async(req,res,next)=>{try{if(['POST','PATCH'].includes(req.method)&&(!req.body||Array.isArray(req.body)||typeof req.body!=='object'))throw new ApiError('validation_error','Expected a JSON object.');res.status(status).json({data:await fn({auth:req.identity,data:req.body||{},query:req.query,id:req.params.id})});}catch(e){next(e);}};
  app.get('/api/posts',postAction(services.postsList));
@@ -127,10 +123,9 @@ function createApp({services,auth,googleExchange,emailDelivery,trustProxy=false,
   if(e.type==='entity.parse.failed'){code='invalid-argument';message='Invalid JSON request.';}
   if(e.type==='entity.too.large'){code='invalid-argument';message='Request is too large.';}
   const status=STATUS[code]||500;
-  if(code==='internal'){
-   const redact=value=>String(value||'').replace(/([?&](?:token|signature|x-amz-signature|x-amz-credential)=)[^&\s]+/gi,'$1[redacted]');
-   console.error(`API operation failed: method=${req.method} path=${req.path} status=${status} error.code=${redact(e.code||'unknown')} error.message=${redact(e.message||e)}\nerror.stack=${redact(e.stack||'(no stack available)')}`); // Never log request bodies or signed URL credentials.
-  }
+  if(status===429&&!res.hasHeader('Retry-After'))res.set('Retry-After','60');
+  if(code==='internal')console.error(JSON.stringify({event:'api_failure',category:req.requestCategory||'authentication',method:req.method,status,code}));
+
   res.status(status).json({error:{code,message,...(e instanceof ApiError&&e.fields?{fields:e.fields}:{}),...(e instanceof ApiError&&e.retryWithNewRequest===true?{retryWithNewRequest:true}:{})}});
  });
  return app;

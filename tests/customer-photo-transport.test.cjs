@@ -17,7 +17,7 @@ function setup(){
  function load(file,mocks){const code=babel.transformSync(fs.readFileSync(file,'utf8'),{configFile:false,babelrc:false,plugins:[require.resolve('@babel/plugin-transform-modules-commonjs')]}).code;
   const mod={exports:{}};new Function('require','module','exports','process','fetch','XMLHttpRequest','FormData','__DEV__','console',code)(name=>{assert.ok(Object.hasOwn(mocks,name),name);return mocks[name];},mod,mod.exports,{env:{EXPO_PUBLIC_API_URL:'https://api.example.test'}},async url=>{fetched.push(url);if(!url.endsWith('/health'))throw Error('Native multipart fetch fails');return {ok:true,text:async()=>'{"ok":true}'};},XHR,Multipart,true,{warn:(...args)=>warnings.push(args),error:()=>{}});return mod.exports;}
  const api=load('src/shared/services/api.js',{'./firebase':{firebase:()=>({auth})},'./network':{requireConnection:async()=>{}}});
- const photos=load('src/features/marketplace/services/photoApi.js',{'react-native':{Platform:{OS:'ios'}},'../../../shared/services/api':api,'../../../shared/services/firebase':{firebase:()=>({auth})},'../utils/photos':{photoFileError:()=>''}});
+ const photos=load('src/features/marketplace/services/photoApi.js',{'../../../shared/services/readCoordinator':load('src/shared/services/readCoordinator.js',{}),'react-native':{Platform:{OS:'ios'}},'../../../shared/services/api':api,'../../../shared/services/firebase':{firebase:()=>({auth})},'../utils/photos':{photoFileError:()=>''}});
  return {api,photos,auth,sent,fetched,state,warnings};
 }
 const file={uri:'file:///cache/prepared.jpg',name:'prepared.jpg',mimeType:'image/jpeg',size:1024};

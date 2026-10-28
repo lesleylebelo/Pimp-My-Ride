@@ -84,7 +84,7 @@ export async function apiRequest(path,data,{multipart=false,expectedUid,authClie
  catch{
   const message=response.status===401?'Your session expired. Please sign out and sign in again.':response.status>=500?`The server could not complete this request (HTTP ${response.status}). Please try again shortly.`:'The server returned an unexpected response. Please try again.';
   const error=new Error(message);error.code=`api/http-${response.status}`;error.status=response.status;error.responseBody=loggedBody;error.requestUrl=requestUrl;
-  console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});
+  console.error('[PimpMyRide API request failed]',{status:response.status});
   throw retryAfter(error,response.status,response.headers?.get('Retry-After'));
  }
  if(!response.ok){
@@ -93,13 +93,13 @@ export async function apiRequest(path,data,{multipart=false,expectedUid,authClie
   const error=new Error(message);error.code=`api/${payload.error?.code||'internal'}`;error.status=response.status;error.responseBody=errorBody;error.requestUrl=requestUrl;
   if(payload.error?.retryWithNewRequest===true)error.retryWithNewRequest=true;
   const expectedAI=path==='ai/assist'&&((response.status===503&&payload.error?.code==='unavailable')||(response.status===429&&payload.error?.code==='resource-exhausted')||(response.status===403&&payload.error?.code==='permission-denied'));
-  if(!expectedAI)console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});
+  if(!expectedAI)console.error('[PimpMyRide API request failed]',{status:response.status});
   throw retryAfter(error,response.status,response.headers?.get('Retry-After'));
  }
  if(!result||typeof result!=='object'||!Object.prototype.hasOwnProperty.call(result,'data')){
   const error=new Error('The server returned an unexpected response. Please try again.');
   error.code='api/unexpected-response';error.status=response.status;error.responseBody=loggedBody;error.requestUrl=requestUrl;
-  console.error('[PimpMyRide API response invalid]',{status:response.status,responseBody:loggedBody,requestUrl});
+  console.error('[PimpMyRide API response invalid]',{status:response.status});
   throw error;
  }
  return result.data;
@@ -174,18 +174,18 @@ export async function apiMethodRequest(path,{method='GET',query,data,expectedUid
  catch{
   const message=response.status===401?'Your session expired. Please sign out and sign in again.':response.status>=500?`The server could not complete this request (HTTP ${response.status}). Please try again shortly.`:'The server returned an unexpected response. Please try again.';
   const error=new Error(message);error.code=`api/http-${response.status}`;error.status=response.status;error.responseBody=loggedBody;error.requestUrl=requestUrl;
-  console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});throw error;
+  console.error('[PimpMyRide API request failed]',{status:response.status});throw retryAfter(error,response.status,response.headers?.get('Retry-After'));
  }
  if(!response.ok){
   const payload=result&&typeof result==='object'?result:{},errorBody=payload.error||payload;
   const message=response.status===401?'Your session expired. Please sign out and sign in again.':response.status>=500?`The server could not complete this request (HTTP ${response.status}). Please try again shortly.`:payload.error?.message||'The request failed.';
   const error=new Error(message);error.code=`api/${payload.error?.code||'internal'}`;error.status=response.status;error.responseBody=errorBody;error.requestUrl=requestUrl;
-  console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});throw error;
+  console.error('[PimpMyRide API request failed]',{status:response.status});throw retryAfter(error,response.status,response.headers?.get('Retry-After'));
  }
  if(!result||typeof result!=='object'||!Object.hasOwn(result,'data')){
   const error=new Error('The server returned an unexpected response. Please try again.');
   error.code='api/unexpected-response';error.status=response.status;error.responseBody=loggedBody;error.requestUrl=requestUrl;
-  console.error('[PimpMyRide API response invalid]',{status:response.status,responseBody:loggedBody,requestUrl});throw error;
+  console.error('[PimpMyRide API response invalid]',{status:response.status});throw retryAfter(error,response.status,response.headers?.get('Retry-After'));
  }
  return result.data;
 }

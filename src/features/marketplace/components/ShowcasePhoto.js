@@ -1,3 +1,4 @@
+import {useAppActive} from '../../../shared/services/useAppActive';
 import React,{useEffect,useState} from 'react';
 import {ActivityIndicator,Image,Text,View} from 'react-native';
 import {useTheme} from '../../../shared/theme/ThemeContext';
@@ -12,7 +13,7 @@ export const hasPostImage=image=>typeof image?.path==='string'||isMediaUrl(image
 // Bucket/path identify private media. Never persist signed URLs in a post or cache.
 export default function ShowcasePhoto({postId,image,style,resizeMode='cover'}){
  const {theme}=useTheme();
- const {user,offline}=useAuth(),uid=user?.uid,focused=useIsFocused();
+ const {user,offline}=useAuth(),uid=user?.uid,screenFocused=useIsFocused(),appActive=useAppActive(),focused=screenFocused&&appActive;
  const [access,setAccess]=useState(null),[error,setError]=useState(''),[retry,setRetry]=useState(0);
  const privateMedia=!!image?.bucket||(typeof image?.path==='string'&&!isMediaUrl(image?.url)),key=JSON.stringify([uid,postId,image?.bucket,image?.path,focused,offline,retry]);
  useEffect(()=>{

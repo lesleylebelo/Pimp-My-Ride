@@ -1,3 +1,4 @@
+import {createReadCoordinator,invalidateReads} from '../../../shared/services/readCoordinator';
 import {Platform} from 'react-native';
 import {photoFileError,preparePhoto} from '../utils/photos';
 
@@ -12,7 +13,7 @@ function account(expectedUid){
  if(expectedUid&&uid!==expectedUid)throw new Error('Your account changed. Please try again.');
  return uid;
 }
-export async function postsApi(op,data={},expectedUid){
+async function executePostsApi(op,data={},expectedUid){
  const uid=account(expectedUid);
  const restWrite=op==='create'&&data.type==='showcase'||['update','remove'].includes(op)&&data.showcase===true;
  if(['feed','mine','get'].includes(op)||restWrite){
@@ -54,7 +55,7 @@ export async function postsApi(op,data={},expectedUid){
 }
 export async function viewPostPhoto(id,path,expectedUid){
  const uid=account(expectedUid);
- const result=await api().apiMethodRequest('posts/'+encodeURIComponent(id)+'/images/view',{method:'POST',data:{path},expectedUid:uid});
+ const result=await coordinatedMedia([id,path],()=>api().apiMethodRequest('posts/'+encodeURIComponent(id)+'/images/view',{method:'POST',data:{path},expectedUid:uid}),{ttl:0});
  account(uid);return result;
 }
 export async function pickPostPhotos(maximum,{
@@ -88,3 +89,12 @@ export async function uploadPostPhoto(file,expectedUid,onProgress){
 export async function removePostPhoto(path,expectedUid){
  return postsApi('removeImage',{path},expectedUid);
 }
+
+const coordinatedRead=createReadCoordinator(()=>require('../../../shared/services/firebase').firebase().auth.currentUser);
+export async function postsApi(op,data={},expectedUid,options={}){
+ account(expectedUid);
+ if(!['feed','mine','saved','get'].includes(op)){try{return await executePostsApi(op,data,expectedUid);}finally{invalidateReads();}}
+ return coordinatedRead([op,data],()=>executePostsApi(op,data,expectedUid),{ttl:op==='get'?0:5000,...options});
+}
+
+const coordinatedMedia=createReadCoordinator(()=>require('../../../shared/services/firebase').firebase().auth.currentUser);
