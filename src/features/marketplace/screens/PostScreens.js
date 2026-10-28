@@ -1,3 +1,4 @@
+import {WorkshopReviews} from '../components/ServiceReviews';
 import {CustomerAction,CustomerGrid,CustomerPressable,useCustomerExperience} from '../../customer/components/CustomerUI';
 import React,{useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {Image,Pressable,RefreshControl,ScrollView,View,useWindowDimensions} from 'react-native';
@@ -191,6 +192,7 @@ function ShopPortfolio({navigation,shop}){
  return <ShowcasePage title="Workshop portfolio" navigation={navigation} onScroll={onScroll} refreshControl={<RefreshControl refreshing={feed.refreshing} onRefresh={()=>void feed.refresh()}/>}>
   {shop?.id?<><WorkshopIdentity shop={shop}/>
   {customer&&<>{!!shop.services?.length&&<View style={ui.section}><Text style={ui.heading}>Services</Text><Text style={ui.body}>{Array.isArray(shop.services)?shop.services.join(' / '):shop.services}</Text></View>}{shop.id&&<CustomerAction title="Request a service" icon="construct-outline" primary onPress={()=>navigation.navigate('RequestForm',{shop:{id:shop.id,shopName:shop.name,city:shop.city}})}/>}</>}
+  <WorkshopReviews shopId={shop.id}/>
   <Text accessibilityRole="header" style={ui.heading}>{customer?'Workshop showcases':'Featured work'}</Text>
   <Notice busy={feed.busy} error={feed.error}/>
   {!!feed.error&&<Button title="Retry loading portfolio" outline onPress={()=>void feed.refresh()}/>}

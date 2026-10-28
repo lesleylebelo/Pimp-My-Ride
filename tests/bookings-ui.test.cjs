@@ -18,6 +18,7 @@ function setup(role='owner',mode='dark',platform='ios',width=390){
   '../../../shared/theme/ThemeContext':{useTheme:()=>({theme:palettes[mode],isDark:mode==='dark'})},
   '../hooks/useMarketData':{useMarketData:()=>({data:state.data,busy:state.busy,error:state.error,refresh:async()=>{state.refreshes++;return state.refresh?state.refresh():state.data;}})},
   '../hooks/useMockPayments':{useMockPayments:()=>({enabled:true,busy:false,error:'',refresh:async()=>{}})},
+  '../services/serviceReviewsApi':{serviceReviewsApi:async()=>({review:null,eligible:state.data.booking?.serviceStatus==='completed'&&!!state.data.booking?.serviceCompletedAt})},
   '../services/marketApi':{marketApi:async(op,data)=>{state.calls.push({op,data});return state.api?state.api(op,data):{id:booking.id};}},
   '../components/ConversationAction':{ConversationAction:props=>React.createElement('ConversationAction',props)},
   '../components/PhotoGallery':props=>React.createElement('PhotoGallery',props),
@@ -162,5 +163,12 @@ test('booking forms preserve safe areas and platform keyboard handling without a
    assert.deepEqual(tree.root.findByType('SafeAreaView').props.edges,['top','bottom','left','right']);assert.equal(tree.root.findByType('KeyboardAvoidingView').props.behavior,platform==='ios'?'padding':platform==='android'?'height':undefined);
    assert.equal(tree.root.findAllByType('TextInput').length,1);assert.equal(tree.root.findByType('ScrollView').props.keyboardShouldPersistTaps,'handled');assert.equal(s.state.calls.length,0);
   });
+ }
+});
+
+test('only the customer completed-booking detail offers Rate & Review; payment is not required',async()=>{
+ for(const role of ['owner','shop'])for(const serviceStatus of ['not_started','completed']){
+  const s=setup(role);s.state.data={booking:{...booking,status:'confirmed',serviceStatus,...(serviceStatus==='completed'?{serviceCompletedAt:1}:{})}};
+  await mounted(s.screens.BookingDetailScreen,details(s),async tree=>{assert.equal(!!button(tree,'Rate & Review Workshop'),role==='owner'&&serviceStatus==='completed');if(role==='shop'&&serviceStatus==='completed')assert.match(text(tree),/Customer service review/);assert.match(text(tree),/Unpaid/);});
  }
 });

@@ -34,6 +34,11 @@ async function mount(context, id = 'request-one') {
 }
 const rerender = (context, tree, id = 'request-one') => act(async () => tree.update(React.createElement(context.Screen, {route: {params: {id}}, navigation: context.navigation})));
 
+test('comparison distinguishes actual verified ratings from confidence adjustment and unrated workshops',async()=>{
+ const c=setup();c.state.first.recommendations={status:'recommended',recommendedId:'quote-one',eligibleCount:2,entries:[{id:'quote-one',rank:1,comparable:true,shopName:'First Customs',totalCents:75000,explanations:['Highest confidence-adjusted score'],coverage:{required:0,matched:0},ratingExplanation:'Workshop rating: 4.6/5 from 28 verified reviews. Comparison accounts for review volume (4.43/5 adjusted).'},{id:'quote-two',rank:2,comparable:true,coverage:{required:0,matched:0},ratingExplanation:'Workshop rating: Not yet rated. A neutral 3.5/5 prior is used when ratings are scored.'}],scoringNote:'Customer ratings do not certify mechanical quality or safety.'};
+ const tree=await mount(c);try{assert.ok(says(tree,'4.6/5 from 28 verified reviews'));assert.ok(says(tree,'4.43/5 adjusted'));assert.ok(says(tree,'Not yet rated'));assert.ok(says(tree,'do not certify mechanical quality or safety'));}finally{await unmount(tree);}
+});
+
 test('owner compares quotation details and continues to the payment choice for the selected quote', async t => {
   const context = setup();context.state.first.quotes[0]={...context.state.first.quotes[0],depositType:'percentage',depositValue:20,depositAmountCents:15000};
   const tree = await mount(context);

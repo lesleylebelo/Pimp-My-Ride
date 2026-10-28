@@ -36,6 +36,7 @@ export function notificationTime(value, now = Date.now()) {
 }
 
 export function notificationIcon(item) {
+  if(item.event==='service_review_created')return 'star-outline';
   const type = item.target?.type;
   if (type === 'conversation') return 'chatbubble-ellipses-outline';
   if (type === 'receipt') return 'receipt-outline';

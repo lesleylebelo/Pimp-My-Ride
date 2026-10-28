@@ -1,3 +1,4 @@
+import {RatingSummary} from './ServiceReviews';
 import React from 'react';
 import {StyleSheet, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
@@ -43,6 +44,7 @@ export function WorkshopShowcaseCard({post, photos, author, place, time, vehicle
       <ProfileAvatar context={post.shop?.id ? 'shop' : 'post'} id={post.shop?.id || post.id} revision={post.authorPhotoRevision ?? post.shop?.profilePhotoRevision} shop size={40}/>
       <View style={styles.copy}><Text style={styles.name}>{author}</Text><Text muted style={styles.meta}>{[place, time].filter(Boolean).join(' · ')}</Text>{(post.verificationStatus === 'approved' || post.shop?.verificationStatus === 'approved') && <Text style={styles.meta}>Verified workshop</Text>}</View>
     </Identity>
+    {!!post.shop?.ratingSummary&&<RatingSummary summary={post.shop.ratingSummary}/>}
     <Interaction accessibilityRole="button" accessibilityLabel={`View ${post.title}`} onPress={onOpen} style={styles.copy}>
       <Text muted style={styles.meta}>{['SHOWCASE', post.serviceCategory || post.category].filter(Boolean).join(' / ')}</Text>
       <Text heading>{post.title}</Text>

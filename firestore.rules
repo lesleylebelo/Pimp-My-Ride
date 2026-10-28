@@ -30,6 +30,10 @@ service cloud.firestore {
     allow create, update, delete: if false;
    }
   }
+  // Verified service reviews and reputation totals are API-owned.
+  match /serviceReviews/{reviewId} {
+   allow read, write: if false;
+  }
   match /posts/{postId} {
    // API reads recheck author eligibility and return a public field projection.
    // Direct SDK reads would bypass those checks and disclose full records.

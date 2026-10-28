@@ -10,7 +10,7 @@ function compare(quotes, changes={}, contexts) {
 
 test('different all-inclusive prices rank by the documented normalisation',()=>{
   const result=compare([quote('a'),quote('b',20000)]);
-  assert.deepEqual(result.rankedIds,['a','b']);assert.equal(result.entries[0].score,100);assert.equal(result.entries[1].score,80);
+  assert.deepEqual(result.rankedIds,['a','b']);assert.equal(result.entries[0].score,100);assert.equal(result.entries[1].score,78.125);
   assert.ok(result.entries[0].explanations.includes('Lowest eligible price'));
 });
 test('distance uses geographical kilometres and can change the winner',()=>{
@@ -27,7 +27,7 @@ test('missing or malformed locations remove distance for every candidate without
   for(const location of [undefined,{latitude:'0',longitude:0},{latitude:91,longitude:0},{latitude:null,longitude:0}]) {
     const result=compare([quote('a'),quote('b',20000)],{}, {a:{available:true,current:true,location},b:{available:true,current:true,location:request.serviceLocation}});
     assert.equal(result.distanceUsed,false);assert.equal(result.entries[0].distanceKm,null);assert.equal(result.entries[1].distanceKm,0);
-    assert.equal(result.entries[1].score,73.3333);assert.equal(result.entries[1].components.distance,null);
+    assert.equal(result.entries[1].score,73.0769);assert.equal(result.entries[1].components.distance,null);
   }
   assert.equal(compare([quote('a'),quote('b')],{serviceLocation:null}).distanceUsed,false);
 });
@@ -51,7 +51,7 @@ test('fixed, percentage, none and missing deposit terms preserve exact stored ce
 test('scope, turnaround and missing warranty trade-offs are factual and never fabricate quality',()=>{
  const result=compare([quote('a',10000,{scope:'Paint the doors',completionDays:5,warranty:''}),quote('b',11000,{scope:'Paint doors and blend adjacent panels',completionDays:2,warranty:'Six months'})]);
  assert.equal(result.scopeDiffers,true);assert.ok(result.entries[0].tradeoffs.some(note=>note.includes('Service scopes differ')));assert.ok(result.entries[0].tradeoffs.includes('Warranty: Not specified'));assert.ok(result.entries[1].highlights.includes('Shortest stated turnaround'));
- assert.ok(result.entries[0].explanations.every(note=>!note.includes('Best overall value')));assert.match(result.scoringNote,/not quality scores/);
+ assert.ok(result.entries[0].explanations.every(note=>!note.includes('Best overall value')));assert.match(result.scoringNote,/do not certify mechanical quality or safety/);
 });
 
 test('zero and single offers return explicit reasons, with consistent results on reopening',()=>{
@@ -74,4 +74,20 @@ test('fewer than two verifiably current and available offers never produces rank
   const result=compare([quote('a'),quote('b')],{}, {a:{available:true,current:true},b:{available:false,current:true}});
   assert.equal(result.recommendedId,null);assert.deepEqual(result.rankedIds,[]);assert.equal(result.entries[0].rank,undefined);
   assert.equal(compare([quote('a'),quote('b')],{},{}).recommendedId,null);
+});
+
+test('ratings preserve raw facts while shrinking sparse reviews towards the documented prior',()=>{
+ const contexts={a:{available:true,current:true,ratingSummary:{average:5,count:1}},b:{available:true,current:true,ratingSummary:{average:5,count:100}}};
+ const result=compare([quote('a'),quote('b')],{},contexts),[a,b]=result.entries;
+ assert.equal(result.recommendedId,'b');assert.equal(result.ratingUsed,true);
+ assert.equal(a.rating.average,5);assert.equal(a.rating.count,1);assert.equal(a.rating.adjusted,3.75);
+ assert.ok(b.rating.adjusted>a.rating.adjusted);assert.match(b.ratingExplanation,/100 verified reviews/);
+ assert.match(result.scoringNote,/five prior observations at 3.5/);assert.match(result.scoringNote,/do not certify/);
+});
+test('unrated and malformed ratings remain eligible and receive explicit neutral treatment',()=>{
+ for(const summary of [undefined,{average:0,count:0},{average:9,count:5},{average:'5',count:2}]){
+  const result=compare([quote('a'),quote('b')],{}, {a:{available:true,current:true,ratingSummary:summary},b:{available:true,current:true,ratingSummary:{average:3.5,count:10}}});
+  const a=result.entries[0];assert.equal(a.eligible,true);assert.equal(a.rating.average,null);assert.equal(a.rating.count,0);assert.equal(a.rating.adjusted,3.5);assert.equal(result.status,'tie');assert.match(a.ratingExplanation,/Not yet rated/);
+ }
+ const allUnrated=compare([quote('a'),quote('b')]);assert.equal(allUnrated.ratingUsed,false);assert.ok(allUnrated.entries.every(entry=>entry.components.rating===null));
 });

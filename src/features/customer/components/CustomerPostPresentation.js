@@ -1,3 +1,4 @@
+import {RatingSummary} from '../../marketplace/components/ServiceReviews';
 import React from 'react';
 import {View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
@@ -25,6 +26,7 @@ export default function CustomerPostPresentation({post,onOpen,onProfile,photos,a
    <CustomerAction title={saved?'Unsave post':'Save post'} icon={saved?'bookmark':'bookmark-outline'} iconOnly loading={busy} accessibilityState={{selected:saved}} disabled={busy||offline} onPress={event=>{event?.stopPropagation?.();void onToggleSaved();}}/>
   </View>
   {post.authorRole==='shop'&&(post.verificationStatus==='approved'||post.shop?.verificationStatus==='approved')&&<CustomerText style={{paddingHorizontal:16,paddingBottom:12,fontSize:11}}>Verified workshop</CustomerText>}
+  {!!post.shop?.ratingSummary&&<View style={{padding:16,paddingTop:0}}><RatingSummary summary={post.shop.ratingSummary}/></View>}
   {!!error&&<CustomerText accessibilityRole="alert" style={{padding:16,color:theme.error}}>{error}</CustomerText>}
   {!!message&&<CustomerText accessibilityLiveRegion="polite" muted style={{padding:16}}>{message}</CustomerText>}
  </CustomerCard>;

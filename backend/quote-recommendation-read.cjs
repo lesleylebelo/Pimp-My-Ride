@@ -1,3 +1,4 @@
+const {ratingSummary}=require('./service-reviews.cjs');
 const {recommendQuotations} = require('./quote-recommendations.cjs');
 
 // Called only after visibleRequest has verified ownership. Never returned to shops.
@@ -17,7 +18,7 @@ async function readRecommendations({db, request, quoteId, eligible, authEligible
       const [profileDoc, headDoc] = await Promise.all([db.doc(`users/${quote.shopId}`).get(), db.doc(`quotationHeads/${legacyId}`).get()]);
       const profile = profileDoc.data(), head = headDoc.data();
       return {available: requestAvailable && eligible(profile, 'shop') && await authEligible(quote.shopId),
-        location: profile?.shop?.coordinates,
+        location: profile?.shop?.coordinates,ratingSummary:ratingSummary(profile),
         currentId: headDoc.exists ? head?.serviceRequestId === request.id && head?.shopId === quote.shopId ? head.quoteId : null : legacyId};
     })());
   }

@@ -121,3 +121,9 @@ test('profile photo references cannot be forged directly even by their own accou
   await assertFails(updateDoc(doc(db,'users',role),{profilePhoto:{id:'forged'},profilePhotoRevision:100}));
  }
 });
+
+test('verified service reviews and rating totals cannot be forged or read directly by any client role',async()=>{
+ await env.withSecurityRulesDisabled(c=>setDoc(doc(c.firestore(),'serviceReviews','review'),{customerId:'owner',shopId:'shop',bookingId:'private-booking',rating:5,text:'Synthetic review',status:'visible'}));
+ for(const role of ['owner','shop','admin']){await seed(role,role);const client=ctx(role,true,role==='admin').firestore();await assertFails(getDoc(doc(client,'serviceReviews','review')));await assertFails(getDocs(collection(client,'serviceReviews')));await assertFails(setDoc(doc(client,'serviceReviews','forged'),{customerId:role,rating:5}));await assertFails(updateDoc(doc(client,'serviceReviews','review'),{rating:1,status:'hidden'}));await assertFails(deleteDoc(doc(client,'serviceReviews','review')));await assertFails(updateDoc(doc(client,'users','shop'),{verifiedRating:{count:99,sum:495}}));}
+ await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(),'serviceReviews','review')));
+});

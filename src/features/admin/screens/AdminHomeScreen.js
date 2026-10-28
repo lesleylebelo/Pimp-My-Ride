@@ -21,6 +21,6 @@ export default function AdminHomeScreen({navigation}) {
     <Card><Text style={styles.heading}>Requires attention</Text>
       {busy ? <Text style={styles.muted}>Checking applications…</Text> : !Number.isFinite(data?.pending) ? <Text style={styles.muted}>Application totals are unavailable. Refresh to try again.</Text> : data.pending > 0 ? <><Text style={styles.muted}>{data.pending} workshop {data.pending === 1 ? 'application is' : 'applications are'} awaiting review.</Text><View style={styles.row}><Button title="Review applications" primary onPress={() => navigation.navigate('AdminAccounts', {filter: 'pending'})}/></View></> : <Text style={styles.muted}>No workshop applications awaiting review.</Text>}
     </Card>
-    <View style={styles.row}><Text style={styles.heading}>Quick access</Text><Button title="Online status" onPress={() => navigation.navigate('AdminPresence')}/><Button title="Activity log" onPress={() => navigation.navigate('AdminAudit')}/></View>
+    <View style={styles.row}><Text style={styles.heading}>Quick access</Text><Button title="Online status" onPress={() => navigation.navigate('AdminPresence')}/><Button title="Service reviews" onPress={() => navigation.navigate('AdminServiceReviews')}/><Button title="Activity log" onPress={() => navigation.navigate('AdminAudit')}/></View>
   </Page>;
 }

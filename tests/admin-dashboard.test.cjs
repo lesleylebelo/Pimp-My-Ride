@@ -58,7 +58,7 @@ test('narrow navigation opens and closes without replacing the mounted content; 
  assert.deepEqual(calls,[['AdminAccounts',{filter:'all'}]]);await act(async()=>tree.unmount());
 });
 
-test('all seven Admin routes use the shared navigator shell with the duplicate native header disabled',async()=>{
+test('all eight Admin routes use the shared navigator shell with the duplicate native header disabled',async()=>{
  const stub=()=>null;
  const Navigator=loadUI('src/features/admin/AdminNavigator.js',{
   '@react-navigation/native-stack':{createNativeStackNavigator:()=>({Navigator:'Navigator',Screen:'Screen'})},
@@ -67,7 +67,7 @@ test('all seven Admin routes use the shared navigator shell with the duplicate n
  }).default;
  const tree=await mount(Navigator),nav=tree.root.findByType('Navigator');
  assert.equal(nav.props.screenOptions.headerShown,false);
- assert.deepEqual(tree.root.findAllByType('Screen').map(n=>n.props.name),['AdminDashboard','AdminAccounts','AdminAccount','AdminCategories','AdminAudit','AdminPresence','AdminConfirm']);
+ assert.deepEqual(tree.root.findAllByType('Screen').map(n=>n.props.name),['AdminDashboard','AdminAccounts','AdminAccount','AdminCategories','AdminServiceReviews','AdminAudit','AdminPresence','AdminConfirm']);
  assert.equal(nav.props.layout({children:'screen'}).type,'Shell');await act(async()=>tree.unmount());
 });
 

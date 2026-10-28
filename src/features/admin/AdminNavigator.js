@@ -1,3 +1,4 @@
+import ServiceReviewModerationScreen from './screens/ServiceReviewModerationScreen';
 import React from 'react';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import AdminHomeScreen from './screens/AdminHomeScreen';
@@ -24,6 +25,7 @@ export default function AdminNavigator(){
       <Stack.Screen name="AdminAccounts" component={AccountsScreen} options={({route})=>({title:route.params?.filter==='pending'?'Workshop Applications':'Accounts'})}/>
       <Stack.Screen name="AdminAccount" component={AccountDetailScreen} options={{title:'Account details'}}/>
       <Stack.Screen name="AdminCategories" component={CategoriesScreen} options={{title:'Service Categories'}}/>
+      <Stack.Screen name="AdminServiceReviews" component={ServiceReviewModerationScreen}/>
       <Stack.Screen name="AdminAudit" component={AuditScreen} options={{title:'Activity Log'}}/>
       <Stack.Screen name="AdminPresence" component={PresenceScreen} options={{title:'Online Status'}}/>
       <Stack.Screen name="AdminConfirm" component={ConfirmIdentityScreen} options={{title:'Verify identity'}}/>
