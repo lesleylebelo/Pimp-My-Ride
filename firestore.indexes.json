@@ -59,14 +59,6 @@
       "collectionGroup": "serviceRequests",
       "queryScope": "COLLECTION",
       "fields": [
-        {"fieldPath": "ownerId", "order": "ASCENDING"},
-        {"fieldPath": "__name__", "order": "ASCENDING"}
-      ]
-    },
-    {
-      "collectionGroup": "serviceRequests",
-      "queryScope": "COLLECTION",
-      "fields": [
         {"fieldPath": "visibility", "order": "ASCENDING"},
         {"fieldPath": "shopId", "order": "ASCENDING"},
         {"fieldPath": "status", "order": "ASCENDING"},
