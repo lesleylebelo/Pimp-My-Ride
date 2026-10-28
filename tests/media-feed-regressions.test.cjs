@@ -67,7 +67,7 @@ test('Find Jobs refresh and refocus reset pagination to the first page and remov
 test('Garage resolves persisted asset IDs, renews authorised URLs and discards a previous account response',async t=>{
  const state={uid:'owner',focused:true,calls:0};let tree,renew;
  const realTimeout=global.setTimeout,realClear=global.clearTimeout;
- global.setTimeout=(fn,ms)=>{if(ms>=1000&&ms<=55000){renew=fn;return 123;}return realTimeout(fn,ms);};
+ global.setTimeout=(fn,ms)=>{if(ms>55000&&ms<=60000){renew=fn;return 123;}return realTimeout(fn,ms);};
  global.clearTimeout=id=>{if(id!==123)realClear(id);};
  const Photo=loadUI('src/features/marketplace/components/PrivatePhoto.js',{
   '../../auth/context/AuthContext':{useAuth:()=>({user:{uid:state.uid},offline:false})},'@react-navigation/native':{useIsFocused:()=>state.focused},

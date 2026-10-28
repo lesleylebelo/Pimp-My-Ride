@@ -1,3 +1,4 @@
+import {useAppActive} from '../../../shared/services/useAppActive';
 import React,{useEffect,useRef,useState} from 'react';
 import {Image,Modal,Pressable,ScrollView,StyleSheet,Text,View} from 'react-native';
 import {useIsFocused} from '@react-navigation/native';
@@ -23,7 +24,7 @@ export default function RequestPhotos({request,presentation}){
 function RequestPhoto({requestId,photoId,index,feed=false,large=false}){
  const {theme}=useTheme(),Interaction=feed?CustomerPressable:Pressable,Action=feed?CustomerAction:Button;
  const imageStyle=feed?{width:large?'100%':120,aspectRatio:4/3,borderRadius:12}:styles.image;
- const {user,offline}=useAuth(),uid=user?.uid,focused=useIsFocused();
+ const {user,offline}=useAuth(),uid=user?.uid,screenFocused=useIsFocused(),appActive=useAppActive(),focused=screenFocused&&appActive;
  const [access,setAccess]=useState(null),[error,setError]=useState(false),[retry,setRetry]=useState(0),[open,setOpen]=useState(false);
  const timer=useRef(null),current=useRef(null);
  const key=JSON.stringify([uid,requestId,photoId,focused,offline,retry]);
@@ -38,7 +39,7 @@ function RequestPhoto({requestId,photoId,index,feed=false,large=false}){
     if(!active)return;
     if(!isMediaUrl(result?.url)||!Number.isFinite(result.expiresAt)||result.expiresAt<=Date.now())throw Error('Expired preview');
     const next={key,url:result.url};current.current=next;setAccess(next);setError(false);
-    timer.current=setTimeout(()=>void load(),Math.max(1,Math.min(55000,result.expiresAt-Date.now()-5000)));
+    timer.current=setTimeout(()=>void load(),Math.max(1,result.expiresAt-Date.now()));
    }catch{if(active){current.current=null;setAccess(null);setError(true);}}
   }
   void load();return()=>{active=false;clearTimeout(timer.current);};

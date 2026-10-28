@@ -15,7 +15,7 @@ function fixture({privateMedia=false}={}){
  const normalize=value=>value?.constructor?.name==='ServerTimestampTransform'?Timestamp.now():clone(value);
  const snapshot=path=>{const value=rows.get(path);return {id:path.split('/').at(-1),exists:rows.has(path),data:()=>clone(value),get:key=>value?.[key]};};
  const ref=path=>({path,id:path.split('/').at(-1),get:async()=>snapshot(path),update:async changes=>{rows.set(path,{...rows.get(path),...Object.fromEntries(Object.entries(changes).map(([key,value])=>[key,normalize(value)]))});}});
- const db={rows,doc:ref,collection(name){return {
+ const db={rows,queryReads:[],doc:ref,collection(name){return {
   doc(id){return ref(`${name}/${id||`post-${++sequence}`}`);},
   where(field,operator,value){return query(name,[[field,operator,value]]);}
  };},async runTransaction(work){
@@ -52,7 +52,7 @@ function fixture({privateMedia=false}={}){
      const [time,id]=after;
      docs=docs.filter(doc=>{const created=doc.get('createdAt'),comparison=created.seconds-time.seconds||created.nanoseconds-time.nanoseconds;return comparison<0||comparison===0&&doc.id<id;});
     }
-    const selected=docs.slice(0,take);
+    const selected=docs.slice(0,take);db.queryReads.push({name,documents:selected.length});
     return {docs:selected,size:selected.length};
    }
   };return q;
@@ -311,4 +311,15 @@ test('private showcases persist bucket/path only and sign only a published post 
  await request(f.app).delete(`/api/posts/${id}`).set('Authorization',f.token('shop')).expect(200);
  await request(f.app).post(`/api/posts/${id}/images/view`).set('Authorization',f.token('customer')).send({path}).expect(404);
  assert.deepEqual(f.removals,[]);assert.equal(f.files.has(path),true);
+});
+
+
+test('sparse search bounds each request to 200 documents and continues without skipping a later match',async()=>{
+ const f=fixture();
+ for(let i=0;i<250;i++)f.db.rows.set('posts/scan-'+String(i).padStart(3,'0'),{authorId:'shop',shopId:'shop',authorRole:'shop',type:'showcase',status:'published',title:i===220?'Rare needle':'Ordinary work',description:'',category:'Tuning',images:[],createdAt:Timestamp.fromMillis(1800000000000-i*1000)});
+ const first=await request(f.app).get('/api/posts').query({q:'needle',limit:20}).set('Authorization',f.token('customer')).expect(200);
+ assert.deepEqual(first.body.data.items,[]);assert.ok(first.body.data.cursor);assert.equal(f.db.queryReads.reduce((sum,r)=>sum+r.documents,0),200);
+ f.db.queryReads.length=0;
+ const next=await request(f.app).get('/api/posts').query({q:'needle',limit:20,cursor:first.body.data.cursor}).set('Authorization',f.token('customer')).expect(200);
+ assert.deepEqual(next.body.data.items.map(item=>item.id),['scan-220']);assert.equal(next.body.data.cursor,null);assert.equal(f.db.queryReads.reduce((sum,r)=>sum+r.documents,0),50);
 });

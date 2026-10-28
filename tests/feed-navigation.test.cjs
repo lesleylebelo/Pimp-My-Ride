@@ -16,7 +16,7 @@ function setup(role='owner'){
   '@expo-google-fonts/space-grotesk':{},'@expo-google-fonts/manrope':{},
   '../../../features/auth/context/AuthContext':{useAuth:()=>state.auth},'../../auth/context/AuthContext':{useAuth:()=>state.auth},'../context/AuthContext':{useAuth:()=>state.auth},
   '@react-navigation/native':{useIsFocused:()=>state.focused},
-  '../services/messageApi':{messageApi:async(op,data)=>{state.calls.push({op,data});return state.reply?state.reply(op,data):state.pages[data.cursor||'first'];}},
+  '../services/messageApi':{messageApi:async(op,data)=>{state.calls.push({op,data});return state.reply?state.reply(op,data):{unreadCount:Object.values(state.pages).flatMap(page=>page.items).reduce((sum,item)=>sum+(item.unreadCount||0),0)};}},
   '../services/marketApi':{marketApi:async()=>({})},
   '../hooks/useMarketData':{useMarketData:()=>({data:{items:[],cursor:null},busy:false,error:'',refresh:async()=>{}})},
   '../hooks/usePostsFeed':{usePostsFeed:()=>feed},'../../marketplace/hooks/usePostsFeed':{usePostsFeed:()=>feed},
@@ -31,7 +31,7 @@ function setup(role='owner'){
 async function mount(Component,props={}){let tree;await act(async()=>{tree=create(React.createElement(Component,props));});return tree;}
 const close=tree=>act(async()=>tree.unmount());
 
-test('customer and shop feed headers show the same accessible inbox icon, aggregate unread pages and keep feed controls',async()=>{
+test('customer and shop feed headers show the same accessible inbox icon, use an unread summary and keep feed controls',async()=>{
  for(const role of ['owner','shop']){
   const s=setup(role),Component=role==='owner'?s.load('src/features/customer/screens/OwnerHomeScreen.js').default:s.load('src/features/marketplace/screens/ShopMarketplaceScreens.js').ShopJobsScreen;
   const tree=await mount(Component,{navigation:s.navigation});
@@ -44,7 +44,7 @@ test('customer and shop feed headers show the same accessible inbox icon, aggreg
    assert.equal(badge(tree).length,1);assert.match(texts(tree),/5/);assert.doesNotMatch(texts(tree),/Sign out/i);
    assert.ok(button(tree,'All'));assert.ok(button(tree,'More filters'));assert.equal(tree.root.findAllByType('TextInput').length,1);
    await act(async()=>inbox.props.onPress());assert.deepEqual(s.state.moves,[['Messages']]);
-   assert.deepEqual(s.state.calls,[{op:'list',data:{}},{op:'list',data:{cursor:'next'}}]);
+   assert.deepEqual(s.state.calls,[{op:'summary',data:{}}]);
    assert.ok(tree.root.findByType('SafeAreaView').props.edges.includes('top'));
   }finally{await close(tree);}
  }
@@ -56,8 +56,8 @@ test('unread badge refreshes from current counters, caps its label and never mar
  const Component=s.load('src/features/marketplace/components/MessagesHeaderButton.js').default,tree=await mount(Component,{navigation:s.navigation});
  try{
   assert.match(texts(tree),/99\+/);assert.equal(button(tree,'Messages').props.accessibilityValue.text,'120 unread messages');
-  s.state.pages.first.items[0].unreadCount=0;await act(async()=>t.mock.timers.tick(15000));assert.equal(badge(tree).length,0);
-  assert.ok(s.state.calls.every(call=>call.op==='list'));
+  s.state.pages.first.items[0].unreadCount=0;await act(async()=>t.mock.timers.tick(30000));assert.equal(badge(tree).length,0);
+  assert.ok(s.state.calls.every(call=>call.op==='summary'));
  }finally{await close(tree);}
  assert.equal(s.state.listenerRemoved,true);
 });

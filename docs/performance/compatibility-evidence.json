@@ -1,0 +1,9 @@
+{
+  "pinnedBaseline": "1a98e86d7ce301a9f6fe396d2d0b6bbd7508fdd2",
+  "committedHead": "781b0c5dd15df8c9a72f540d592a82b36c8e3389",
+  "indexGuardAlreadyFailsInCommittedHead": true,
+  "pinnedIndexCount": 22,
+  "committedIndexCount": 22,
+  "newIndexCount": 3,
+  "authenticatedTransportMatchesAfterOnlyRetryMetadataAndLogRedactionNormalization": true
+}

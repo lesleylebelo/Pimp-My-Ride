@@ -7,11 +7,11 @@ export function usePostsFeed({view='feed',source='all',authorId,cursor=null,serv
  const {user,offline}=useAuth(),uid=user?.uid,focused=useIsFocused();
  const [items,setItems]=useState([]),[nextCursor,setNextCursor]=useState(null),[busy,setBusy]=useState(true),[refreshing,setRefreshing]=useState(false),[error,setError]=useState('');
  const generation=useRef(0),requested=useRef(new Set());
- const load=useCallback(async(next=null,replace=false)=>{
+ const load=useCallback(async(next=null,replace=false,force=false)=>{
   if(!uid||offline){setBusy(false);setError(offline?'Connect to load posts.':'Sign in to continue.');return;}
   const current=++generation.current;setBusy(true);setError('');
   try{
-   const data=await postsApi(view,{...(view==='feed'?{source,service,q,limit,shop_id:shopId}:{}),...(authorId?{authorId}:{}),...(next?{cursor:next}:{})},uid);
+   const data=await postsApi(view,{...(view==='feed'?{source,service,q,limit,shop_id:shopId}:{}),...(authorId?{authorId}:{}),...(next?{cursor:next}:{})},uid,{force});
    if(current!==generation.current)return;
    if(!Array.isArray(data?.items))throw new Error('The server returned an unexpected posts response. Please try again.');
    setItems(previous=>{
@@ -29,6 +29,6 @@ export function usePostsFeed({view='feed',source='all',authorId,cursor=null,serv
   return()=>{++generation.current;};
  },[focused,uid,offline,load]);
  const loadNext=()=>{if(nextCursor&&!busy&&!requested.current.has(nextCursor)){requested.current.add(nextCursor);void load(nextCursor);}};
- const refresh=async()=>{requested.current.clear();setRefreshing(true);try{return await load(null,true);}finally{setRefreshing(false);}};
+ const refresh=async()=>{requested.current.clear();setRefreshing(true);try{return await load(null,true,true);}finally{setRefreshing(false);}};
  return {items,busy,refreshing,error,cursor:nextCursor,loadNext,refresh};
 }

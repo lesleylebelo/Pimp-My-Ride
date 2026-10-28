@@ -21,7 +21,8 @@ test('request previews renew expired URLs without relisting Garage photos or rel
   await act(async()=>{tree=create(render(Component,request));});assert.equal(images(tree).length,2);assert.equal(state.calls.length,2);
   const firstUrls=images(tree).map(image=>image.props.source.uri),staleError=images(tree)[0].props.onError;
   await act(async()=>tree.update(render(Component,{...request,photoIds:[...request.photoIds]})));assert.equal(state.calls.length,2);
-  await act(async()=>t.mock.timers.tick(55000));assert.equal(state.calls.length,4);assert.ok(images(tree).every(image=>!firstUrls.includes(image.props.source.uri)));
+  await act(async()=>t.mock.timers.tick(55000));assert.equal(state.calls.length,2);
+  await act(async()=>t.mock.timers.tick(5000));assert.equal(state.calls.length,4);assert.ok(images(tree).every(image=>!firstUrls.includes(image.props.source.uri)));
   assert.deepEqual(state.calls.map(call=>call.slice(0,3)),[['request','job','b'],['request','job','a'],['request','job','b'],['request','job','a']]);
   await act(async()=>staleError());assert.equal(images(tree).length,2);
  }finally{if(tree)await act(async()=>tree.unmount());}

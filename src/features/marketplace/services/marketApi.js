@@ -1,3 +1,4 @@
+import {createReadCoordinator,invalidateReads} from '../../../shared/services/readCoordinator';
 import {apiRequest} from '../../../shared/services/api';
 import {firebase} from '../../../shared/services/firebase';
 import {postsApi} from './postsApi';
@@ -5,7 +6,7 @@ const writes=new Set(['vehicleSave','vehicleArchive','requestCreate','requestUpd
 const pending=new Map();let lastUid;
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k])])):value;
 function account(){const uid=firebase().auth.currentUser?.uid;if(uid!==lastUid){pending.clear();lastUid=uid;}return uid;}
-export async function marketApi(op,data={}){
+async function executemarketApi(op,data={}){
  if(op==='posts'){
   const {view='feed',...input}=data;
   return postsApi(view,input);
@@ -24,4 +25,12 @@ export async function marketApi(op,data={}){
   if(key&&pending.get(key)===requestId)pending.delete(key);
   return result;
  }finally{account();}
+}
+
+const coordinatedRead=createReadCoordinator(()=>firebase().auth.currentUser);
+const reads=new Set(['paymentSimulation','vehicles','categories','shops','requests','request','quotes','bookings','booking','notifications','notificationSummary','receipt']);
+export async function marketApi(op,data={},options={}){
+ if(op==='posts')return executemarketApi(op,data);
+ if(!reads.has(op)){try{return await executemarketApi(op,data);}finally{invalidateReads();}}
+ return coordinatedRead([op,data],()=>executemarketApi(op,data),{ttl:op==='categories'?60000:op==='notificationSummary'?30000:['request','booking','receipt','paymentSimulation'].includes(op)?0:5000,...options});
 }

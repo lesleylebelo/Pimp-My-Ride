@@ -1,3 +1,4 @@
+import {createReadCoordinator,invalidateReads} from '../../../shared/services/readCoordinator';
 import {Platform} from 'react-native';
 import {apiRequest,uploadRequest} from '../../../shared/services/api';
 import {firebase} from '../../../shared/services/firebase';
@@ -14,11 +15,16 @@ function account(expectedUid) {
  if (expectedUid && uid !== expectedUid) throw new Error('Your account changed. Choose the photo again.');
  return uid;
 }
-async function request(payload, expectedUid) {
+const coordinatedRead=createReadCoordinator(()=>firebase().auth.currentUser);
+async function executeRequest(payload, expectedUid) {
  const uid = account(expectedUid);
  const result = await apiRequest('photos', payload, {expectedUid:uid});
  account(uid);
  return result;
+}
+async function request(payload,expectedUid){
+ account(expectedUid);
+ return coordinatedRead(payload,()=>executeRequest(payload,expectedUid),{ttl:0});
 }
 async function mutate(identity, execute, expectedUid, initial = {}) {
  const uid = account(expectedUid), key = JSON.stringify([uid,canonical(identity)]);

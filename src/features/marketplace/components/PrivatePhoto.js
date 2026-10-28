@@ -1,3 +1,4 @@
+import {useAppActive} from '../../../shared/services/useAppActive';
 import React,{useEffect,useState} from 'react';
 import {Image,Text,View} from 'react-native';
 import {useIsFocused} from '@react-navigation/native';
@@ -8,7 +9,7 @@ import {isMediaUrl} from '../../../shared/services/mediaUrl';
 
 // Only asset IDs persist. Signed bearer URLs live in this focused account's UI.
 export default function PrivatePhoto({target,id,imageStyle,style,accessibilityLabel='Vehicle photo'}){
- const {user,offline}=useAuth(),focused=useIsFocused(),uid=user?.uid;
+ const {user,offline}=useAuth(),screenFocused=useIsFocused(),appActive=useAppActive(),focused=screenFocused&&appActive,uid=user?.uid;
  const [photo,setPhoto]=useState(null),[error,setError]=useState(''),[retry,setRetry]=useState(0);
  const key=JSON.stringify([uid,target,id,focused,offline,retry]);
  useEffect(()=>{
@@ -22,7 +23,7 @@ export default function PrivatePhoto({target,id,imageStyle,style,accessibilityLa
     if(!active)return;
     if(!isMediaUrl(access.url)||!Number.isFinite(access.expiresAt)||access.expiresAt<=Date.now())throw new Error('Photo access expired. Try again.');
     setPhoto({key,url:access.url});setError('');
-    timer=setTimeout(()=>{setPhoto(null);void load();},Math.max(1000,Math.min(access.expiresAt-Date.now()-5000,55000)));
+    timer=setTimeout(()=>{setPhoto(null);void load();},Math.max(1000,access.expiresAt-Date.now()));
    }catch(e){if(active){setPhoto(null);setError(e.message||'Photo unavailable. Try again.');}}
   }
   void load();return()=>{active=false;clearTimeout(timer);};

@@ -1,5 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {execFileSync}=require('node:child_process');
+const {isDeepStrictEqual}=require('node:util');
 // Current production main verified read-only on 2026-10-23.
 const BASE='1a98e86d7ce301a9f6fe396d2d0b6bbd7508fdd2',root=path.resolve(__dirname,'../..');
 const baseline=file=>execFileSync('git',['show',BASE+':'+file],{cwd:root,encoding:'utf8',windowsHide:true}).replace(/\r\n/g,'\n');
@@ -15,12 +16,28 @@ test('format handling preserves grounding, non-AI runtime, dependencies, rules a
  // AI presentation and its pending-request lock are deliberately changed by the
  // PimpPilot audit; their behavioural contracts live in tests/ai-assist.test.cjs.
  for(const file of ['firestore.rules','render.yaml'])assert.equal(current(file),baseline(file),file);
- // Transactional emails add only their own queue index/exemptions; preserve
- // every pre-existing marketplace and AI index without relaxing the boundary.
+ // Keep BASE pinned. Commit e62653c removed this exact redundant owner/name
+ // index; the performance release adds only the three explicit summary indexes.
+ // Preserve exact definitions, order and all other historical index contracts.
+ const expectedIndexes=JSON.parse(baseline('firestore.indexes.json'));
+ const redundantOwnerIndex={collectionGroup:'serviceRequests',queryScope:'COLLECTION',fields:[{fieldPath:'ownerId',order:'ASCENDING'},{fieldPath:'__name__',order:'ASCENDING'}]};
+ assert.equal(expectedIndexes.indexes.filter(index=>isDeepStrictEqual(index,redundantOwnerIndex)).length,1);
+ expectedIndexes.indexes=expectedIndexes.indexes.filter(index=>!isDeepStrictEqual(index,redundantOwnerIndex));
+ // Firestore rejects this single-field equivalent as a composite: authorId's
+ // automatic ascending index already includes the ascending __name__ suffix.
+ const redundantPostAuthorIndex={collectionGroup:'posts',queryScope:'COLLECTION',fields:[{fieldPath:'authorId',order:'ASCENDING'},{fieldPath:'__name__',order:'ASCENDING'}]};
+ assert.equal(expectedIndexes.indexes.filter(index=>isDeepStrictEqual(index,redundantPostAuthorIndex)).length,1);
+ expectedIndexes.indexes=expectedIndexes.indexes.filter(index=>!isDeepStrictEqual(index,redundantPostAuthorIndex));
+ expectedIndexes.indexes.unshift(
+  {collectionGroup:'notifications',queryScope:'COLLECTION',fields:[{fieldPath:'recipientUid',order:'ASCENDING'},{fieldPath:'readAt',order:'ASCENDING'}]},
+  {collectionGroup:'conversations',queryScope:'COLLECTION',fields:[{fieldPath:'ownerId',order:'ASCENDING'},{fieldPath:'receivedOwner',order:'ASCENDING'},{fieldPath:'readOwner',order:'ASCENDING'}]},
+  {collectionGroup:'conversations',queryScope:'COLLECTION',fields:[{fieldPath:'shopId',order:'ASCENDING'},{fieldPath:'receivedShop',order:'ASCENDING'},{fieldPath:'readShop',order:'ASCENDING'}]},
+ );
+ // Retain the existing transactional-email-only index/exemption allowance.
  const indexes=JSON.parse(current('firestore.indexes.json'));
  indexes.indexes=indexes.indexes.filter(index=>index.collectionGroup!=='transactionalEmailJobs');
  indexes.fieldOverrides=indexes.fieldOverrides.filter(index=>index.collectionGroup!=='transactionalEmailJobs');
- assert.deepEqual(indexes,JSON.parse(baseline('firestore.indexes.json')));
+ assert.deepEqual(indexes,expectedIndexes);
  // The authorised Azure migration adds SDKs but does not upgrade any existing
  // resolved package. Shared transitive dependencies may lose their dev-only flag.
  const oldLock=JSON.parse(baseline('backend/package-lock.json')),newLock=JSON.parse(current('backend/package-lock.json'));
@@ -34,13 +51,18 @@ test('format handling preserves grounding, non-AI runtime, dependencies, rules a
  // and connection diagnostics, covered by tests/api.test.cjs. Keep configuration,
  // fetch deadlines, authenticated operations and uploads byte-for-byte protected.
  const apiFile='src/shared/services/api.js',previousAPI=baseline(apiFile),nextAPI=current(apiFile);
- // The HTTP 429 fix adds Retry-After metadata only. Keep every other byte of
- // authenticated request/upload handling protected by the existing boundary.
+ // Require the privacy change at the exact six existing log call sites. The
+ // request/error data, authentication, fetch deadlines and upload code stay
+ // protected; reintroducing response bodies or URLs into logs must fail.
+ const expectedAPI=previousAPI
+  .replaceAll("console.error('[PimpMyRide API request failed]',{status:response.status,responseBody:loggedBody,requestUrl});","console.error('[PimpMyRide API request failed]',{status:response.status});")
+  .replaceAll("console.error('[PimpMyRide API response invalid]',{status:response.status,responseBody:loggedBody,requestUrl});","console.error('[PimpMyRide API response invalid]',{status:response.status});");
+ // Retain only the existing exact Retry-After metadata allowances.
  const compatibleAPI=nextAPI.replaceAll("throw retryAfter(error,response.status,response.headers?.get('Retry-After'));",'throw error;')
   .replaceAll("finish(reject,retryAfter(error,xhr.status,xhr.getResponseHeader?.('Retry-After')));",'finish(reject,error);');
  const section=(source,start,end)=>source.slice(source.indexOf(start),end?source.indexOf(end):undefined);
  for(const [start,end] of [['function baseURL()','function connectionError('],['async function fetchWithTimeout(','async function ready('],['export async function apiRequest(']]){
-  assert.equal(section(compatibleAPI,start,end),section(previousAPI,start,end),`${apiFile}: ${start}`);
+  assert.equal(section(compatibleAPI,start,end),section(expectedAPI,start,end),`${apiFile}: ${start}`);
  }
  const old=JSON.parse(baseline('backend/package.json')),next=JSON.parse(current('backend/package.json'));delete old.scripts.test;delete next.scripts.test;
  assert.equal(next.scripts['check:ai-config'],'node check-ai-config.cjs');delete next.scripts['check:ai-config'];

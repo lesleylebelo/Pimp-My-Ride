@@ -1,0 +1,79 @@
+{
+  "date": "2026-10-28",
+  "localOnly": true,
+  "performance-frontend-final.log": [
+    "tests 664",
+    "pass 664",
+    "fail 0",
+    "duration_ms 592932.6904"
+  ],
+  "performance-frontend-focused-complete.log": [
+    "tests 82",
+    "pass 82",
+    "fail 0",
+    "duration_ms 39461.9373"
+  ],
+  "performance-backend-complete.log": [
+    "FAIL: format handling preserves grounding, non-AI runtime, dependencies, rules and UI (15435.8886ms)",
+    "tests 384",
+    "pass 383",
+    "fail 1",
+    "duration_ms 22332.5685",
+    "FAIL: failing tests:",
+    "FAIL: format handling preserves grounding, non-AI runtime, dependencies, rules and UI (15435.8886ms)"
+  ],
+  "performance-integration-tests.log": [
+    "tests 15",
+    "pass 15",
+    "fail 0",
+    "duration_ms 52670.0117",
+    "tests 17",
+    "pass 17",
+    "fail 0",
+    "duration_ms 23892.1546",
+    "tests 36",
+    "pass 36",
+    "fail 0",
+    "duration_ms 136634.9176",
+    "tests 9",
+    "pass 9",
+    "fail 0",
+    "duration_ms 22614.2307",
+    "tests 4",
+    "pass 4",
+    "fail 0",
+    "duration_ms 7836.9216",
+    "tests 5",
+    "pass 5",
+    "fail 0",
+    "duration_ms 18373.6507",
+    "tests 1",
+    "pass 1",
+    "fail 0",
+    "duration_ms 7021.4698",
+    "+  Script exited successfully (code 0)"
+  ],
+  "performance-integration-final.log": [
+    "tests 5",
+    "pass 5",
+    "fail 0",
+    "duration_ms 17387.7147",
+    "+  Script exited successfully (code 0)"
+  ],
+  "performance-web-build-complete.log": [
+    "Exported: dist",
+    "\"sha256\": \"9611e00240d6f6b2ee2ada11d57543045c87f6e575b92cf2b9bb43c98a27f111\","
+  ],
+  "performance-final-targeted.log": [
+    "tests 64",
+    "pass 64",
+    "fail 0",
+    "duration_ms 17656.4107"
+  ],
+  "performance-policy-complete.log": [
+    "tests 7",
+    "pass 7",
+    "fail 0",
+    "duration_ms 5103.3217"
+  ]
+}

@@ -18,21 +18,15 @@ function useUnreadCount(){
    if(loading||AppState.currentState!=='active')return;
    loading=true;const current=epoch;
    try{
-    let cursor=null,total=0;const cursors=new Set(),ids=new Set();
-    do{
-     const result=await messageApi('list',cursor?{cursor}:{});
-     if(!active||current!==epoch)return;
-     if(!Array.isArray(result?.items))throw Error('Invalid inbox response');
-     for(const item of result.items){if(!ids.has(item.id)){ids.add(item.id);if(Number.isSafeInteger(item.unreadCount)&&item.unreadCount>0)total+=item.unreadCount;}}
-     cursor=result.cursor;
-     if(cursor&&(typeof cursor!=='string'||cursors.has(cursor)))throw Error('Invalid inbox cursor');
-     cursors.add(cursor);
-    }while(cursor);
+    const result=await messageApi('summary',{});
+    if(!active||current!==epoch)return;
+    const total=result?.unreadCount;
+    if(!Number.isSafeInteger(total)||total<0)throw Error('Invalid unread summary');
     setCount({key,value:total});
    }catch{if(active&&current===epoch)setCount(null);}
    finally{if(current===epoch)loading=false;}
   }
-  void refresh();const interval=setInterval(()=>void refresh(),15000);
+  void refresh();const interval=setInterval(()=>void refresh(),30000);
   const listener=AppState.addEventListener('change',state=>{if(state==='active')void refresh();else{++epoch;loading=false;setCount(null);}});
   return()=>{active=false;++epoch;clearInterval(interval);listener.remove();};
  },[key]);

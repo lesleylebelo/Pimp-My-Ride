@@ -20,6 +20,13 @@ test('429 preserves Retry-After seconds, HTTP dates and a safe fallback without 
   }
  }
 });
+test('REST post 429s expose retry deadlines even for malformed bodies and logs exclude private response content',async()=>{
+ for(const malformed of [false,true]){
+  const s=setup(async url=>url.endsWith('/health')?{ok:true,json:async()=>({ok:true})}:{ok:false,status:429,headers:{get:()=> '90'},text:async()=>malformed?'private provider text':JSON.stringify({error:{code:'resource-exhausted',message:'Wait',private:'never log'}})});
+  await assert.rejects(()=>s.apiMethodRequest('posts'),error=>error.status===429&&error.retryAfterMs===90000);
+  assert.deepEqual(s.errors,[['[PimpMyRide API request failed]',{status:429}]]);assert.equal(s.calls.length,2);
+ }
+});
 
 test('missing configuration fails before health or authentication requests and differs from connectivity errors',async()=>{
  const s=setup(async()=>assert.fail('No fetch without configuration'),{base:''});
@@ -176,7 +183,7 @@ test('HTTP failures log status, response body and request URL and guide the user
   assert.deepEqual(error.responseBody,body.error);
   return true;
  });
- assert.deepEqual(s.errors,[['[PimpMyRide API request failed]',{status:401,responseBody:JSON.stringify(body),requestUrl:'https://api.example.test/api/posts'}]]);
+ assert.deepEqual(s.errors,[['[PimpMyRide API request failed]',{status:401}]]);
 });
 
 test('server failures are distinguished and response envelopes are validated',async()=>{
@@ -187,10 +194,10 @@ test('server failures are distinguished and response envelopes are validated',as
   assert.equal(error.message,'The server could not complete this request (HTTP 500). Please try again shortly.');
   return true;
  });
- assert.deepEqual(failed.errors[0],['[PimpMyRide API request failed]',{status:500,responseBody:JSON.stringify(body),requestUrl:'https://api.example.test/api/marketplace'}]);
+ assert.deepEqual(failed.errors[0],['[PimpMyRide API request failed]',{status:500}]);
  const invalid=setup(async url=>url.endsWith('/health')?{ok:true,json:async()=>({ok:true})}:{ok:true,status:200,json:async()=>({items:[]})});
  await assert.rejects(()=>invalid.apiRequest('posts',{op:'feed'}),{code:'api/unexpected-response',status:200});
- assert.deepEqual(invalid.errors[0][1],{status:200,responseBody:'{"items":[]}',requestUrl:'https://api.example.test/api/posts'});
+ assert.deepEqual(invalid.errors[0][1],{status:200});
 });
 
 test('successful feed responses larger than diagnostic log limits remain intact',async()=>{

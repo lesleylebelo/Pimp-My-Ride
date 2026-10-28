@@ -3,6 +3,7 @@ const {FieldPath,FieldValue,Timestamp}=require('firebase-admin/firestore');
 const D=require('./domain.cjs'),M=require('./marketplace-domain.cjs'),P=require('./photo-domain.cjs');
 const {ApiError}=require('./errors.cjs');
 const {mutation}=require('./mutations.cjs');
+const MAX_SCAN=200;
 const PAGE_SIZE=20,MAX_SHOWCASE_IMAGES=10,stamp=()=>FieldValue.serverTimestamp();
 const serialize=value=>value instanceof Timestamp?value.toMillis():Array.isArray(value)?value.map(serialize):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([key,v])=>[key,serialize(v)])):value;
 const row=doc=>({id:doc.id,...serialize(doc.data())});
@@ -140,15 +141,15 @@ function createPosts({db,auth,actor,storage}){
   if(shopId)base=base.where('authorId','==',shopId);
   let current=cursor,skip=query.page===undefined?0:(Number(query.page)-1)*limit,matched=0;
   const items=[],scanSize=Math.min(100,Math.max(limit*2,40));
-  let hasMore=false;
-  while(items.length<limit){
+  let hasMore=false,scanned=0;const profiles=new Map();
+  while(items.length<limit&&scanned<MAX_SCAN){
    let queryRef=base.orderBy('createdAt','desc').orderBy(FieldPath.documentId(),'desc');
    if(current)queryRef=queryRef.startAfter(current.seconds===undefined?Timestamp.fromMillis(current.createdAt):new Timestamp(current.seconds,current.nanoseconds),current.id);
-   const snapshot=await queryRef.limit(scanSize).get();
+   const take=Math.min(scanSize,MAX_SCAN-scanned),snapshot=await queryRef.limit(take).get();
+   scanned+=snapshot.docs.length;
    if(!snapshot.docs.length)break;
-   const profiles=new Map();
-   await Promise.all([...new Set(snapshot.docs.map(doc=>doc.data().shopId||doc.data().authorId))].map(async id=>{
-    const profile=(await db.doc(`users/${id}`).get()).data();if(profile)profiles.set(id,profile);
+   await Promise.all([...new Set(snapshot.docs.map(doc=>doc.data().shopId||doc.data().authorId))].filter(id=>!profiles.has(id)).map(async id=>{
+    const profile=(await db.doc(`users/${id}`).get()).data();profiles.set(id,profile||null);
    }));
    for(let index=0;index<snapshot.docs.length;index++){
     const doc=snapshot.docs[index],data=doc.data(),id=data.shopId||data.authorId,shop=shopSnapshot(id,profiles.get(id),data),vehicle=postVehicle(data.vehicle);
@@ -157,11 +158,13 @@ function createPosts({db,auth,actor,storage}){
     if(q&&!`${data.title||''} ${data.description||''} ${shop.name} ${vehicle.make} ${vehicle.model}`.toLocaleLowerCase().includes(q))continue;
     if(matched++<skip)continue;
     items.push(publicPost(doc.id,data,profiles.get(id)));
-    if(items.length===limit){hasMore=index<snapshot.docs.length-1||snapshot.docs.length===scanSize;break;}
+    if(items.length===limit){hasMore=index<snapshot.docs.length-1||snapshot.docs.length===take;break;}
    }
    if(items.length===limit)break;
-   if(snapshot.docs.length<scanSize){hasMore=false;break;}
+   if(snapshot.docs.length<take){hasMore=false;break;}
+   hasMore=true;
   }
+  if(query.page!==undefined&&scanned>=MAX_SCAN&&matched<skip)validation({page:'Use cursor pagination to continue this search.'});
   return {items,cursor:hasMore&&current?Buffer.from(JSON.stringify(current)).toString('base64url'):null};
  }
  async function postDetail(request){

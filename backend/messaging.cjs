@@ -1,5 +1,5 @@
 const {createHash} = require('node:crypto');
-const {FieldPath, FieldValue, Timestamp} = require('firebase-admin/firestore');
+const {FieldPath, FieldValue, Timestamp, AggregateField} = require('firebase-admin/firestore');
 const D = require('./domain.cjs'), M = require('./marketplace-domain.cjs');
 const {mutation} = require('./mutations.cjs');
 const {quoteId} = require('./marketplace.cjs');
@@ -9,7 +9,7 @@ const active = (profile, role) => profile?.role === role && D.active(profile) &&
 const stamp = () => FieldValue.serverTimestamp();
 const messageId = number => String(number).padStart(16, '0');
 const serial = value => value instanceof Timestamp ? value.toMillis() : value;
-const allowed = {list:['cursor'], get:['id','cursor'], open:['serviceRequestId','shopId'], enquire:['serviceRequestId','reason'], consent:['id','decision'], send:['id','text'], read:['id','through']};
+const allowed = {summary:[], list:['cursor'], get:['id','cursor'], open:['serviceRequestId','shopId'], enquire:['serviceRequestId','reason'], consent:['id','decision'], send:['id','text'], read:['id','through']};
 const writes = new Set(['open','enquire','consent','send','read']);
 
 function createMessaging({db, auth, actor, now = Date.now}) {
@@ -19,7 +19,7 @@ function createMessaging({db, auth, actor, now = Date.now}) {
   function participant(conversation, account) {
     if (!conversation || conversation[account.profile.role === 'owner' ? 'ownerId' : 'shopId'] !== account.uid) D.fail('Conversation not found.', 'not-found');
   }
-  async function context(get, conversation) {
+  async function context(get, conversation, isEnabled=enabled) {
     const [requestDoc, ownerDoc, shopDoc, bookingDoc] = await Promise.all([
       get(db.doc(`serviceRequests/${D.id(conversation.serviceRequestId)}`)), get(db.doc(`users/${D.id(conversation.ownerId)}`)),
       get(db.doc(`users/${D.id(conversation.shopId)}`)), get(db.doc(`bookings/${conversation.serviceRequestId}`)),
@@ -27,7 +27,7 @@ function createMessaging({db, auth, actor, now = Date.now}) {
     const request = requestDoc.data(), owner = ownerDoc.data(), shop = shopDoc.data(), booking = bookingDoc.data();
     if (!request || request.ownerId !== conversation.ownerId) D.fail('Service request not found.', 'not-found');
     const base = {request, owner, shop, canSend:false, canEnquire:false, reason:'This relationship no longer authorises new messages.', bookingId:null};
-    if (!active(owner,'owner') || !active(shop,'shop') || !(await enabled(conversation.ownerId)) || !(await enabled(conversation.shopId))) return {...base,reason:'A participant is no longer eligible to send messages.'};
+    if (!active(owner,'owner') || !active(shop,'shop') || !(await isEnabled(conversation.ownerId)) || !(await isEnabled(conversation.shopId))) return {...base,reason:'A participant is no longer eligible to send messages.'};
     // Explicit customer denial takes precedence over automatic quotation/invitation/booking access.
     if (['rejected','revoked'].includes(conversation.consent)) return {...base,reason:'The customer has not authorised communication.'};
     const booked = request.status === 'booked' && request.bookingId === conversation.serviceRequestId &&
@@ -78,11 +78,22 @@ function createMessaging({db, auth, actor, now = Date.now}) {
     if (!Object.hasOwn(allowed,op)) D.fail('Unknown messaging operation.');
     M.fields(input,['op',...allowed[op],...(writes.has(op)?['requestId']:[])]);
     const owner = account.profile.role === 'owner';
+    if (op === 'summary') {
+      // Only the caller's participant counters; no conversation text or identities.
+      const counters=await db.collection('conversations').where(owner?'ownerId':'shopId','==',account.uid)
+        .aggregate({received:AggregateField.sum(owner?'receivedOwner':'receivedShop'),read:AggregateField.sum(owner?'readOwner':'readShop')}).get();
+      return {unreadCount:Math.max(0,counters.data().received-counters.data().read)};
+    }
     if (op === 'list') {
       let query = db.collection('conversations').where(owner?'ownerId':'shopId','==',account.uid).orderBy('updatedAt','desc').orderBy(FieldPath.documentId(),'desc');
       if (input.cursor) {const cursor = await db.doc(`conversations/${D.id(input.cursor)}`).get();participant(cursor.data(),account);query = query.startAfter(cursor);}
       const snapshot = await query.limit(21).get(), docs = snapshot.docs.slice(0,20), result = {docs,cursor:snapshot.docs.length>20?docs[19].id:null};
-      const items = await Promise.all(result.docs.map(async doc => {const conversation = doc.data();return view(doc.id,conversation,account,await context(ref=>ref.get(),conversation));}));
+      // Deduplicate repeated participant/request documents within this page only.
+      // Every subsequent request and transaction still rechecks current access.
+      const documents=new Map(),identities=new Map();
+      const get=ref=>{if(!documents.has(ref.path))documents.set(ref.path,ref.get());return documents.get(ref.path);};
+      const isEnabled=uid=>{if(!identities.has(uid))identities.set(uid,enabled(uid));return identities.get(uid);};
+      const items = await Promise.all(result.docs.map(async doc => {const conversation = doc.data();return view(doc.id,conversation,account,await context(get,conversation,isEnabled));}));
       return {items,cursor:result.cursor};
     }
     if (op === 'get') {

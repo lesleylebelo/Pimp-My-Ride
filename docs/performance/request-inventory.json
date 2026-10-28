@@ -1,0 +1,797 @@
+{
+  "date": "2026-10-28",
+  "scope": "Source inventory; literal call sites plus shared hooks/components are traced in PRODUCTION_PERFORMANCE.md. No production observations.",
+  "files": [
+    {
+      "file": "src/features/activity/PresenceTracker.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [
+        "setInterval(tick,30000)"
+      ],
+      "timers": [
+        "setTimeout(resolve,1500))])"
+      ]
+    },
+    {
+      "file": "src/features/admin/screens/AdminHomeScreen.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/admin/screens/AdminScreens.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [
+        "setInterval(refresh,30000)"
+      ],
+      "timers": []
+    },
+    {
+      "file": "src/features/admin/services/adminApi.js",
+      "operations": [
+        {
+          "caller": "apiRequest",
+          "value": "admin"
+        },
+        {
+          "caller": "apiRequest",
+          "value": "admin"
+        }
+      ],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/auth/components/BusinessLocation.js",
+      "operations": [
+        {
+          "caller": "apiRequest",
+          "value": "profile"
+        }
+      ],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/auth/context/AuthContext.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [
+        "setInterval(()=>{\r"
+      ],
+      "timers": [
+        "setTimeout(()=>reject(Object.assign(new Error('Connection timed out.'),{code:'unavailable'})),12000)",
+        "setTimeout(()=>{if(!lock.current)void sync()"
+      ]
+    },
+    {
+      "file": "src/features/auth/hooks/useLoginCooldown.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [
+        "setInterval(tick,500)"
+      ],
+      "timers": []
+    },
+    {
+      "file": "src/features/auth/screens/AccountScreen.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/auth/screens/ForgotPasswordScreen.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/auth/screens/LegalScreen.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/auth/screens/SignInScreen.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/auth/screens/SignUpScreen.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/auth/screens/SplashScreen.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/auth/screens/VerifyEmailScreen.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/auth/services/accounts.js",
+      "operations": [
+        {
+          "caller": "apiRequest",
+          "value": "profile"
+        },
+        {
+          "caller": "apiRequest",
+          "value": "documents/list"
+        }
+      ],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/auth/services/googleAccounts.js",
+      "operations": [
+        {
+          "caller": "apiRequest",
+          "value": "profile"
+        },
+        {
+          "caller": "apiRequest",
+          "value": "auth/google/authorize"
+        }
+      ],
+      "hooks": [],
+      "polls": [],
+      "timers": [
+        "setTimeout(abort,90000)"
+      ]
+    },
+    {
+      "file": "src/features/auth/services/googleIdentity.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": [
+        "setTimeout(()=>{script.remove()"
+      ]
+    },
+    {
+      "file": "src/features/auth/services/profilePhotos.js",
+      "operations": [
+        {
+          "caller": "apiRequest",
+          "value": "profile/photos"
+        },
+        {
+          "caller": "apiRequest",
+          "value": "profile/photos"
+        }
+      ],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/customer/components/CustomerUI.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": [
+        "setTimeout(()=>controls()[0]?.focus(),0)"
+      ]
+    },
+    {
+      "file": "src/features/customer/screens/CustomerAccountScreen.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/customer/screens/CustomerDiscoverScreen.js",
+      "operations": [
+        {
+          "caller": "useMarketData",
+          "value": "shops"
+        }
+      ],
+      "hooks": [
+        "usePostsFeed",
+        "useMarketData"
+      ],
+      "polls": [],
+      "timers": [
+        "setTimeout(()=>setNormalized(query.trim().toLowerCase()),180)"
+      ]
+    },
+    {
+      "file": "src/features/customer/screens/CustomerSavedScreen.js",
+      "operations": [],
+      "hooks": [
+        "usePostsFeed"
+      ],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/customer/screens/OwnerHomeScreen.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/components/ConversationAction.js",
+      "operations": [
+        {
+          "caller": "useMarketData",
+          "value": "shops"
+        }
+      ],
+      "hooks": [
+        "useMarketData"
+      ],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/components/DeviceReadOnlyCheck.js",
+      "operations": [
+        {
+          "caller": "apiRequest",
+          "value": "photos"
+        }
+      ],
+      "hooks": [],
+      "polls": [],
+      "timers": [
+        "setTimeout(()=>setMessage('Saved-session restoration timed out. No authenticated check has run.'),12000)",
+        "setTimeout(()=>{setV1Result(value=>value?{...value,preview:null}:null)",
+        "setTimeout(()=>reject(Error('Fixture deadline exceeded.')),20000)"
+      ]
+    },
+    {
+      "file": "src/features/marketplace/components/MessagesHeaderButton.js",
+      "operations": [
+        {
+          "caller": "messageApi",
+          "value": "summary"
+        }
+      ],
+      "hooks": [],
+      "polls": [
+        "setInterval(()=>void refresh(),30000)"
+      ],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/components/NotificationHistory.js",
+      "operations": [
+        {
+          "caller": "marketApi",
+          "value": "notificationRead"
+        }
+      ],
+      "hooks": [
+        "useNotificationHistory"
+      ],
+      "polls": [
+        "setInterval(() => setNow(Date.now()), 60000)"
+      ],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/components/NotificationsHeaderButton.js",
+      "operations": [
+        {
+          "caller": "marketApi",
+          "value": "notificationSummary"
+        }
+      ],
+      "hooks": [],
+      "polls": [
+        "setInterval(()=>void refresh(),30000)"
+      ],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/components/PhotoGallery.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": [
+        "setTimeout(() => setPreview(value => value?.photoId === preview.photoId ? {...value,url:null,error:'This preview expired. View the photo again.'} : value),Math.max(0,preview.expiresAt-Date.now()))"
+      ]
+    },
+    {
+      "file": "src/features/marketplace/components/PostCard.js",
+      "operations": [
+        {
+          "caller": "postsApi",
+          "value": "save"
+        },
+        {
+          "caller": "postsApi",
+          "value": "remove"
+        },
+        {
+          "caller": "postsApi",
+          "value": "remove"
+        }
+      ],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/components/PrivatePhoto.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": [
+        "setTimeout(()=>{setPhoto(null)"
+      ]
+    },
+    {
+      "file": "src/features/marketplace/components/RequestPhotos.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": [
+        "setTimeout(()=>void load(),Math.max(1,result.expiresAt-Date.now()))"
+      ]
+    },
+    {
+      "file": "src/features/marketplace/components/ShowcasePhoto.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": [
+        "setTimeout(()=>{setAccess(null)"
+      ]
+    },
+    {
+      "file": "src/features/marketplace/components/StudioUI.js",
+      "operations": [
+        {
+          "caller": "useMarketData",
+          "value": "vehicles"
+        }
+      ],
+      "hooks": [
+        "useMarketData"
+      ],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/hooks/useMessages.js",
+      "operations": [],
+      "hooks": [
+        "useMessages"
+      ],
+      "polls": [
+        "setInterval(()=>void fetchPage(),id?4000:15000)"
+      ],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/hooks/useMockPayments.js",
+      "operations": [
+        {
+          "caller": "useMarketData",
+          "value": "paymentSimulation"
+        }
+      ],
+      "hooks": [
+        "useMockPayments",
+        "useMarketData"
+      ],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/hooks/useNotificationHistory.js",
+      "operations": [
+        {
+          "caller": "marketApi",
+          "value": "notifications"
+        },
+        {
+          "caller": "marketApi",
+          "value": "notifications"
+        }
+      ],
+      "hooks": [
+        "useNotificationHistory"
+      ],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/screens/BookingScreens.js",
+      "operations": [
+        {
+          "caller": "useMarketData",
+          "value": "bookings"
+        },
+        {
+          "caller": "useMarketData",
+          "value": "booking"
+        },
+        {
+          "caller": "marketApi",
+          "value": "paymentMockResult"
+        }
+      ],
+      "hooks": [
+        "useMarketData",
+        "useMockPayments"
+      ],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/screens/CommunicationScreens.js",
+      "operations": [
+        {
+          "caller": "useMarketData",
+          "value": "receipt"
+        }
+      ],
+      "hooks": [
+        "useMarketData"
+      ],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/screens/MessagingScreens.js",
+      "operations": [
+        {
+          "caller": "messageApi",
+          "value": "send"
+        }
+      ],
+      "hooks": [
+        "useMessages"
+      ],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/screens/OwnerMarketplaceScreens.js",
+      "operations": [
+        {
+          "caller": "useMarketData",
+          "value": "vehicles"
+        },
+        {
+          "caller": "useMarketData",
+          "value": "requests"
+        },
+        {
+          "caller": "useMarketData",
+          "value": "vehicles"
+        },
+        {
+          "caller": "useMarketData",
+          "value": "categories"
+        },
+        {
+          "caller": "useMarketData",
+          "value": "shops"
+        },
+        {
+          "caller": "useMarketData",
+          "value": "request"
+        }
+      ],
+      "hooks": [
+        "useMarketData"
+      ],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/screens/PaymentChoiceScreen.js",
+      "operations": [
+        {
+          "caller": "marketApi",
+          "value": "quoteAccept"
+        },
+        {
+          "caller": "marketApi",
+          "value": "paymentMockResult"
+        },
+        {
+          "caller": "marketApi",
+          "value": "request"
+        }
+      ],
+      "hooks": [
+        "useMockPayments"
+      ],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/screens/PimpPilotStudioScreen.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/screens/PostScreens.js",
+      "operations": [
+        {
+          "caller": "useMarketData",
+          "value": "posts"
+        },
+        {
+          "caller": "postsApi",
+          "value": "get"
+        }
+      ],
+      "hooks": [
+        "usePostsFeed",
+        "useMarketData"
+      ],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/screens/QuoteComparisonScreen.js",
+      "operations": [
+        {
+          "caller": "useMarketData",
+          "value": "request"
+        }
+      ],
+      "hooks": [
+        "useMarketData"
+      ],
+      "polls": [
+        "setInterval(reload, 30000)"
+      ],
+      "timers": [
+        "setTimeout(() => {\r"
+      ]
+    },
+    {
+      "file": "src/features/marketplace/screens/ShopMarketplaceScreens.js",
+      "operations": [
+        {
+          "caller": "useMarketData",
+          "value": "requests"
+        },
+        {
+          "caller": "useMarketData",
+          "value": "request"
+        },
+        {
+          "caller": "useMarketData",
+          "value": "request"
+        },
+        {
+          "caller": "marketApi",
+          "value": "quoteSubmit"
+        },
+        {
+          "caller": "useMarketData",
+          "value": "quotes"
+        },
+        {
+          "caller": "marketApi",
+          "value": "quoteWithdraw"
+        }
+      ],
+      "hooks": [
+        "useMarketData",
+        "usePostsFeed"
+      ],
+      "polls": [],
+      "timers": [
+        "setTimeout(()=>setNow(Date.now()),Math.min(2147483647,Math.max(1,expiry-Date.now()+1)))",
+        "setTimeout(() => setDebouncedSearch(search.trim().toLowerCase()), 180)"
+      ]
+    },
+    {
+      "file": "src/features/marketplace/screens/VehiclePhotosScreen.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/services/aiAssistApi.js",
+      "operations": [
+        {
+          "caller": "apiRequest",
+          "value": "ai/assist"
+        }
+      ],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/services/marketApi.js",
+      "operations": [
+        {
+          "caller": "apiRequest",
+          "value": "marketplace"
+        }
+      ],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/services/messageApi.js",
+      "operations": [
+        {
+          "caller": "apiRequest",
+          "value": "messaging"
+        }
+      ],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/services/photoApi.js",
+      "operations": [
+        {
+          "caller": "apiRequest",
+          "value": "photos"
+        },
+        {
+          "caller": "apiRequest",
+          "value": "photos"
+        }
+      ],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/services/pimpPilotStudio.js",
+      "operations": [
+        {
+          "caller": "apiRequest",
+          "value": "ai/studio"
+        }
+      ],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/services/postsApi.js",
+      "operations": [
+        {
+          "caller": "apiMethodRequest",
+          "value": "posts"
+        },
+        {
+          "caller": "apiRequest",
+          "value": "posts"
+        },
+        {
+          "caller": "apiMethodRequest",
+          "value": "posts/"
+        },
+        {
+          "caller": "postsApi",
+          "value": "removeImage"
+        }
+      ],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/marketplace/utils/approvedVehicleTest.js",
+      "operations": [
+        {
+          "caller": "apiRequest",
+          "value": "photos"
+        },
+        {
+          "caller": "apiRequest",
+          "value": "photos"
+        },
+        {
+          "caller": "apiRequest",
+          "value": "photos"
+        }
+      ],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/features/shop/screens/ShopHomeScreen.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": []
+    },
+    {
+      "file": "src/shared/components/PhotoSourceChooser.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": [
+        "setTimeout(() => controls()[0]?.focus(), 0)",
+        "setTimeout(() => {if (!document.querySelector('[role=\"dialog\"][aria-label=\"Choose a photo source\"]')) previous?.focus?.()"
+      ]
+    },
+    {
+      "file": "src/shared/components/ProfileAvatar.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": [
+        "setTimeout(()=>{if(active)setRefresh(n=>n+1)",
+        "setTimeout(()=>setPhoto(value=>value===photo?null:value),Math.max(0,photo.expiresAt-Date.now()))"
+      ]
+    },
+    {
+      "file": "src/shared/components/StartupSplash.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": [
+        "setTimeout(dismiss, 180)",
+        "setTimeout(dismiss, 12000)"
+      ]
+    },
+    {
+      "file": "src/shared/location/location.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": [
+        "setTimeout(() => reject(new Error('Current location timed out. Choose a map pin or enter coordinates.')), 20000)"
+      ]
+    },
+    {
+      "file": "src/shared/services/api.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": [
+        "setTimeout(()=>{\r",
+        "setTimeout(()=>listeners.forEach(fn=>fn(true)),4000)",
+        "setTimeout(()=>{failConnection(true)"
+      ]
+    },
+    {
+      "file": "src/shared/services/localDemo.js",
+      "operations": [],
+      "hooks": [],
+      "polls": [],
+      "timers": [
+        "setTimeout(()=>controller.abort(),5000)"
+      ]
+    }
+  ]
+}
