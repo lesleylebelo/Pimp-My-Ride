@@ -19,7 +19,16 @@ export async function isolatedAccountAction(operation) {
 export async function login(email, password) {
  return isolatedAccountAction(async ({auth, db}) => {
   const { user } = await guardedLogin(() => signInWithEmailAndPassword(auth, email.trim(), password));
-  return validateAndPromote({auth,db},user);
+  try{return await validateAndPromote({auth,db},user);}
+  catch(error){
+   if(error?.selfDeactivated){
+    const status=await apiRequest('account',{op:'status'},{authClient:auth,expectedUid:user.uid,force:true});
+    if(status.accountStatus==='deactivated'&&status.job?.kind==='deactivate'&&status.job.state==='completed'){
+     const recovery=new Error('Your account is self-deactivated. You can choose to reactivate it.');recovery.code='auth/self-deactivated';throw recovery;
+    }
+   }
+   throw error;
+  }
  });
 }
 export async function validateAndPromote({auth,db},user,assertActive=()=>{}) {
@@ -37,7 +46,7 @@ export async function validateAndPromote({auth,db},user,assertActive=()=>{}) {
    const invalid=new Error('Your account profile is incomplete or damaged. Sign-in cannot continue; contact support to restore account access.');
    invalid.code='auth/profile-invalid';throw invalid;
   }
-  if (profile.accountStatus && profile.accountStatus !== 'active'){const failure=new Error(profile.accountStatus==='deactivated'?'This account is self-deactivated. Use account recovery to reactivate it.':profile.accountStatus==='deleting'?'Deletion cleanup is pending. Use account status to check progress.':'This account is restricted. Contact the project administrator.');failure.code='auth/account-restricted';throw failure;}
+  if (profile.accountStatus && profile.accountStatus !== 'active'){const failure=new Error('Account access is restricted. Contact support.');failure.code='auth/account-restricted';failure.selfDeactivated=profile.accountStatus==='deactivated'&&['owner','shop'].includes(profile.role)&&profile.verificationStatus!=='reviewing'&&!profile.statusOperation&&!profile.reviewOperation&&!profile.provisioningOperation;throw failure;}
   const role = profile.role;
   if (!['owner','shop','admin'].includes(role)) throw new Error('Account access is unavailable. Contact the project administrator.');
   if (role === 'admin' && (await getIdTokenResult(user,true)).claims.admin !== true) throw new Error('This account does not have administrator access.');

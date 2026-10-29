@@ -1,6 +1,8 @@
 export function authError(error) {
  if(error?.code?.startsWith('api/'))return error.message;
  const messages = {
+ 'auth/self-deactivated': 'Your account is self-deactivated. Reactivation is optional.',
+ 'auth/account-restricted': 'Account access is restricted. Contact support.',
  'auth/google-native-unavailable': error?.message,
  'auth/google-native-error': error?.message,
  'auth/google-cancelled': 'Google sign-in cancelled. You remain signed out.',

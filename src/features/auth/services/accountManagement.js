@@ -34,8 +34,9 @@ export async function recoverAccount(email,password,reactivate=false){
   const {user}=await guardedLogin(()=>signInWithEmailAndPassword(auth,email.trim(),password));
   if(!user.emailVerified)throw Error('Verify your email before account recovery.');
   const status=await accountApi('status',{}, {authClient:auth});
+  if(firebase().auth.currentUser)throw Error('Sign out before starting another account action.');
   if(!reactivate)return status;
-  if(status.accountStatus!=='deactivated'||status.job?.state!=='completed')throw Error('Only a completed self-deactivation can be reactivated here. Other restrictions require support.');
+  if(status.accountStatus!=='deactivated'||status.job?.kind!=='deactivate'||status.job?.state!=='completed')throw Error('Only a completed self-deactivation can be reactivated here. Other restrictions require support.');
   return accountApi('reactivate',{requestId:accountRequestId()},{authClient:auth});
  });
 }

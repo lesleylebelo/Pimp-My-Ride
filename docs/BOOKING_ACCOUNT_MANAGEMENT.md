@@ -2,6 +2,8 @@
 
 Implementation and local verification: 29 October 2026. No production customer records were accessed or modified. No commit, push or deployment was performed. The master academic DOCX is unchanged.
 
+Sign In UI follow-up: [Clean Sign In and contextual self-reactivation](SIGN_IN_SIMPLIFICATION.md). The normal account-status panel has been removed. Eligible self-deactivated customers/workshops are offered optional recovery only after an actual verified email/password sign-in and backend status check. Pending-deletion users are directed to support; underlying authenticated status functionality remains.
+
 Production safety follow-up: [Account deletion production safety review](ACCOUNT_DELETION_PRODUCTION_SAFETY.md). Permanent-deletion intake (`PMR_ACCOUNT_DELETION_REQUESTS_ENABLED`) and execution (`PMR_ACCOUNT_DELETION_WORKER_ENABLED`) now require independent exact `true` opt-ins; both default disabled. This supersedes any unconditional deletion-execution description below. Deactivation recovery remains active. Deploy the additional `accountLifecycleJobs(state, kind, dueAt)` index before rollout.
 
 ## Findings and corrected booking behavior

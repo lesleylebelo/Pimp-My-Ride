@@ -25,7 +25,7 @@ import { validateEmailField } from "../utils/validators";
 
 export default function SignInScreen({ navigation, route }) {
   const {theme:colors}=useTheme(),styles=makeStyles(colors);
-  const { run, offline } = useAuth();
+  const { run, offline, user } = useAuth();
   const cooldown = useLoginCooldown();
   const [submitError, setSubmitError] = useState('');
   const [email, setEmail] = useState(typeof route?.params?.email === 'string' ? route.params.email : '');
@@ -33,10 +33,13 @@ export default function SignInScreen({ navigation, route }) {
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [verificationEmail, setVerificationEmail] = useState('');
+  const [recovery,setRecovery]=useState(null),[notice,setNotice]=useState('');
+  const credentialsVersion=useRef(0),currentUid=useRef(user?.uid);currentUid.current=user?.uid;
   const submitting = useRef(false);
 
   const handleSignIn = async () => {
-    if (submitting.current || offline || cooldown.seconds !== 0) return;
+    if (submitting.current || loading || user || offline || cooldown.seconds !== 0) return;
+    const version=credentialsVersion.current;setRecovery(null);setNotice('');
     setSubmitError('');
     setVerificationEmail('');
     const emailError = validateEmailField(email);
@@ -50,7 +53,9 @@ export default function SignInScreen({ navigation, route }) {
     setLoading(true);
     try { await run(() => login(email, password)); }
     catch (error) {
+      if(version!==credentialsVersion.current||currentUid.current)return;
       setSubmitError(authError(error));
+      if(error?.code==='auth/self-deactivated')setRecovery(version);
       if (error?.code === 'auth/email-not-verified') {
         setPassword('');
         setVerificationEmail(email.trim());
@@ -95,7 +100,7 @@ export default function SignInScreen({ navigation, route }) {
               placeholder="example@gmail.com"
               value={email}
               onChangeText={(text) => {
-                setEmail(text);setVerificationEmail('');
+                ++credentialsVersion.current;setRecovery(null);setNotice('');setEmail(text);setVerificationEmail('');
                 setErrors(e=>({...e,email:validateEmailField(text)}));setSubmitError('');
               }}
               keyboardType="email-address"
@@ -108,7 +113,7 @@ export default function SignInScreen({ navigation, route }) {
               placeholder="Enter your password"
               value={password}
               onChangeText={(text) => {
-                setPassword(text);setVerificationEmail('');
+                ++credentialsVersion.current;setRecovery(null);setNotice('');setPassword(text);setVerificationEmail('');
                 setErrors(e=>({...e,password:text ? null : 'Password is required.'}));setSubmitError('');
               }}
               secureTextEntry
@@ -124,7 +129,8 @@ export default function SignInScreen({ navigation, route }) {
             </Pressable>
           </View>
 
-          <AccountRecovery email={email} password={password} disabled={loading||offline||cooldown.seconds!==0} onBusyChange={setLoading}/>
+          {recovery!==null&&!user&&<AccountRecovery key={recovery} eligible email={email} password={password} disabled={loading||offline||cooldown.seconds!==0} onBusyChange={setLoading} onRecovered={()=>{++credentialsVersion.current;setRecovery(null);setPassword('');setSubmitError('');setNotice('Account reactivated. Sign in to continue.');}}/>}
+          {!!notice&&<Text accessibilityLiveRegion="polite" style={styles.hint}>{notice}</Text>}
           {offline && (
             <Text style={styles.hint}>You are offline. Connect to sign in.</Text>
           )}
