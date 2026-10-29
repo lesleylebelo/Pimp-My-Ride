@@ -88,7 +88,7 @@ export function CustomerFrame({title,subtitle,navigation,activeRoute,headerRight
     <View style={{flex:1,minWidth:0,gap:3}}><CustomerText accessibilityRole="header" style={{fontSize:desktop?30:24,lineHeight:desktop?39:32,fontWeight:'600',letterSpacing:-.6}}>{title}</CustomerText>{!!subtitle&&<CustomerText muted style={{fontSize:13}}>{subtitle}</CustomerText>}</View>
     <View style={{flexDirection:'row',gap:2,alignItems:'center'}}>{headerRight||<><CustomerAction title="Notifications" icon="notifications-outline" iconOnly onPress={()=>navigation?.navigate('Notifications')}/><CustomerAction title="Messages" icon="chatbubbles-outline" iconOnly onPress={()=>navigation?.navigate('Messages')}/></>}</View>
    </View>
-   {!!auth.offline&&<View style={{padding:12,marginHorizontal:16,borderRadius:8,backgroundColor:theme.surfaceMuted}}><CustomerText accessibilityRole="status" muted>Offline · Connect for updates and account actions.</CustomerText></View>}
+   {!!auth.offline&&<View style={{padding:12,marginHorizontal:16,borderRadius:8,backgroundColor:theme.surfaceMuted}}><CustomerText accessibilityRole="status" muted>Offline · Displayed information may be outdated.{auth.cachedAt ? ` Account preview saved ${new Date(auth.cachedAt).toLocaleString()}.` : ''} Connect to refresh or save changes.</CustomerText></View>}
    {children}
   </View>
   {tabs}

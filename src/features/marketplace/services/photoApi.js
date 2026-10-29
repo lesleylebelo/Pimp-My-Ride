@@ -1,4 +1,5 @@
 import {createReadCoordinator,invalidateReads} from '../../../shared/services/readCoordinator';
+import {registerSessionCache} from '../../../shared/services/sessionCaches';
 import {Platform} from 'react-native';
 import {apiRequest,uploadRequest} from '../../../shared/services/api';
 import {firebase} from '../../../shared/services/firebase';
@@ -6,6 +7,7 @@ import {photoFileError} from '../utils/photos';
 
 const pending = new Map();
 let lastUid;
+registerSessionCache(()=>{pending.clear();lastUid=undefined;});
 const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
  ? Object.fromEntries(Object.keys(value).sort().map(key => [key,canonical(value[key])])) : value;
 function account(expectedUid) {

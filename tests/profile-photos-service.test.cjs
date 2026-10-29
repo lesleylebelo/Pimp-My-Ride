@@ -1,7 +1,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),babel=require('@babel/core'),{loadUI}=require('./helpers/load-ui.cjs');
 function client(platform='android'){
  const auth={currentUser:{uid:'first'}},calls=[],state={fail:false},photo=loadUI('src/features/marketplace/utils/photos.js');
- const mocks={'react-native':{Platform:{OS:platform}},'../../../shared/services/firebase':{firebase:()=>({auth})},'../../marketplace/utils/photos':photo,'../../../shared/services/api':{
+ const mocks={'../../../shared/services/sessionCaches':loadUI('src/shared/services/sessionCaches.js'),'react-native':{Platform:{OS:platform}},'../../../shared/services/firebase':{firebase:()=>({auth})},'../../marketplace/utils/photos':photo,'../../../shared/services/api':{
   apiRequest:async(path,data,options)=>{calls.push({kind:'json',path,data,options});return state.reply?state.reply(data):{url:'https://private.example.invalid/photo',expiresAt:Date.now()+60000};},
   uploadRequest:async(path,body,options)=>{calls.push({kind:'upload',path,body,options});if(state.fail)throw Object.assign(Error('Synthetic outage'),{retryWithNewRequest:state.terminal});return {ok:true,version:1,photoId:'one'};},
  }};

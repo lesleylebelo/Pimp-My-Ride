@@ -1,10 +1,12 @@
 import {Platform} from 'react-native';
+import {registerSessionCache} from '../../../shared/services/sessionCaches';
 import {firebase} from '../../../shared/services/firebase';
 import {apiRequest,uploadRequest} from '../../../shared/services/api';
 import {photoFileError} from '../../marketplace/utils/photos';
 
 const pending=new Map(),cache=new Map(),inflight=new Map(),listeners=new Set();
 let lastUid,lastUser,cooldown;
+registerSessionCache(()=>{pending.clear();cache.clear();inflight.clear();lastUid=undefined;lastUser=undefined;cooldown=null;});
 function account(expected){
  const user=firebase().auth.currentUser,uid=user?.uid;
  if(uid!==lastUid||user!==lastUser){pending.clear();cache.clear();inflight.clear();cooldown=null;lastUid=uid;lastUser=user;}

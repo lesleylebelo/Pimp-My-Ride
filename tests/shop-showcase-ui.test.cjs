@@ -18,6 +18,7 @@ function fixture(options={}){
   '../hooks/usePostsFeed':{usePostsFeed:args=>{feedArgs.push(args);return feed;}},
   '../services/postsApi':{postsApi:async(op,data)=>{calls.push({op,data});if(state.fail)throw Error(state.fail);return {post:state.post};},pickPostPhotos:async()=>[],uploadPostPhoto:async()=>assert.fail('No real upload')},
   '../components/PostCard':{PostCard:props=>React.createElement('PostCard',props)},
+  '../components/ServiceReviews':{WorkshopReviews:props=>React.createElement('WorkshopReviews',props)},
   '../components/ShowcasePhoto':{__esModule:true,default:props=>React.createElement('PrivatePhoto',props),hasPostImage:i=>!!i?.path},
   '../components/AIAssistButton':()=>null,
  };
@@ -30,7 +31,8 @@ test('customer storefront uses the supplied identity and shop-scoped portfolio w
  const tree=await f.render('ShopProfileScreen',{shop});try{
   assert.match(text(tree),/Long workshop name/);assert.match(text(tree),/Durban/);
   assert.equal(f.feedArgs[0].shopId,'real-shop');assert.equal(tree.root.findAllByType('PostCard').length,2);
-  assert.doesNotMatch(text(tree),/Verified workshop|followers|Chat|Contact|reviews/i);
+  assert.doesNotMatch(text(tree),/Verified workshop|followers|Chat|Contact/i);
+  assert.equal(tree.root.findByType('WorkshopReviews').props.shopId,'real-shop');
   await act(async()=>tree.root.findAllByType('PostCard')[0].props.onOpen());assert.deepEqual(f.routes[0],['PostDetail',{id:'one'}]);
  }finally{await act(async()=>tree.unmount());}
 });
@@ -120,6 +122,7 @@ test('photo reordering and removal stay local until the existing save action con
 });
 test('shop account retains business location editing and presents registered services without creating new editors',async()=>{
  const f=fixture({role:'shop'}),Account=loadUI('src/features/auth/screens/AccountScreen.js',{
+  '@expo-google-fonts/space-grotesk':{},'@expo-google-fonts/manrope':{},
   '../context/AuthContext':{useAuth:()=>({user:{uid:'actor',emailVerified:true,email:'shop@example.invalid'},profile:{...f.profile,accountStatus:'active'},refresh:async()=>{},logout:async()=>{},requireConnection:async()=>{}})},
   '../../../shared/theme/ThemeContext':{useTheme:()=>({theme:palettes.dark,mode:'dark'})},
   '../../../shared/services/firebase':{firebase:()=>({})},

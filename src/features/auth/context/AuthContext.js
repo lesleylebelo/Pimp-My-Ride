@@ -6,7 +6,8 @@ import {onAuthStateChanged, reload, getIdTokenResult, signOut} from 'firebase/au
 import {doc, getDocFromServer, onSnapshot} from 'firebase/firestore';
 import {firebase, configured, localDemo, prepareLocalDemo} from '../../../shared/services/firebase';
 import {isOffline, isNetworkError, requireConnection} from '../../../shared/services/network';
-import {readProfileCache, saveProfileCache, clearProfileCache, CACHE_AGE} from '../../../shared/offline/profileCache';
+import {readProfileCache, saveProfileCache, clearProfileCache, retryProfileCacheCleanup, CACHE_AGE} from '../../../shared/offline/profileCache';
+import {clearSessionCaches} from '../../../shared/services/sessionCaches';
 import {authError} from '../utils/authErrors';
 const Context = createContext(null);
 export const useAuth = () => useContext(Context);
@@ -19,9 +20,23 @@ export function AuthProvider({children}) {
  const [working,setWorking]=useState(false);
  const lock=useRef(false),epoch=useRef(0),active=useRef(true),inFlight=useRef(false),online=useRef(true);
  const blockedUser=useRef(null),verificationRequired=useRef(false);
+ const observedUser=useRef(undefined),closingUser=useRef(null);
+ const observeIdentity=useCallback(()=>{
+  const next=firebase().auth.currentUser,previous=observedUser.current;
+  if(next===previous)return;
+  observedUser.current=next;closingUser.current=null;++epoch.current;
+  clearSessionCaches();
+  // This runs even during run(): the old navigator must unmount before any
+  // asynchronous validation, storage cleanup or replacement account action.
+  setState({user:null,profile:null,initializing:!!next,error:verificationRequired.current?'Please verify your email before signing in.':'',offline:!online.current,cachedAt:null});
+  if(previous?.uid)void clearProfileCache(previous.uid).catch(()=>{});
+ },[]);
  const sync=useCallback(async()=>{
+  observeIdentity();
+  void retryProfileCacheCleanup();
   const generation=++epoch.current;
   const u=firebase().auth.currentUser;
+  const current=()=>generation===epoch.current&&active.current&&firebase().auth.currentUser===u;
   inFlight.current=true;
   let profile=null,error=verificationRequired.current?'Please verify your email before signing in.':'',offline=!online.current,cachedAt=null;
   const rejectUnverified=async()=>{
@@ -38,6 +53,7 @@ export function AuthProvider({children}) {
   };
   try {
    if(u){
+    if(closingUser.current===u){error='Unable to finish signing out. Try signing out again.';return setState({user:{uid:u.uid,email:u.email,emailVerified:u.emailVerified},profile:null,initializing:false,error,offline,cachedAt:null});}
     if(!u.emailVerified || blockedUser.current===u){await rejectUnverified();return;}
     blockedUser.current=null;verificationRequired.current=false;error='';
     if(offline)throw Object.assign(new Error('Offline'),{code:'app/offline'});
@@ -45,7 +61,9 @@ export function AuthProvider({children}) {
     if(generation!==epoch.current || !active.current || firebase().auth.currentUser!==u)return;
     if(!u.emailVerified){await rejectUnverified();return;}
     const token=await timeout(getIdTokenResult(u,true));
+    if(!current())return;
     const snapshot=await timeout(getDocFromServer(doc(firebase().db,'users',u.uid)));
+    if(!current())return;
     profile=snapshot.data()||null;
     if(profile?.role==='admin' && token.claims.admin!==true){
      profile=null;error='Administrator authorization is missing. Contact the project administrator.';
@@ -56,7 +74,7 @@ export function AuthProvider({children}) {
     }
    }else blockedUser.current=null;
   }catch(e){
-   if(generation!==epoch.current)return;
+   if(!current())return;
    if(isNetworkError(e)){
     offline=true;
     const cache=u?.emailVerified ? await readProfileCache(u.uid).catch(()=>null) : null;
@@ -64,17 +82,18 @@ export function AuthProvider({children}) {
     if(u && !profile)error='Connect to the internet to verify your account access. No available offline landing page.';
    }else if(['auth/user-disabled','auth/user-not-found','auth/user-token-expired','auth/invalid-user-token'].includes(e.code)){
     await clearProfileCache(u?.uid).catch(()=>{});
+    if(!current())return;
     await signOut(firebase().auth);
-    if(active.current)setState({user:null,profile:null,error:'',offline:false,cachedAt:null,initializing:false});
+    if(current())setState({user:null,profile:null,error:'',offline:false,cachedAt:null,initializing:false});
     return;
    }else{
     profile=null;error=authError(e);
     await clearProfileCache(u?.uid).catch(()=>{});
    }
   }finally{if(generation===epoch.current)inFlight.current=false;}
-  if(generation!==epoch.current || !active.current || firebase().auth.currentUser?.uid!==u?.uid)return;
+  if(!current())return;
   setState({user:u ? {uid:u.uid,email:u.email,emailVerified:u.emailVerified} : null,profile,error,offline,cachedAt,initializing:false});
- },[]);
+ },[observeIdentity]);
  useEffect(()=>{
   active.current=true;
   if(!configured){setState(s=>({...s,initializing:false,error:'Firebase configuration is missing.'}));return;}
@@ -86,7 +105,7 @@ export function AuthProvider({children}) {
    if(!next)setState(s=>({...s,offline:true,profile:s.profile?.role==='admin'?null:s.profile,error:s.profile?.role==='admin'?'Administrator access requires an internet connection.':s.error}));
    if(changed && !lock.current)void sync();
   });
-  const unsubscribe=onAuthStateChanged(firebase().auth,()=>{if(!lock.current)void sync();},e=>setState(s=>({...s,initializing:false,error:authError(e)})));
+  const unsubscribe=onAuthStateChanged(firebase().auth,()=>{observeIdentity();if(!lock.current)void sync();},e=>{++epoch.current;clearSessionCaches();setState({user:null,profile:null,initializing:false,offline:!online.current,cachedAt:null,error:authError(e)});});
   const app=AppState.addEventListener('change',status=>{
    if(status==='active' && !lock.current)void sync();
   });
@@ -95,7 +114,7 @@ export function AuthProvider({children}) {
   if(localDemo)prepareLocalDemo().then(start).catch(e=>{if(!disposed&&active.current)setState(s=>({...s,initializing:false,error:e.message}));});
   else start();
   return()=>{disposed=true;active.current=false;++epoch.current;dispose();};
- },[sync]);
+ },[sync,observeIdentity]);
  useEffect(()=>{
   if(!state.user)return;
   const timer=setInterval(()=>{
@@ -125,10 +144,11 @@ export function AuthProvider({children}) {
  }
  async function logout(){
   return run(async()=>{
-   const uid=firebase().auth.currentUser?.uid;
-   await endPresence();
-   await signOut(firebase().auth);
-   await clearProfileCache(uid);
+   const auth=firebase().auth,u=auth.currentUser;
+   closingUser.current=u;clearSessionCaches();
+   setState(s=>({...s,profile:null,cachedAt:null,error:'Signing out…'}));
+   try{await endPresence();if(auth.currentUser===u)await signOut(auth);}
+   finally{await clearProfileCache(u?.uid);}
   });
  }
  return <Context.Provider value={{...state,working,run,refresh:sync,logout,requireConnection}}>{children}</Context.Provider>;

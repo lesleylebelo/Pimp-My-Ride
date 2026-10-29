@@ -1,10 +1,12 @@
 import {createReadCoordinator,invalidateReads} from '../../../shared/services/readCoordinator';
+import {registerSessionCache} from '../../../shared/services/sessionCaches';
 import {Platform} from 'react-native';
 import {photoFileError,preparePhoto} from '../utils/photos';
 import {bookmarkSession,bookmarkRevision,publishBookmark,saveBookmark} from './bookmarkState';
 
 const pending=new Map();
 let lastUid;
+registerSessionCache(()=>{pending.clear();lastUid=undefined;});
 const api=()=>require('../../../shared/services/api');
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 function account(expectedUid){

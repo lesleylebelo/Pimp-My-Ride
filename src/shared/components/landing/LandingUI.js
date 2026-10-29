@@ -82,7 +82,7 @@ export function LandingShell({ title, subtitle, tabs, feature, showFeature, onCl
     <FontContext.Provider value={loaded}>
       <SafeAreaView style={ui.safeArea} edges={['top', 'left', 'right']}>
         <View style={[ui.page,shop&&{minHeight:0},shop&&feedLayout&&{maxWidth:1200}]}>
-          {offline && <View style={ui.offlineBar}><LandingText style={ui.offlineText}>Offline · Read-only preview{cachedAt ? ` · Saved ${new Date(cachedAt).toLocaleString()}` : ''}. Connect for updates.</LandingText></View>}
+          {offline && <View style={ui.offlineBar}><LandingText accessibilityRole="status" style={ui.offlineText}>Offline · Displayed information may be outdated.{cachedAt ? ` Account preview saved ${new Date(cachedAt).toLocaleString()}.` : ''} Connect to refresh or save changes.</LandingText></View>}
 
           <View style={[ui.header,shop&&feedLayout&&{width:'100%',maxWidth:600,alignSelf:'center'}]}>
             <LogoMark size={40}/>

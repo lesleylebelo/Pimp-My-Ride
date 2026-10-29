@@ -1,8 +1,10 @@
+import {registerSessionCache} from '../../../shared/services/sessionCaches';
 // Shared presentation state only. Firestore through postsApi remains authoritative.
 let session,revision=0;
 const records=new Map(),listeners=new Set();
 const key=(uid,id)=>JSON.stringify([uid,id]);
 const emit=()=>{for(const listener of listeners)listener();};
+registerSessionCache(()=>{session=undefined;++revision;records.clear();emit();});
 export function bookmarkSession(user){
  if(session!==user){session=user;++revision;records.clear();emit();}
 }
