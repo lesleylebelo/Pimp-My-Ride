@@ -1,7 +1,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),{loadUI}=require('./helpers/load-ui.cjs');
 function setup(){
  const user={uid:'synthetic-owner',email:'current@synthetic.invalid',emailVerified:true},auth={currentUser:user},isolated={currentUser:null},calls=[];
- const state={respond:async(op)=>op==='status'?{accountStatus:'deactivated',job:{state:'completed'}}:{accepted:true},reauth:async()=>{},reset:0};
+ const state={respond:async(op)=>op==='status'?{accountStatus:'deactivated',job:{kind:'deactivate',state:'completed'}}:{accepted:true},reauth:async()=>{},reset:0};
  const sdk={EmailAuthProvider:{credential:(email,password)=>({email,password})},reauthenticateWithCredential:async(u,credential)=>{calls.push(['reauth',u,credential]);await state.reauth();},getIdToken:async(u,force)=>{calls.push(['token',u,force]);return 'synthetic-token';},verifyBeforeUpdateEmail:async(u,email)=>calls.push(['verifyEmail',u,email]),updatePassword:async(u,value)=>calls.push(['password',u,value]),sendPasswordResetEmail:async(a,email)=>{calls.push(['reset',a,email]);},signInWithEmailAndPassword:async(a,email)=>{a.currentUser={uid:'isolated-owner',email,emailVerified:true};calls.push(['isolatedSignIn']);return {user:a.currentUser};},signOut:async a=>{calls.push(['signOut']);a.currentUser=null;}};
  const api=loadUI('src/features/auth/services/accountManagement.js',{
   'firebase/auth':sdk,'../../../shared/services/firebase':{firebase:()=>({auth})},'../../../shared/services/network':{requireConnection:async()=>{}},
@@ -32,5 +32,12 @@ test('account API binds identity before requests and rejects late acknowledgemen
 test('recovery uses isolated Firebase authentication, never promotes a session and cannot restore an admin restriction',async()=>{
  const s=setup();s.auth.currentUser=null;await s.api.recoverAccount('current@synthetic.invalid','synthetic-password',true);assert.equal(s.auth.currentUser,null);assert.equal(s.isolated.currentUser,null);
  const requests=s.calls.filter(call=>call[0]==='api');assert.deepEqual(requests.map(call=>call[2].op),['status','reactivate']);assert.ok(requests.every(call=>call[3].expectedUid==='isolated-owner'&&call[3].authClient===s.isolated));
- s.state.respond=async()=>({accountStatus:'suspended',job:{state:'completed'}});await assert.rejects(()=>s.api.recoverAccount('current@synthetic.invalid','synthetic-password',true),/Only a completed self-deactivation/);
+ s.state.respond=async()=>({accountStatus:'suspended',job:{kind:'deactivate',state:'completed'}});await assert.rejects(()=>s.api.recoverAccount('current@synthetic.invalid','synthetic-password',true),/Only a completed self-deactivation/);
+});
+
+test('recovery cannot submit reactivation for deletion, pending operations, malformed jobs or an unrelated app session',async()=>{
+ for(const status of [{accountStatus:'deleting',job:{kind:'delete',state:'pending'}},{accountStatus:'deleted'},{accountStatus:'suspended'},{accountStatus:'deactivated',job:{kind:'deactivate',state:'pending'}},{accountStatus:'deactivated',job:{kind:'delete',state:'completed'}},{accountStatus:'deactivated',job:{state:'completed'}}]){
+  const s=setup();s.auth.currentUser=null;s.state.respond=async()=>status;await assert.rejects(()=>s.api.recoverAccount('current@synthetic.invalid','synthetic-password',true),/Only a completed self-deactivation/);assert.ok(!s.calls.some(c=>c[0]==='api'&&c[2].op==='reactivate'));
+ }
+ const s=setup();s.auth.currentUser=null;s.state.respond=async()=>{s.auth.currentUser={uid:'unrelated'};return {accountStatus:'deactivated',job:{kind:'deactivate',state:'completed'}};};await assert.rejects(()=>s.api.recoverAccount('current@synthetic.invalid','synthetic-password',true),/Sign out/);assert.ok(!s.calls.some(c=>c[0]==='api'&&c[2].op==='reactivate'));assert.equal(s.auth.currentUser.uid,'unrelated');
 });

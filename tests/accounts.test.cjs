@@ -8,7 +8,7 @@ function setup(profile,claims={},options={}) {
  const signOut=async auth=>{checkIsolated(auth);calls.push(['logout']);auth.currentUser=null;};
  const mocks={
  'react-native':{Platform:{OS:'android'}},
- '../../../shared/services/api':{apiRequest:async(path,data,requestOptions)=>{calls.push(['profile',data,requestOptions]);assert.equal(path,'profile');checkIsolated(requestOptions.authClient);assert.equal(requestOptions.expectedUid,user.uid);assert.equal(requestOptions.authClient.currentUser.uid,user.uid);if(options.onProfile)await options.onProfile();if(options.profileError)throw options.profileError;}},
+ '../../../shared/services/api':{apiRequest:async(path,data,requestOptions)=>{checkIsolated(requestOptions.authClient);assert.equal(requestOptions.expectedUid,user.uid);assert.equal(requestOptions.authClient.currentUser.uid,user.uid);if(path==='account'){calls.push(['account',data,requestOptions]);if(options.statusError)throw options.statusError;return options.status;}calls.push(['profile',data,requestOptions]);assert.equal(path,'profile');if(options.onProfile)await options.onProfile();if(options.profileError)throw options.profileError;}},
  './loginCooldown':{guardedLogin:async fn=>fn()},
  '../../../shared/services/network':{requireConnection:async()=>{if(options.connectionError)throw options.connectionError;}},
  'firebase/auth':{
@@ -163,4 +163,18 @@ test('an app account appearing during credential validation is not overwritten',
  finish.resolve();await assert.rejects(()=>login,/Your account changed/);
  assert.equal(s.auth.currentUser,other);assert.equal(s.sessions[0].auth.currentUser,null);
  assert.ok(!s.calls.some(c=>c[0]==='promote'));
+});
+
+test('only credential-verified customers/workshops with a completed self-deactivation receive contextual recovery eligibility',async()=>{
+ for(const role of ['owner','shop']){
+  const s=setup({role,accountStatus:'deactivated'},{},{status:{accountStatus:'deactivated',job:{kind:'deactivate',state:'completed'}}});
+  await assert.rejects(()=>s.login('demo@example.com','password'),{code:'auth/self-deactivated'});assert.equal(s.auth.currentUser,null);assert.equal(s.sessions[0].auth.currentUser,null);assert.deepEqual(s.calls.filter(c=>c[0]==='account').map(c=>c[1]),[{op:'status'}]);assert.ok(!s.calls.some(c=>c[0]==='promote'));
+ }
+ for(const status of [{accountStatus:'deleting',job:{kind:'delete',state:'pending'}},{accountStatus:'deactivated',job:{kind:'deactivate',state:'pending'}},{accountStatus:'deactivated',job:{kind:'delete',state:'completed'}},{accountStatus:'suspended'}, {accountStatus:'deleted'}]){
+  const s=setup({role:'owner',accountStatus:'deactivated'},{},{status});await assert.rejects(()=>s.login('demo@example.com','password'),{code:'auth/account-restricted'});
+ }
+ for(const profile of [{role:'owner',accountStatus:'deleting'},{role:'owner',accountStatus:'suspended'},{role:'owner',accountStatus:'deleted'},{role:'admin',accountStatus:'deactivated'},{role:'owner',accountStatus:'deactivated',statusOperation:'admin-operation'}]){
+  const s=setup(profile);await assert.rejects(()=>s.login('demo@example.com','password'),{code:'auth/account-restricted'});assert.ok(!s.calls.some(c=>c[0]==='account'));
+ }
+ const wrong=setup({role:'owner',accountStatus:'deactivated'},{},{loginError:Object.assign(Error('Incorrect credentials'),{code:'auth/invalid-credential'})});await assert.rejects(()=>wrong.login('demo@example.com','wrong'),{code:'auth/invalid-credential'});assert.ok(!wrong.calls.some(c=>['account','read-profile'].includes(c[0])));
 });
