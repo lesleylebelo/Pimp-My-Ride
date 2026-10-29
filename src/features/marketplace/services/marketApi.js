@@ -1,9 +1,11 @@
 import {createReadCoordinator,invalidateReads} from '../../../shared/services/readCoordinator';
+import {registerSessionCache} from '../../../shared/services/sessionCaches';
 import {apiRequest} from '../../../shared/services/api';
 import {firebase} from '../../../shared/services/firebase';
 import {postsApi} from './postsApi';
 const writes=new Set(['vehicleSave','vehicleArchive','requestCreate','requestUpdate','requestClose','quoteSubmit','quoteWithdraw','quoteAccept','paymentMockResult','paymentRetry','paymentStart','paymentRecordInStore','bookingComplete','bookingConfirm','bookingCancel','notificationRead']);
 const pending=new Map();let lastUid;
+registerSessionCache(()=>{pending.clear();lastUid=undefined;});
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k])])):value;
 function account(){const uid=firebase().auth.currentUser?.uid;if(uid!==lastUid){pending.clear();lastUid=uid;}return uid;}
 async function executemarketApi(op,data={}){

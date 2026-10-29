@@ -3,6 +3,7 @@ import {firebase} from '../../../shared/services/firebase';
 import {apiRequest} from '../../../shared/services/api';
 import {clearProfileCache} from '../../../shared/offline/profileCache';
 import {invalidateReads} from '../../../shared/services/readCoordinator';
+import {clearSessionCaches} from '../../../shared/services/sessionCaches';
 import {isolatedAccountAction} from './accounts';
 import {guardedLogin} from './loginCooldown';
 import {validateEmailField,validatePasswordField} from '../utils/validators';
@@ -28,7 +29,12 @@ export async function changePassword(password,next){
  const user=await confirmPassword(password);await updatePassword(user,next);await closeLocalSession();
 }
 export async function resetOwnPassword(){const auth=firebase().auth;if(!auth.currentUser?.email)throw Error('Sign in again.');await sendPasswordResetEmail(auth,auth.currentUser.email);}
-export async function closeLocalSession(){const auth=firebase().auth,uid=auth.currentUser?.uid;await signOut(auth);await clearProfileCache(uid);invalidateReads();}
+export async function closeLocalSession(){
+ const auth=firebase().auth,uid=auth.currentUser?.uid;
+ clearSessionCaches();
+ try{await signOut(auth);}
+ finally{await clearProfileCache(uid);}
+}
 export async function recoverAccount(email,password,reactivate=false){
  return isolatedAccountAction(async({auth})=>{
   const {user}=await guardedLogin(()=>signInWithEmailAndPassword(auth,email.trim(),password));

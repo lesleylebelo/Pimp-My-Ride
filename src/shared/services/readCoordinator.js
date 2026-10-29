@@ -1,12 +1,14 @@
 // Memory only. Successful mutations invalidate all participating read caches.
 // No automatic retry: callers/polls may try again after the shared cooldown.
+import {registerSessionCache} from './sessionCaches';
 const coordinators=new Set();
 export function invalidateReads(){for(const invalidate of coordinators)invalidate();}
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 export function createReadCoordinator(session){
- let owner,epoch=0,cooldown=null;
+ let owner,epoch=0,sessionEpoch=0,cooldown=null;
  const entries=new Map();
  const clear=()=>{++epoch;entries.clear();};coordinators.add(clear);
+ registerSessionCache(()=>{++sessionEpoch;owner=undefined;cooldown=null;clear();});
  function account(){const next=session();if(next!==owner){owner=next;clear();cooldown=null;}return next;}
  return async function read(input,execute,{ttl=5000,force=false}={}){
   const user=account();if(!user)throw Error('Sign in to continue.');
@@ -19,11 +21,11 @@ export function createReadCoordinator(session){
    const removable=[...entries].find(([,item])=>!item.promise);
    if(removable)entries.delete(removable[0]);else throw Error('Too many concurrent reads. Try again shortly.');
   }
-  const generation=epoch,entry={failures:previous?.failures||0};
+  const generation=epoch,sessionGeneration=sessionEpoch,entry={failures:previous?.failures||0};
   entry.promise=(async()=>{
    try{
     const value=await Promise.resolve().then(execute);
-    if(account()!==user)throw Error('Your account changed. Reload this page.');
+    if(account()!==user||sessionGeneration!==sessionEpoch)throw Error('Your account changed. Reload this page.');
     // Never cache an in-flight read that began before a mutation completed.
     if(generation===epoch){entry.value=value;entry.until=Date.now()+ttl;entry.failures=0;}
     return value;

@@ -1,9 +1,11 @@
 import {invalidateReads} from '../../../shared/services/readCoordinator';
+import {registerSessionCache} from '../../../shared/services/sessionCaches';
 import {apiRequest} from '../../../shared/services/api';
 import {firebase} from '../../../shared/services/firebase';
 const retryKeys=new Map();
 const MAX_RETRY_KEYS=50;
 let observedUid;
+registerSessionCache(()=>{retryKeys.clear();observedUid=undefined;});
 const mutations=new Set(['categorySave','categoryArchive','editAccount','review','status','serviceReviewModerate','serviceReviewReconcile']);
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 function observeAccount(){

@@ -150,17 +150,27 @@ export function SavedPostsScreen({navigation}){
 export function PostDetailScreen({navigation,route}){
  const {theme}=useTheme(),ui=showcaseStyles(theme),{width}=useWindowDimensions(),[selected,setSelected]=useState(0);
  const customer=useCustomerExperience(),Interaction=customer?CustomerPressable:Pressable;
- const {user}=useAuth(),[loaded,setPost]=useState(null),[busy,setBusy]=useState(true),[error,setError]=useState('');
+ const {user,offline}=useAuth(),focused=useIsFocused(),[loaded,setPost]=useState(null),[busy,setBusy]=useState(true),[error,setError]=useState('');
  const post=loaded&&loaded.uid===user?.uid&&loaded.id===route.params?.id?loaded.post:null;
  const bookmark=usePostBookmark(post);
  const [retry,setRetry]=useState(0);
- useEffect(()=>{let active=true;setBusy(true);setPost(null);setError('');postsApi('get',{id:route.params?.id},user?.uid).then(result=>{if(active)setPost({uid:user?.uid,id:route.params?.id,post:result.post});}).catch(e=>{if(active)setError(e.message||failure(e));}).finally(()=>{if(active)setBusy(false);});return()=>{active=false;};},[route.params?.id,user?.uid,retry]);
+ useEffect(()=>{
+  if(!user?.uid||offline||!focused){setBusy(false);return;}
+  let active=true;setBusy(true);setError('');
+  postsApi('get',{id:route.params?.id},user.uid,{force:true}).then(result=>{
+   if(active)setPost({uid:user.uid,id:route.params?.id,post:result.post});
+  }).catch(e=>{if(active)setError(e.message||failure(e));}).finally(()=>{if(active)setBusy(false);});
+  return()=>{active=false;};
+ },[route.params?.id,user?.uid,offline,focused,retry]);
  const photos=(Array.isArray(post?.images)?post.images:[]).map(image=>typeof image==='string'?{url:image}:image).filter(hasPostImage),vehicle=post?.vehicle;
  useEffect(()=>setSelected(0),[post?.id]);
  const date=typeof post?.createdAt==='number'&&Number.isFinite(post.createdAt)?new Date(post.createdAt).toLocaleDateString('en-ZA'):null;
  return <ShowcasePage title="Project showcase" navigation={navigation}>
   <Notice busy={busy} error={error}/>
-  {!!error&&<Button title="Retry loading post" outline onPress={()=>setRetry(value=>value+1)}/>}
+  {!!error&&<Button title="Retry loading post" outline disabled={offline||busy||!focused} onPress={()=>setRetry(value=>value+1)}/>}
+  {offline&&<Text accessibilityRole="status" style={ui.muted}>{post?'Offline · This previously loaded post may be outdated.':'Offline · Connect to load this post.'}</Text>}
+  {!!post&&!offline&&(busy||!!error)&&<Text accessibilityRole="status" style={ui.muted}>Previously loaded post · Refreshing or awaiting a successful refresh. Information may be outdated.</Text>}
+  {!!post&&<Button title="Refresh post" outline disabled={offline||busy||!focused} onPress={()=>setRetry(value=>value+1)}/>}
   {!busy&&!error&&!post&&<ShowcaseEmpty>This project is unavailable or you do not have access.</ShowcaseEmpty>}
   {post&&<>
    {photos.length?<View style={{gap:12}}><ShowcasePhoto postId={post.id} image={photos[Math.min(selected,photos.length-1)]} style={[ui.photo,{maxHeight:620}]} resizeMode="contain"/>

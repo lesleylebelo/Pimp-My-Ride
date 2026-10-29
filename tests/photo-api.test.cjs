@@ -4,7 +4,7 @@ const {loadUI}=require('./helpers/load-ui.cjs');
 const file=(name='paint.jpg')=>({uri:`file:///selected/${name}`,name,mimeType:'image/jpeg',size:1024});
 function setup({platform='android',fetchFile}={}){
  const auth={currentUser:{uid:'owner'}},calls=[];let respond=async()=>({ok:true});
- const mocks={'../../../shared/services/readCoordinator':loadUI('src/shared/services/readCoordinator.js'),'react-native':{Platform:{OS:platform}},'../../../shared/services/firebase':{firebase:()=>({auth})},
+ const mocks={'../../../shared/services/sessionCaches':loadUI('src/shared/services/sessionCaches.js'),'../../../shared/services/readCoordinator':loadUI('src/shared/services/readCoordinator.js'),'react-native':{Platform:{OS:platform}},'../../../shared/services/firebase':{firebase:()=>({auth})},
   '../utils/photos':loadUI('src/features/marketplace/utils/photos.js'),
   '../../../shared/services/api':{apiRequest:async(...args)=>{calls.push(args);return respond(...args);},uploadRequest:async(...args)=>{calls.push(args);return respond(...args);}}};
  class Multipart{constructor(){this.fields=[];}append(...args){this.fields.push(args);}}

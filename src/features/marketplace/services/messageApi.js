@@ -1,8 +1,10 @@
 import {createReadCoordinator,invalidateReads} from '../../../shared/services/readCoordinator';
+import {registerSessionCache} from '../../../shared/services/sessionCaches';
 import {apiRequest} from '../../../shared/services/api';
 import {firebase} from '../../../shared/services/firebase';
 const writes = new Set(['open','enquire','consent','send','read']), pending = new Map();
 let lastUid;
+registerSessionCache(()=>{pending.clear();lastUid=undefined;});
 const canonical = value => value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key,canonical(value[key])])) : value;
 async function executemessageApi(op, data = {}) {
   const uid = firebase().auth.currentUser?.uid;
