@@ -37,7 +37,7 @@ export async function validateAndPromote({auth,db},user,assertActive=()=>{}) {
    const invalid=new Error('Your account profile is incomplete or damaged. Sign-in cannot continue; contact support to restore account access.');
    invalid.code='auth/profile-invalid';throw invalid;
   }
-  if (profile.accountStatus && profile.accountStatus !== 'active') throw new Error('This account is restricted. Contact the project administrator.');
+  if (profile.accountStatus && profile.accountStatus !== 'active'){const failure=new Error(profile.accountStatus==='deactivated'?'This account is self-deactivated. Use account recovery to reactivate it.':profile.accountStatus==='deleting'?'Deletion cleanup is pending. Use account status to check progress.':'This account is restricted. Contact the project administrator.');failure.code='auth/account-restricted';throw failure;}
   const role = profile.role;
   if (!['owner','shop','admin'].includes(role)) throw new Error('Account access is unavailable. Contact the project administrator.');
   if (role === 'admin' && (await getIdTokenResult(user,true)).claims.admin !== true) throw new Error('This account does not have administrator access.');

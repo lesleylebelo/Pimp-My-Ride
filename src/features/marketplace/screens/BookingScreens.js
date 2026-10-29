@@ -14,7 +14,7 @@ import {Field, Notice, useInfiniteCursor, formatMoney} from '../components/Marke
 import {BookingPage as Page, BookingSection as Card, BookingAction as Button, BookingOverview, BookingProgress, BookingEmpty, paymentChoiceLabel, bookingStyles, isSimulatedBooking} from '../components/BookingUI';
 import {useMockPayments} from '../hooks/useMockPayments';
 import MockPaymentNotice from '../components/MockPaymentNotice';
-import {appointmentErrors, cancellationError} from '../utils/bookingValidation';
+import {appointmentErrors, cancellationError, serviceCompleted, completionError} from '../utils/bookingValidation';
 import PhotoGallery from '../components/PhotoGallery';
 import {ConversationAction} from '../components/ConversationAction';
 
@@ -69,6 +69,7 @@ export function BookingDetailScreen(props) {
 function BookingDetail({navigation, id}) {
   const {offline, profile} = useAuth(),capability=useMockPayments();
   const {theme}=useTheme(),styles=bookingStyles(theme);
+  const [reviewVersion,setReviewVersion]=useState(0);
   const [paymentCursor,setPaymentCursor]=useState(null);
   const {data, busy, error, refresh} = useMarketData('booking', {id,...(paymentCursor?{paymentCursor}:{})});
   const history=useInfiniteCursor(data,busy,setPaymentCursor,{itemsKey:'paymentAttempts',cursorKey:'paymentCursor',autoLoad:false});
@@ -90,7 +91,7 @@ function BookingDetail({navigation, id}) {
   const errors = appointmentErrors(form), reasonError = cancellationError(reason);
   const disabled = busy || saving || offline || !booking || !!error;
   const canConfirm = profile?.role === 'shop' && booking?.status === 'pending_confirmation';
-  const canCancel = ['owner', 'shop'].includes(profile?.role) && ['pending_payment','pending_confirmation', 'confirmed'].includes(booking?.status);
+  const canCancel = ['owner', 'shop'].includes(profile?.role) && !serviceCompleted(booking) && ['pending_payment','pending_confirmation', 'confirmed'].includes(booking?.status);
   const touch = key => setTouched(value => ({...value, [key]: true}));
   const change = (key, value) => { touch(key); setForm(current => ({...current, [key]: value})); };
   const fieldError = key => submitted || touched[key] ? errors[key] : undefined;
@@ -173,8 +174,9 @@ function BookingDetail({navigation, id}) {
   }
 
   const canComplete=profile?.role==='shop'&&booking?.status==='confirmed'&&(booking.serviceStatus==='not_started'||!Object.prototype.hasOwnProperty.call(booking,'serviceStatus')&&!Object.prototype.hasOwnProperty.call(booking,'serviceCompletedAt'));
+  const completionIssue=completionError(booking);
   async function completeService(){
-    if(lock.current||disabled||!canComplete)return;
+    if(lock.current||disabled||!canComplete||completionIssue)return;
     await update('bookingComplete',{id},{...booking,serviceStatus:'completed'},'Service marked completed. Booking and payment status are unchanged.');
   }
 
@@ -191,7 +193,7 @@ function BookingDetail({navigation, id}) {
         </View>
         {booking.status!=='cancelled' && <ConversationAction serviceRequestId={booking.serviceRequestId} shopId={booking.shopId} navigation={navigation} disabled={disabled}/>}
       </Card>
-      {profile?.role==='owner'&&(booking.serviceStatus==='completed'||booking.serviceCompletedAt)&&<BookingReview booking={booking} disabled={disabled}/>}
+      {profile?.role==='owner'&&(booking.serviceStatus==='completed'||booking.serviceCompletedAt)&&<BookingReview booking={booking} disabled={disabled} refreshKey={reviewVersion}/>}
       {profile?.role==='shop'&&booking.serviceStatus==='completed'&&<WorkshopBookingReview key={booking.id} booking={booking}/>}
       <MockPaymentNotice capability={capability}/>
       <Card>
@@ -232,7 +234,8 @@ function BookingDetail({navigation, id}) {
       {canComplete&&<Card>
         <Text weight="semibold" style={styles.heading}>Service completion</Text>
         <Text>Mark the service complete separately from the booking and payment status.</Text>
-        <ConfirmationButton palette={theme} title="Mark service completed" message="Mark this confirmed service as completed? Booking and payment status will remain unchanged." disabled={disabled} onConfirm={completeService}/>
+        {!!completionIssue&&<Text>{completionIssue}</Text>}
+        <ConfirmationButton palette={theme} title="Mark service completed" message="Mark this confirmed service as completed? Booking and payment status will remain unchanged." disabled={disabled||!!completionIssue} onConfirm={completeService}/>
       </Card>}
       {attempts.map(attempt=><Card key={attempt.id}>
         <Text weight="semibold">{attempt.simulated===true&&attempt.testTransaction===true?'Simulated test transaction':'Recorded transaction'} · {attempt.status}</Text>
@@ -268,6 +271,6 @@ function BookingDetail({navigation, id}) {
         <ConfirmationButton palette={theme} title="Cancel booking" message="Cancel this booking for both parties? The reason and accepted quotation will remain in the booking history." disabled={disabled} danger onConfirm={cancelBooking}/>
       </Card>}
     </>}
-    <Button title="Refresh booking" disabled={busy || saving || offline} onPress={() => { if (!busy && !saving && !offline) {history.reset();if(paymentCursor)setPaymentCursor(null);else void refresh().catch(() => {});} }}/>
+    <Button title="Refresh booking" disabled={busy || saving || offline} onPress={() => { if (!busy && !saving && !offline) {setReviewVersion(value=>value+1);history.reset();if(paymentCursor)setPaymentCursor(null);else void refresh().catch(() => {});} }}/>
   </Page>;
 }

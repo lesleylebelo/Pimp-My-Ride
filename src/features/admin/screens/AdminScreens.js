@@ -72,9 +72,9 @@ export function AccountDetailScreen({route,navigation}){
     <Detail label="Last sign-in">{when(data.lastSignIn)}</Detail>
     <Disclosure><Detail label="Account UID">{uid}</Detail></Disclosure>
     {data.statusReason&&<Text style={styles.muted}>Access note: {data.statusReason}</Text>}
-    {data.statusOperation&&<Text style={styles.muted}>A server operation needs reconciliation. Contact the project operator.</Text>}
+    {data.statusOperation&&<Text style={styles.muted}>A server operation needs reconciliation. Contact the project operator.</Text>}{data.statusOperation?.startsWith('self:')&&<Button title="Resume account cleanup" disabled={disabled} onPress={()=>void action('accountLifecycleResume',{}).catch(()=>{})}/>}
    </Card>
-   {data.role!=='admin'&&<Card>
+   {['owner','shop'].includes(data.role)&&!['deleting','deleted'].includes(data.accountStatus)&&<Card>
     <Text style={styles.heading}>Profile</Text>
     <FormGrid>
     <ValidatedField label="Full name" value={form.fullName} error={fieldError('fullName')} onBlur={()=>touch('fullName')} onChangeText={fullName=>editForm('fullName',f=>({...f,fullName}))} maxLength={200} editable={!saving}/>
@@ -89,7 +89,7 @@ export function AccountDetailScreen({route,navigation}){
     <View style={styles.row}>{['cipcCert','proofOfAddress','ownerId'].map(kind=><Button key={kind} title={{cipcCert:'Registration certificate',proofOfAddress:'Proof of address',ownerId:'Owner ID'}[kind]} disabled={disabled||!data.documents?.some(d=>d.id===kind)} onPress={()=>viewDocument(kind)}/>)}</View>
     <Text style={styles.muted}>Private links expire after one minute. Review all three documents before approving. Use fictional documents for this academic project.</Text>
    </Card>}
-   {data.role!=='admin'&&<Card>
+   {['owner','shop'].includes(data.role)&&!['deleting','deleted'].includes(data.accountStatus)&&<Card>
     <Text style={styles.heading}>Account actions</Text>
     <Text style={styles.muted}>Sensitive actions require identity verification within 15 minutes. Verify, then retry your action.</Text>
     <View style={styles.row}><Button title="Verify identity" disabled={saving} onPress={()=>navigation.navigate('AdminConfirm',{section:route.params.section||'accounts'})}/></View>

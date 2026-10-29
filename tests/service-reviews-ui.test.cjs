@@ -73,6 +73,17 @@ test('changing customer identity cannot display a previous customer review',asyn
  await mount(s.ui.BookingReview,{booking},async(tree,update)=>{await press(tree,'View Your Review');assert.match(text(tree),/Private customer review/);s.state.uid='other';s.state.own={review:null,eligible:false};await update();assert.doesNotMatch(text(tree),/Private customer review/);assert.ok(!button(tree,'View Your Review'));});
 });
 
+test('same-booking evidence changes, explicit refresh and navigation focus reconcile eligibility without bypassing server reasons',async()=>{
+ const s=setup(),props={booking:{...booking,serviceCompletedAt:null},refreshKey:0};
+ s.state.own={review:null,eligible:false,reason:'Completion evidence is missing. Contact the workshop/support.'};
+ await mount(s.ui.BookingReview,props,async(tree,update)=>{
+  assert.match(text(tree),/Completion evidence is missing/);assert.ok(!button(tree,'Rate & Review Workshop'));
+  s.state.own={review:null,eligible:true};props.booking={...props.booking,serviceCompletedAt:123};await update();assert.ok(button(tree,'Rate & Review Workshop'));
+  s.state.own={review:{rating:4,text:'Existing submitted service review remains visible.'},eligible:true};props.refreshKey++;await update();assert.ok(button(tree,'View Your Review'));assert.ok(!button(tree,'Rate & Review Workshop'));
+  s.state.focused=false;await update();const reads=s.state.calls.length;s.state.focused=true;await update();assert.equal(s.state.calls.length,reads+1);assert.ok(button(tree,'View Your Review'));
+ });
+});
+
 test('admin moderation requires a reason, preserves failures and provides hide/restore/reconciliation actions',async()=>{
  const s=setup(),state={data:{items:[{id:'hash1',shopId:'shop',rating:1,text:'The service communication could have been clearer.',status:'visible'}],cursor:null},calls:[],fail:false};
  const mocks={...s.mocks,

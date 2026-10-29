@@ -17,3 +17,14 @@ export function cancellationError(reason) {
   if (value.length > 500) return 'Use 500 characters or fewer for the cancellation reason.';
   return '';
 }
+
+export const serviceCompleted=booking=>booking?.serviceStatus==='completed'||!!booking?.serviceCompletedAt;
+
+export function completionError(booking,now=Date.now()){
+ if(!booking)return '';
+ if(booking.appointmentAt!=null&&!Number.isFinite(booking.appointmentAt))return 'The saved appointment needs reconciliation before completion.';
+ const hasTyped=booking.appointmentDate||booking.appointmentTime;
+ if(hasTyped&&(!validCalendarDate(booking.appointmentDate)||!validClockTime(booking.appointmentTime)))return 'The saved appointment needs reconciliation before completion.';
+ const typed=hasTyped?Date.parse(booking.appointmentDate+'T'+booking.appointmentTime+':00+02:00'):null;
+ return (Number.isFinite(booking.appointmentAt)&&booking.appointmentAt>now)||(typed!==null&&typed>now)?'A service cannot be completed before its scheduled appointment (SAST).':'';
+}

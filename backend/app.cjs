@@ -61,6 +61,7 @@ function createApp({services,auth,googleExchange,emailDelivery,trustProxy=false,
  app.post('/api/photos',action(services.photosApi));
  app.post('/api/profile/photos',action(services.profilePhotos));
  app.post('/api/session',action(services.sessionEvent));
+ app.post('/api/account',action(services.accountApi));
  app.post('/api/profile',action(services.completeProfile));
  app.post('/api/auth/google/authorize',action(services.authorizeGoogleSession));
  app.post('/api/documents/list',action(services.listDocuments));

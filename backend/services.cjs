@@ -1,6 +1,7 @@
 const {FieldValue,Timestamp,FieldPath}=require('firebase-admin/firestore');
 const {ApiError}=require('./errors.cjs');
 const D=require('./domain.cjs');
+const {createAccountManagement}=require('./account-management.cjs');
 const {createReviews}=require('./reviews.cjs');
 const {createServiceReviews}=require('./service-reviews.cjs');
 const {mutation}=require('./mutations.cjs');
@@ -14,16 +15,16 @@ const {saveShopLocation}=require('./shop-location.cjs');
 const {createMessaging}=require('./messaging.cjs');
 const {createAIAssist}=require('./ai-assist.cjs');
 const {createAIStudio}=require('./ai-studio.cjs');
-function createServices({db,auth,storage,photoStorage,profileStorage=photoStorage,requestStorage=photoStorage,postStorage=photoStorage,mockPaymentEnv=process.env,aiProvider,aiStudioProvider,aiDiagnostic}){
+function createServices({db,auth,storage,photoStorage,profileStorage=photoStorage,requestStorage=photoStorage,postStorage=photoStorage,mockPaymentEnv=process.env,accountDeletionEnv=process.env,aiProvider,aiStudioProvider,aiDiagnostic}){
 const reviews=createReviews({db,auth,storage});
 const stamp=()=>FieldValue.serverTimestamp();
 const audit=(actor,action,target,details={})=>({actor,action,target,details,createdAt:stamp()});
-async function actor(request,admin=false){
+async function actor(request,admin=false,recovery=false){
  if(!request.auth)D.fail('Sign in to continue.','unauthenticated');
  const uid=request.auth.uid;
  const [profile,user]=await Promise.all([db.doc(`users/${uid}`).get(),auth.getUser(uid)]);
  const p=profile.data();
- if(!['owner','shop','admin'].includes(p?.role)||!user.emailVerified||!request.auth.token.email_verified||user.disabled||!D.active(p))D.fail('Account access is unavailable.','permission-denied');
+ if(!['owner','shop','admin'].includes(p?.role)||!user.emailVerified||!request.auth.token.email_verified||user.disabled||!(D.active(p)||recovery&&['owner','shop'].includes(p?.role)&&['deactivated','deleting'].includes(p.accountStatus)))D.fail('Account access is unavailable.','permission-denied');
  if(!Number.isFinite(Number(request.auth.token.auth_time))||Number(request.auth.token.auth_time)<Math.floor(Math.max(Date.parse(user.tokensValidAfterTime)||0,Date.parse(user.metadata.creationTime)||0)/1000))D.fail('Sign in again.','unauthenticated');
  if(admin&&(request.auth.token.admin!==true||user.customClaims?.admin!==true||p.role!=='admin'))D.fail('Administrator access required.','permission-denied');
  return {uid,profile:p};
@@ -34,6 +35,7 @@ function rows(snapshot){return snapshot.docs.map(d=>({id:d.id,...serialize(d.dat
 async function adminApi(request){
  const a=await actor(request,true),input=request.data||{},op=input.op;
  if(['serviceReviews','serviceReviewModerate','serviceReviewReconcile'].includes(op)){if(op!=='serviceReviews')recent(request);return serviceReviews.moderate(request);}
+ if(op==='accountLifecycleResume'){recent(request);return accountManagement.process(D.id(input.uid));}
  if(op==='posts'){
   let query=db.collection('posts').orderBy('createdAt','desc').orderBy(FieldPath.documentId(),'desc');
   if(input.cursor){const cursor=await db.doc(`posts/${D.id(input.cursor)}`).get();if(!cursor.exists)D.fail('Post list changed. Refresh the list.','failed-precondition');query=query.startAfter(cursor);}
@@ -55,9 +57,9 @@ async function adminApi(request){
  }
  if(op==='account'){
   const uid=D.id(input.uid),snapshot=await db.doc(`users/${uid}`).get();if(!snapshot.exists)D.fail('Account not found.','not-found');
-  const u=await auth.getUser(uid);
+  const u=await auth.getUser(uid).catch(e=>{if(e.code==='auth/user-not-found'&&['deleting','deleted'].includes(snapshot.data().accountStatus))return null;throw e;});
   const docs=await db.collection(`users/${uid}/documents`).get();
-  return {id:uid,...serialize(snapshot.data()),emailVerified:u.emailVerified,disabled:u.disabled,lastSignIn:u.metadata.lastSignInTime||null,documents:rows(docs)};
+  return {id:uid,...serialize(snapshot.data()),emailVerified:u?.emailVerified||false,disabled:u?.disabled??true,lastSignIn:u?.metadata?.lastSignInTime||null,documents:rows(docs)};
  }
  if(op==='audit'){
   let q=db.collection('auditLogs').orderBy('createdAt','desc').orderBy(FieldPath.documentId(),'desc');
@@ -98,6 +100,7 @@ async function adminApi(request){
  const uid=D.id(input.uid),ref=db.doc(`users/${uid}`),before=await ref.get();
  if(!before.exists)D.fail('Account not found.','not-found');
  const p=before.data();
+ if(['deleting','deleted'].includes(p.accountStatus))D.fail('Use account lifecycle recovery for a deleting/deleted account.','failed-precondition');
  if(op==='document'){
   if(!D.kinds.includes(input.kind)||p.role!=='shop')D.fail('Invalid document.');
   const record=(await ref.collection('documents').doc(input.kind).get()).data();
@@ -110,7 +113,7 @@ async function adminApi(request){
  if(op==='editAccount'){
   const changes=D.editable(input);if(p.role==='shop')changes.shop=D.shop(input.shop);
   return receipt.atomic(async tx=>{const current=await tx.get(ref);D.protect(a.uid,uid,current.data());
-   if(current.data().reviewOperation)D.fail('Wait for the shop review to finish before editing.','failed-precondition');
+   if(current.data().reviewOperation||current.data().statusOperation||['deleting','deleted'].includes(current.data().accountStatus))D.fail('Wait for the account operation to finish before editing.','failed-precondition');
    tx.update(ref,{...changes,...(changes.shop?{shop:{...current.data().shop,...changes.shop}}:{}),updatedAt:stamp()});tx.create(db.collection('auditLogs').doc(),audit(a.uid,op,uid,{fields:Object.keys(changes)}));return {ok:true};});
  }
  if(op==='review')return reviews.review({actor:a.uid,uid,status:input.status,reason:input.reason,operationId:receipt.id,payloadFingerprint:receipt.fingerprint});
@@ -182,6 +185,7 @@ async function completeProfile(request){
  });
 }
 const {listDocuments,checkUpload,uploadDocument}=createDocuments({db,storage,actor});
+const accountManagement=createAccountManagement({db,auth,actor,env:accountDeletionEnv,stores:{verification:storage,photos:photoStorage,requests:requestStorage,profiles:profileStorage,showcase:postStorage}});
 const serviceReviews=createServiceReviews({db,auth,actor});
 const marketplace=createMarketplace({db,auth,actor,mockPaymentEnv});
 const messaging=createMessaging({db,auth,actor});
@@ -190,6 +194,6 @@ const aiAssist=createAIAssist({db,actor,provider:aiProvider,onDiagnostic:aiDiagn
 const aiStudio=createAIStudio({db,actor,provider:aiStudioProvider});
 const {photosApi,checkPhotoUpload,uploadPhoto}=createPhotos({db,auth,storage:photoStorage,requestStorage,actor});
 const {postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage}=createPosts({db,auth,actor,storage:postStorage});
-return {serviceReviews:serviceReviews.api,...profilePhotos,adminApi,sessionEvent,completeProfile,authorizeGoogleSession,listDocuments,checkUpload,uploadDocument,marketplace,messaging,aiAssist,aiStudio,photosApi,checkPhotoUpload,uploadPhoto,postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage};
+return {accountApi:accountManagement.api,accountCleanupTick:accountManagement.tick,serviceReviews:serviceReviews.api,...profilePhotos,adminApi,sessionEvent,completeProfile,authorizeGoogleSession,listDocuments,checkUpload,uploadDocument,marketplace,messaging,aiAssist,aiStudio,photosApi,checkPhotoUpload,uploadPhoto,postsApi,postsList,postDetail,createShowcase,updateShowcase,deleteShowcase,uploadPostImage,viewPostImage};
 }
 module.exports={createServices};

@@ -6,6 +6,7 @@ function createPresence({db,actor,now=Date.now}) {
   if(!['heartbeat','offline'].includes(input.state))D.fail('Invalid session event.');
   const ref=db.doc(`presence/${a.uid}`);
   await db.runTransaction(async tx=>{
+   const current=(await tx.get(db.doc('users/'+a.uid))).data();if(!D.active(current)||current.statusOperation||current.provisioningOperation)D.fail('Account access changed.','permission-denied');
    const snapshot=await tx.get(ref),sessions={...(snapshot.data()?.sessions||{})};
    const previous=sessions[session];
    for(const [key,deadline] of Object.entries(sessions))if(deadline<=at)delete sessions[key];

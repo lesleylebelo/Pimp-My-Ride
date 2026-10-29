@@ -21,7 +21,11 @@ function createDocuments({db,storage,actor}) {
   const path=`verification/${a.uid}/${kind}/${id}`,attempt=db.doc(`storageUploadAttempts/${id}`);
   const ref=db.doc(`users/${a.uid}`),record=ref.collection('documents').doc(kind);
   // Persist intent before external I/O. Uncertain uploads are retained for investigation.
-  await attempt.set({path,uid:a.uid,kind,state:'uploading',createdAt:stamp(),updatedAt:stamp()});
+  await db.runTransaction(async tx=>{
+   const p=(await tx.get(ref)).data();
+   if(!D.active(p)||p.role!=='shop'||p.verificationStatus!=='pending'||p.statusOperation||p.reviewOperation)D.fail('Shop access changed before upload.','permission-denied');
+   tx.create(attempt,{path,uid:a.uid,kind,state:'uploading',createdAt:stamp(),updatedAt:stamp()});
+  });
   async function settleFailure(){return db.runTransaction(async tx=>{
    const [current,ledger]=await Promise.all([tx.get(record),tx.get(attempt)]);
    if(current.data()?.path===path)return true;

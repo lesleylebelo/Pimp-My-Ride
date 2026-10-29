@@ -1,5 +1,7 @@
 {
   "indexes": [
+    {"collectionGroup":"accountLifecycleJobs","queryScope":"COLLECTION","fields":[{"fieldPath":"state","order":"ASCENDING"},{"fieldPath":"kind","order":"ASCENDING"},{"fieldPath":"dueAt","order":"ASCENDING"}]},
+    {"collectionGroup":"accountLifecycleJobs","queryScope":"COLLECTION","fields":[{"fieldPath":"state","order":"ASCENDING"},{"fieldPath":"dueAt","order":"ASCENDING"}]},
     {"collectionGroup":"serviceReviews","queryScope":"COLLECTION","fields":[{"fieldPath":"shopId","order":"ASCENDING"},{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"__name__","order":"ASCENDING"}]},
     {"collectionGroup":"serviceReviews","queryScope":"COLLECTION","fields":[{"fieldPath":"shopId","order":"ASCENDING"},{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"rating","order":"ASCENDING"}]},
     {"collectionGroup":"notifications","queryScope":"COLLECTION","fields":[{"fieldPath":"recipientUid","order":"ASCENDING"},{"fieldPath":"readAt","order":"ASCENDING"}]},
@@ -274,7 +276,7 @@
       ]
     }
   ],
-  "fieldOverrides": [{"collectionGroup":"transactionalEmailJobs","fieldPath":"payload","indexes":[]},{"collectionGroup":"transactionalEmailJobs","fieldPath":"snapshot","indexes":[]},{
+  "fieldOverrides": [{"collectionGroup":"messages","fieldPath":"senderId","indexes":[{"order":"ASCENDING","queryScope":"COLLECTION"},{"order":"DESCENDING","queryScope":"COLLECTION"},{"order":"ASCENDING","queryScope":"COLLECTION_GROUP"}]},{"collectionGroup":"transactionalEmailJobs","fieldPath":"payload","indexes":[]},{"collectionGroup":"transactionalEmailJobs","fieldPath":"snapshot","indexes":[]},{
     "collectionGroup": "documents",
     "fieldPath": "path",
     "indexes": [

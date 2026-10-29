@@ -1,0 +1,11 @@
+import React,{useEffect,useRef,useState} from 'react';
+import {Text,View} from 'react-native';
+import PrimaryButton from '../../../shared/components/PrimaryButton';
+import {useTheme} from '../../../shared/theme/ThemeContext';
+import {recoverAccount} from '../services/accountManagement';
+export default function AccountRecovery({email,password,disabled,onBusyChange}){
+ const {theme}=useTheme(),[status,setStatus]=useState(null),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),lock=useRef(false),generation=useRef(0),mounted=useRef(true);
+ useEffect(()=>{setStatus(null);setMessage('');++generation.current;},[email]);useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+ async function check(reactivate=false){if(lock.current||disabled)return;if(!email||!password){setMessage('Enter your email and current password above first.');return;}const ticket=++generation.current;lock.current=true;setBusy(true);onBusyChange?.(true);setMessage('');try{const result=await recoverAccount(email,password,reactivate);if(mounted.current&&ticket===generation.current){if(reactivate){setStatus(null);setMessage('Account reactivated. Sign in to continue.');}else{setStatus(result);setMessage(result.accountStatus==='deleting'?`Deletion cleanup is ${result.job?.state||'pending'}. ${result.job?.issue||'Sign-in and marketplace activity remain restricted.'}`:result.accountStatus==='deactivated'?'Your account is self-deactivated. You can reactivate it once the operation is complete.':'Account status loaded. Other access restrictions require support.');}}}catch(e){if(mounted.current&&ticket===generation.current)setMessage(e.message||'Unable to load account status.');}finally{lock.current=false;if(mounted.current)setBusy(false);onBusyChange?.(false);}}
+ return <View style={{gap:12}}><Text style={{color:theme.textSecondary}}>Self-deactivated account or pending deletion?</Text><PrimaryButton title="Check account status / recovery" disabled={disabled||busy} onPress={()=>void check()}/>{status?.accountStatus==='deactivated'&&status.job?.state==='completed'&&<PrimaryButton title="Reactivate my account" disabled={disabled||busy} onPress={()=>void check(true)}/>} {!!message&&<Text accessibilityLiveRegion="polite" style={{color:theme.textSecondary}}>{message}</Text>}</View>;
+}

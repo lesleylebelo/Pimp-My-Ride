@@ -10,6 +10,10 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PMR_ACCOUNT_DELETION_REQUESTS_ENABLED
+        value: "false"
+      - key: PMR_ACCOUNT_DELETION_WORKER_ENABLED
+        value: "false"
       - key: FIREBASE_PROJECT_ID
         value: pimp-my-ride-a26fc
       - key: FIREBASE_SERVICE_ACCOUNT_JSON

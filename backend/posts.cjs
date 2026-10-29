@@ -384,9 +384,14 @@ function createPosts({db,auth,actor,storage}){
   const file=P.validatePhoto(request.file);
   if(a.profile.role==='shop'&&profile.verificationStatus!=='approved')D.fail('Shop verification is required to publish showcases.','permission-denied');
   const path=`posts/${a.uid}/${randomUUID()}`;
-  await storage.upload(path,file.buffer,file.contentType);
-  const details=await storage.inspect(path);
-  if(!details||details.size!==file.size||details.contentType!==file.contentType)D.fail('The uploaded photo could not be verified. Choose it again.','failed-precondition');
+  const ledger=db.doc('postPhotoUploads/'+path.split('/').at(-1));
+  await db.runTransaction(async tx=>{const p=(await tx.get(db.doc('users/'+a.uid))).data();if(!eligible(p,'shop'))D.fail('Workshop access changed.','failed-precondition');tx.create(ledger,{uid:a.uid,path,...(storage.bucket?{bucket:storage.bucket}:{}),state:'uploading',createdAt:stamp(),updatedAt:stamp()});});
+  try{
+   await storage.upload(path,file.buffer,file.contentType);
+   const details=await storage.inspect(path);
+   if(!details||details.size!==file.size||details.contentType!==file.contentType)D.fail('The uploaded photo could not be verified. Choose it again.','failed-precondition');
+   await db.runTransaction(async tx=>{const p=(await tx.get(db.doc('users/'+a.uid))).data();if(!eligible(p,'shop'))D.fail('Workshop access changed.','failed-precondition');tx.update(ledger,{state:'uploaded',updatedAt:stamp()});});
+  }catch(error){await ledger.update({state:'cleanupPending',updatedAt:stamp()}).catch(()=>{});throw error;}
   return {path,...(storage.bucket?{bucket:storage.bucket}:{}),...(storage.publicUrl?{url:storage.publicUrl(path)}:{}),size:file.size,contentType:file.contentType};
  }
  async function viewPostImage(request){
