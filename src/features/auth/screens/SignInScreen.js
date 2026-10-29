@@ -1,3 +1,4 @@
+import AccountRecovery from '../components/AccountRecovery';
 import {useLoginCooldown} from '../hooks/useLoginCooldown';
 import GoogleSignIn from '../components/GoogleSignIn';
 import { useAuth } from '../context/AuthContext';
@@ -123,6 +124,7 @@ export default function SignInScreen({ navigation, route }) {
             </Pressable>
           </View>
 
+          <AccountRecovery email={email} password={password} disabled={loading||offline||cooldown.seconds!==0} onBusyChange={setLoading}/>
           {offline && (
             <Text style={styles.hint}>You are offline. Connect to sign in.</Text>
           )}

@@ -21,7 +21,10 @@ const submit=(uid='review-owner',extra={})=>call(uid,'service-reviews',{op:'revi
 const complete=()=>call('review-shop','marketplace',{op:'bookingComplete',id:'review-booking',requestId:'complete-booking'}).expect(200);
 test('authorised completion to concurrent reviews, persistent notification, public profile and updated comparison',async()=>{
  await submit().expect(409);await call('review-owner','marketplace',{op:'bookingComplete',id:'review-booking',requestId:'forged-completion'}).expect(403);
- await complete();await Promise.all(Array.from({length:6},()=>submit().expect(200)));
+ await complete();
+ await call('review-owner','marketplace',{op:'bookingCancel',id:'review-booking',reason:'Cannot cancel completed service',requestId:'forbidden-cancel'}).expect(409);
+ const invite=(await db.doc('notifications/service_complete_review-booking').get()).data();assert.equal(invite.recipientUid,'review-owner');assert.match(invite.body,/rating and reviewing/);assert.equal(invite.readAt,null);
+ await Promise.all(Array.from({length:6},()=>submit().expect(200)));
  const id=reviewId('review-booking');assert.equal((await db.collection('serviceReviews').get()).size,1);
  assert.deepEqual((await db.doc('users/review-shop').get()).data().verifiedRating.count,1);
  const notices=await db.collection('notifications').where('event','==','service_review_created').get();assert.equal(notices.size,1);assert.equal(notices.docs[0].id,'service_review_'+id);
@@ -39,7 +42,7 @@ test('authorised completion to concurrent reviews, persistent notification, publ
  await db.doc('serviceRequests/review-request').set({ownerId:'review-owner',vehicleId:'review-car',categoryId:'review-category',status:'open',termsVersion:1,mandatoryServices:['Paint'],visibility:'open',serviceLocation:{latitude:-26,longitude:28}});
  for(const shopId of ['review-shop','review-competitor']){const id=quoteId('review-request',shopId);await db.doc('quotations/'+id).set({shopId,shopName:shopId,serviceRequestId:'review-request',status:'submitted',termsVersion:1,validUntil:Timestamp.fromMillis(Date.now()+3600000),totalCents:10000,currency:'ZAR',items:[{description:'Paint',amountCents:10000}],scopeConfirmed:true,allChargesIncluded:true,coveredServices:['Paint']});}
  const compared=(await call('review-owner','marketplace',{op:'request',id:'review-request',comparison:true}).expect(200)).body.data.recommendations;
- assert.equal(compared.recommendedId,quoteId('review-request','review-shop'));assert.equal(compared.ratingUsed,true);assert.match(compared.entries.find(e=>e.id===compared.recommendedId).ratingExplanation,/1 verified reviews/);
+ assert.equal(compared.recommendedId,quoteId('review-request','review-shop'));assert.equal(compared.ratingUsed,true);assert.match(compared.entries.find(e=>e.id===compared.recommendedId).ratingExplanation,/1 verified review/);
 });
 test('real authentication, ownership and supplied-field boundaries prevent forged reviews',async()=>{
  await complete();await request(http).post('/api/service-reviews').send({op:'reviewSubmit'}).expect(401);

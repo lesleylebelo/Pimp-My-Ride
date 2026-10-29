@@ -169,6 +169,13 @@ test('booking forms preserve safe areas and platform keyboard handling without a
 test('only the customer completed-booking detail offers Rate & Review; payment is not required',async()=>{
  for(const role of ['owner','shop'])for(const serviceStatus of ['not_started','completed']){
   const s=setup(role);s.state.data={booking:{...booking,status:'confirmed',serviceStatus,...(serviceStatus==='completed'?{serviceCompletedAt:1}:{})}};
-  await mounted(s.screens.BookingDetailScreen,details(s),async tree=>{assert.equal(!!button(tree,'Rate & Review Workshop'),role==='owner'&&serviceStatus==='completed');if(role==='shop'&&serviceStatus==='completed')assert.match(text(tree),/Customer service review/);assert.match(text(tree),/Unpaid/);});
+  await mounted(s.screens.BookingDetailScreen,details(s),async tree=>{assert.equal(!!button(tree,'Rate & Review Workshop'),role==='owner'&&serviceStatus==='completed');assert.equal(!!button(tree,'Cancel booking'),serviceStatus!=='completed');if(role==='shop'&&serviceStatus==='completed')assert.match(text(tree),/Customer service review/);assert.match(text(tree),/Unpaid/);});
+ }
+});
+
+test('future and malformed appointments disable completion; elapsed and undated legacy appointments stay supported',async()=>{
+ for(const [values,blocked] of [[{appointmentDate:'2099-01-02',appointmentTime:'14:30'},true],[{appointmentAt:Date.UTC(2099,0,2)},true],[{appointmentAt:'invalid'},true],[{appointmentDate:'2020-01-02',appointmentTime:'14:30'},false],[{},false]]){
+  const s=setup('shop','dark','android');s.state.data={booking:{...booking,status:'confirmed',...values}};
+  await mounted(s.screens.BookingDetailScreen,details(s),async tree=>{assert.equal(!!button(tree,'Mark service completed').props.disabled,blocked);if(blocked)assert.match(text(tree),/before its scheduled appointment|needs reconciliation/);assert.equal(s.state.calls.length,0);});
  }
 });

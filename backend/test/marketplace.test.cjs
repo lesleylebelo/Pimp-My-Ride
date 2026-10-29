@@ -38,7 +38,7 @@ function fixture(extra={},options={}){
  const auth={getUser:async uid=>users.get(uid)||{emailVerified:true,disabled:false}};
  const actor=async req=>({uid:req.auth.uid,profile:(await db.doc('users/'+req.auth.uid).get()).data()});
  db.projectId=options.projectId||'demo-pmr-security';
- let api=createMarketplace({db,auth,actor,paymentProvider:options.paymentProvider,mockPaymentEnv:options.mockPaymentEnv===undefined?LOCAL_MOCK_ENV:options.mockPaymentEnv});
+ let api=createMarketplace({db,auth,actor,paymentProvider:options.paymentProvider,mockPaymentEnv:options.mockPaymentEnv===undefined?LOCAL_MOCK_ENV:options.mockPaymentEnv,completionNow:options.completionNow||(()=>Date.parse('2100-01-01T00:00:00Z'))});
  const read=(uid,op,data={})=>api({auth:{uid},data:{op,...data}});
  const write=(uid,op,data={},key=`retry-${++sequence}`)=>{
   const request=data.serviceRequestId&&db.rows.get(`serviceRequests/${data.serviceRequestId}`);
@@ -729,6 +729,27 @@ test('service completion remains separate from booking confirmation and payment'
  assert.equal(saved.status,'confirmed');assert.equal(saved.paymentStatus,'due');assert.equal(saved.serviceStatus,'completed');
 });
 
+test('completed services cannot be cancelled by either participant and completion invitation is exactly once',async()=>{
+ const f=fixture(),offer=await offered(f),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'});
+ await f.write('shop','bookingConfirm',{id:b.id,...appointment});await f.write('shop','bookingComplete',{id:b.id},'one-completion');
+ await f.write('shop','bookingComplete',{id:b.id},'one-completion');
+ for(const role of ['owner','shop'])await assert.rejects(()=>f.write(role,'bookingCancel',{id:b.id,reason:'Attempt after completion'}),error=>error.code==='failed-precondition'&&/Completed services cannot be cancelled/.test(error.message));
+ const invite=f.db.rows.get('notifications/service_complete_'+b.id);assert.equal(invite.recipientUid,'owner');assert.match(invite.title,/Your service is complete/);assert.match(invite.body,/rating and reviewing/);assert.deepEqual(invite.target,{type:'booking',id:b.id});assert.equal(invite.readAt,null);assert.ok(!invite.simulated);
+ assert.equal(f.db.rows.get('bookings/'+b.id).paymentStatus,'due');
+});
+
+test('future appointments reject completion, while elapsed and undated confirmed legacy bookings remain completable',async()=>{
+ const f=fixture({}, {completionNow:()=>Date.now()}),offer=await offered(f),b=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_in_store'});
+ await f.write('shop','bookingConfirm',{id:b.id,...appointment});await assert.rejects(()=>f.write('shop','bookingComplete',{id:b.id}),{code:'failed-precondition'});
+ const saved=f.db.rows.get('bookings/'+b.id);assert.equal(saved.serviceStatus,'not_started');assert.ok(!f.db.rows.has('notifications/service_complete_'+b.id));
+ Object.assign(saved,{appointmentDate:'2020-01-01',appointmentTime:'09:30',appointmentAt:Timestamp.fromMillis(Date.parse('2020-01-01T07:30:00Z'))});
+ await f.write('shop','bookingComplete',{id:b.id});assert.equal(f.db.rows.get('bookings/'+b.id).serviceStatus,'completed');
+});
+
+test('completion rejects malformed saved timestamps without rejecting undated confirmed legacy records',()=>{
+ const B=require('../booking-domain.cjs');assert.throws(()=>B.requireServiceStarted({appointmentAt:'invalid'}),{code:'failed-precondition'});assert.doesNotThrow(()=>B.requireServiceStarted({status:'confirmed'}));
+});
+
 test('a late simulated result after cancellation is rejected without changing payment history or accounting',async()=>{
  const f=fixture(),offer=await offered(f),booking=await f.write('owner','quoteAccept',{id:offer.id,paymentMethod:'pay_now'});
  await f.write('owner','bookingCancel',{id:booking.id,reason:'Cancelled before simulated payment completed'});
@@ -1193,12 +1214,12 @@ test('Phase 3 event targets, renewal, test outbox templates and mutation replay 
  const pay={id:b.id,paymentAttemptId:b.paymentAttemptId,outcome:'successful'};await f.write('owner','paymentMockResult',pay,'payment');await f.write('owner','paymentMockResult',pay,'payment');
  await f.write('shop','bookingConfirm',{id:b.id,...appointment},'confirm');await f.write('shop','bookingConfirm',{id:b.id,...appointment},'confirm');
  await f.write('shop','bookingComplete',{id:b.id},'complete');await f.write('shop','bookingComplete',{id:b.id},'complete');
- await f.write('owner','bookingCancel',{id:b.id,reason:'Test'},'cancel');await f.write('owner','bookingCancel',{id:b.id,reason:'Test'},'cancel');
+ await assert.rejects(()=>f.write('owner','bookingCancel',{id:b.id,reason:'Test'},'cancel'),{code:'failed-precondition'});
  const notifications=collectionRows(f,'notifications');
- for(const event of ['quotation_accepted','booking_created','simulated_payment_paid','booking_confirmed','service_completed','booking_cancelled'])assert.equal(notifications.filter(n=>n.event===event).length,2,event);
+ for(const event of ['quotation_accepted','booking_created','simulated_payment_paid','booking_confirmed','service_completed'])assert.equal(notifications.filter(n=>n.event===event).length,2,event);
  const paid=notifications.find(n=>n.event==='simulated_payment_paid');assert.deepEqual(paid.target,{type:'receipt',id:b.paymentAttemptId,bookingId:b.id});assert.equal(paid.amountCents,100000);assert.match(paid.body,/ZAR 1000.00/);
  const renewed=notifications.find(n=>n.event==='quotation_renewed');assert.equal(renewed.recipientUid,'owner');assert.deepEqual(renewed.target,{type:'quotation',id});
- const emails=collectionRows(f,'emailOutbox');assert.equal(emails.length,10);
+ const emails=collectionRows(f,'emailOutbox');assert.equal(emails.length,8);
  for(const email of emails){assert.equal(email.transport,'test_outbox');assert.equal(email.deliveryStatus,'test_sink_only');assert.match(email.subject,/SIMULATED \/ TEST/);assert.match(email.body,/NOT REAL PAYMENT/);assert.match(email.deliveryDescription,/No email sent/);assert.ok(!JSON.stringify(email).includes('@')&&!JSON.stringify(email).includes('private phone'));}
  assert.match(emails.find(e=>e.event==='booking_created').subject,/awaiting appointment/);assert.match(emails.find(e=>e.event==='booking_confirmed').body,/09:30 SAST/);
  assert.equal((await f.read('other','notifications')).items.length,0);

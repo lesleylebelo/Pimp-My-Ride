@@ -40,6 +40,14 @@ test('unavailable workshops cannot gain new ratings',async()=>{
  for(const change of [{accountStatus:'suspended'},{verificationStatus:'pending'},{reviewOperation:'in-progress'},{statusOperation:'pending'}]){const f=fixture();Object.assign(f.db.rows.get('users/shop'),change);await assert.rejects(()=>f.submit(),{code:'failed-precondition'});}
  const f=fixture();f.identities.set('shop',{emailVerified:true,disabled:true});await assert.rejects(()=>f.submit());
 });
+
+test('deleted workshop review archives preserve history, moderation and aggregate reconciliation without allowing new reviews',async()=>{
+ const f=fixture();await f.submit();f.db.rows.set('users/shop',{role:'deleted',formerRole:'shop',accountStatus:'deleted',archivedReviews:true,verifiedRating:{sum:4,count:1,revision:1}});
+ assert.equal((await f.call('workshopReviews',{shopId:'shop'})).items.length,1);await assert.rejects(()=>f.submit());
+ await f.moderate();assert.equal((await f.call('workshopReviews',{shopId:'shop'})).items.length,0);
+ await f.service.moderate({auth:{uid:'admin'},data:{op:'serviceReviewReconcile',shopId:'shop',reason:'Reconcile retained historical review archive'}});assert.deepEqual(ratingSummary(f.db.rows.get('users/shop')),{average:null,count:0});
+ await f.moderate('visible');assert.deepEqual(ratingSummary(f.db.rows.get('users/shop')),{average:4,count:1});
+});
 test('concurrent and lost-response retries create one review, one notification and one aggregate increment',async()=>{
  const f=fixture();await Promise.all(Array.from({length:8},()=>f.submit()));
  assert.equal([...f.db.rows.keys()].filter(p=>p.startsWith('serviceReviews/')).length,1);assert.equal([...f.db.rows.keys()].filter(p=>p.startsWith('notifications/')).length,1);

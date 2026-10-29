@@ -4,6 +4,12 @@ const {memoryDb}=require('./helpers/memory-db.cjs');
 const {createDocuments}=require('../documents.cjs');
 const file={buffer:Buffer.from('%PDF-1.7 synthetic fixture'),originalname:'sample.pdf',mimetype:'application/pdf'};
 const req={kind:'ownerId',file};
+
+test('a stale upload actor cannot reserve private media after account restriction',async()=>{
+ const db=memoryDb({'users/shop':{role:'shop',verificationStatus:'pending',accountStatus:'deleting'}});
+ const api=createDocuments({db,storage:{upload:async()=>assert.fail('Restricted upload must never reach storage')},actor:async()=>({uid:'shop',profile:{role:'shop',verificationStatus:'pending'}})});
+ await assert.rejects(()=>api.uploadDocument(req),{code:'permission-denied'});assert.equal([...db.rows.keys()].filter(path=>path.startsWith('storageUploadAttempts/')).length,0);
+});
 function fixture(){
  const db=memoryDb({'users/shop':{role:'shop',verificationStatus:'pending'}}),files=new Map();
  const storage={upload:async(path,buffer)=>files.set(path,buffer),remove:async()=>assert.fail('Uploads must retain files until deletion policy is approved.')};
@@ -35,14 +41,19 @@ test('upload failures and access changes leave retained cleanup candidates witho
  }
 });
 test('lost metadata and settlement acknowledgements return success when the exact file is referenced',async()=>{
- const f=fixture();f.db.after=async()=>{throw Error('Synthetic lost acknowledgement');};
+ const f=fixture(),upload=f.storage.upload;f.storage.upload=async(...args)=>{await upload(...args);f.db.after=async()=>{throw Error('Synthetic lost acknowledgement');};};
  assert.deepEqual(await f.api.uploadDocument(req),{ok:true,kind:'ownerId'});
  assert.ok(f.files.has(f.record().path));assert.equal(f.attempts()[0].state,'referenced');
 });
 test('unresolved transaction failure retains the uploading attempt and reports an uncertain result',async()=>{
- const f=fixture();f.db.before=async()=>{throw Error('Synthetic database unavailable');};
+ const f=fixture(),upload=f.storage.upload;f.storage.upload=async(...args)=>{await upload(...args);f.db.before=async()=>{throw Error('Synthetic database unavailable');};};
  await assert.rejects(()=>f.api.uploadDocument(req),{code:'unavailable'});
  assert.equal(f.files.size,1);assert.equal(f.record(),undefined);assert.equal(f.attempts()[0].state,'uploading');
+});
+
+test('a lost reservation acknowledgement cannot start an untracked upload',async()=>{
+ const f=fixture();f.db.after=async()=>{throw Error('Synthetic lost reservation response');};
+ await assert.rejects(()=>f.api.uploadDocument(req));assert.equal(f.files.size,0);assert.equal(f.attempts()[0].state,'uploading');assert.equal(f.record(),undefined);
 });
 test('a closed attempt cannot later become a metadata reference',async()=>{
  const f=fixture(),upload=f.storage.upload;

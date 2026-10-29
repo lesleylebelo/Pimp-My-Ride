@@ -35,6 +35,7 @@ test('failed atomic changes leave no receipt and permit a meaningful retry',asyn
 
 function presenceFixture(){
  let time=1000000,actors=0;const db=memoryDb();
+ db.rows.set('users/owner',{role:'owner',fullName:'Demo'});
  const sessionEvent=createPresence({db,now:()=>time,actor:async()=>{actors++;return {uid:'owner',profile:{role:'owner',fullName:'Demo'}};}});
  return {db,event:(session,state='heartbeat')=>sessionEvent({data:{session,state}}),advance:ms=>{time+=ms;},actors:()=>actors,row:()=>db.rows.get('presence/owner'),logs:()=>[...db.rows].filter(([path])=>path.startsWith('auditLogs/'))};
 }

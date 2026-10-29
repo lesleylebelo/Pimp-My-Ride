@@ -46,7 +46,9 @@ async function start(){try{
  const profileStorage=createStorage({url:storage.url,key:storage.key,bucket:storage.photoBucket,scope:'profiles'});
  const requestStorage=createMediaStorage({url:storage.url,key:storage.key,bucket:storage.requestBucket,scope:'requests'});
  const postStorage=createMediaStorage({url:storage.url,key:storage.key,bucket:storage.postsBucket,legacyBucket:storage.legacyPostsBucket,scope:'showcase'});
- const app=createApp({auth,emailDelivery,googleExchange:createGoogleAuth({auth,db}),services:createServices({db,auth,storage:storageClient,photoStorage,profileStorage,requestStorage,postStorage}),trustProxy:process.env.RENDER?1:false,
+ const services=createServices({db,auth,storage:storageClient,photoStorage,profileStorage,requestStorage,postStorage});
+ const cleanupTimer=setInterval(()=>{void services.accountCleanupTick().catch(()=>console.warn('Account cleanup worker needs attention.'));},60000);cleanupTimer.unref();
+ const app=createApp({auth,emailDelivery,googleExchange:createGoogleAuth({auth,db}),services,trustProxy:process.env.RENDER?1:false,
   allowedOrigins:corsOrigins(process.env.CORS_ORIGINS,process.env.NODE_ENV==='production')});
  const server=app.listen(portValue,host,()=>console.log('PimpMyRide API ready.'));
  server.requestTimeout=90000;

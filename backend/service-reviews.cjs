@@ -31,9 +31,15 @@ const publicReview=doc=>{
  const v=doc.data();
  return {id:doc.id,rating:v.rating,text:v.text,customerName:v.customerName||'Verified customer',serviceCategory:v.serviceCategory||null,createdAt:v.createdAt?.toMillis?.()??null,verified:true};
 };
+function completionReason(booking){
+ if(booking.status==='cancelled'||booking.cancelledAt||booking.invalidatedAt)return 'Cancelled or invalidated bookings cannot be reviewed.';
+ if(booking.status!=='confirmed'||booking.serviceStatus!=='completed')return 'The workshop must complete this confirmed service before it can be reviewed.';
+ if(!Number.isFinite(booking.serviceCompletedAt?.toMillis?.()))return 'Completion evidence is missing. Ask the workshop or support to reconcile this booking.';
+ return null;
+}
 function createServiceReviews({db,auth,actor}){
  async function authEligible(uid){try{const u=await auth.getUser(uid);return u.emailVerified===true&&!u.disabled;}catch(e){if(e.code==='auth/user-not-found')return false;throw e;}}
- async function shop(id){const doc=await db.doc('users/'+D.id(id)).get();if(!eligible(doc.data(),'shop')||!await authEligible(id))D.fail('Workshop unavailable.','not-found');return doc;}
+ async function shop(id,archive=false){const doc=await db.doc('users/'+D.id(id)).get();if(archive&&doc.data()?.accountStatus==='deleted'&&doc.data()?.formerRole==='shop'&&doc.data()?.archivedReviews)return doc;if(!eligible(doc.data(),'shop')||!await authEligible(id))D.fail('Workshop unavailable.','not-found');return doc;}
  function requireCustomer(p){if(!eligible(p,'owner'))D.fail('An active customer account is required.','permission-denied');}
  const audit=(tx,uid,action,id,details={})=>tx.create(db.collection('auditLogs').doc(),{actor:uid,action:'serviceReview.'+action,target:id,details,createdAt:stamp()});
  async function ownReview(a,id){
@@ -42,8 +48,10 @@ function createServiceReviews({db,auth,actor}){
   const booking=(await db.doc('bookings/'+D.id(id)).get()).data();
   if(!booking||booking[a.profile.role==='shop'?'shopId':'ownerId']!==a.uid)D.fail('Booking not found.','not-found');
   const review=await db.doc('serviceReviews/'+reviewId(id)).get();
-  return {review:review.exists&&(a.profile.role==='owner'||review.data().status==='visible')?{...publicReview(review),status:review.data().status}:null,
-   eligible:!review.exists&&a.profile.role==='owner'&&booking.status==='confirmed'&&booking.serviceStatus==='completed'&&!!booking.serviceCompletedAt&&!booking.cancelledAt&&!booking.invalidatedAt};
+  let reason=completionReason(booking);
+  if(!reason&&!review.exists){try{await shop(booking.shopId);}catch(e){if(e.code!=='not-found')throw e;reason='This workshop is currently unavailable for new reviews.';}}
+  return {reason,review:review.exists&&(a.profile.role==='owner'||review.data().status==='visible')?{...publicReview(review),status:review.data().status}:null,
+   eligible:!review.exists&&a.profile.role==='owner'&&!reason};
  }
  async function submit(a,input){
   requireCustomer(a.profile);const id=D.id(input.id);
@@ -54,7 +62,7 @@ function createServiceReviews({db,auth,actor}){
    requireCustomer(actorDoc.data());if(!await authEligible(a.uid))D.fail('Account access is unavailable.','permission-denied');
    const b=bookingDoc.data();
    if(!b||b.ownerId!==a.uid)D.fail('Booking not found.','not-found');
-   if(b.shopId===a.uid||b.status!=='confirmed'||b.serviceStatus!=='completed'||!b.serviceCompletedAt||b.cancelledAt||b.invalidatedAt)D.fail('Only completed, valid workshop bookings can be reviewed.','failed-precondition');
+   if(b.shopId===a.uid||completionReason(b))D.fail('Only completed, valid workshop bookings can be reviewed.','failed-precondition');
    const shopRef=db.doc('users/'+D.id(b.shopId)),shopDoc=await tx.get(shopRef),p=shopDoc.data();
    if(!eligible(p,'shop')||!await authEligible(b.shopId))D.fail('Workshop unavailable.','failed-precondition');
    if(existing.exists){
@@ -75,11 +83,11 @@ function createServiceReviews({db,auth,actor}){
  }
  async function list(a,input){
   if(!eligible(a.profile,a.profile.role)||!['owner','shop'].includes(a.profile.role))D.fail('Account access is unavailable.','permission-denied');
-  const shopDoc=await shop(input.shopId),shopId=shopDoc.id;
+  const shopDoc=await shop(input.shopId,true),shopId=shopDoc.id;
   let query=db.collection('serviceReviews').where('shopId','==',shopId).where('status','==','visible').orderBy(FieldPath.documentId());
   if(input.cursor)query=query.startAfter(D.id(input.cursor));
   const snap=await query.limit(21).get(),docs=snap.docs.slice(0,20);
-  return {items:docs.map(publicReview),cursor:snap.docs.length>20?docs.at(-1).id:null,summary:ratingSummary(shopDoc.data())};
+  return {archived:shopDoc.data().accountStatus==='deleted',items:docs.map(publicReview),cursor:snap.docs.length>20?docs.at(-1).id:null,summary:ratingSummary(shopDoc.data())};
  }
  async function api(request){
   const a=await actor(request),input=request.data||{};
@@ -114,7 +122,7 @@ function createServiceReviews({db,auth,actor}){
   }
   if(input.op==='serviceReviewReconcile'){
    M.fields(input,['op','shopId','reason','requestId']);const id=D.id(input.shopId),reason=content(input.reason,'Reconciliation reason',10,500),ref=db.doc('users/'+id),before=(await ref.get()).data();
-   if(!before||before.role!=='shop')D.fail('Workshop not found.','not-found');
+   if(!before||!(before.role==='shop'||before.role==='deleted'&&before.formerRole==='shop'&&before.archivedReviews))D.fail('Workshop not found.','not-found');
    const observedRevision=before.verifiedRating?.revision??0;
    const revision=Number.isSafeInteger(observedRevision)&&observedRevision>=0&&observedRevision<Number.MAX_SAFE_INTEGER?observedRevision:0;
    const snapshot=await db.collection('serviceReviews').where('shopId','==',id).where('status','==','visible').aggregate({count:AggregateField.count(),sum:AggregateField.sum('rating')}).get();
@@ -131,4 +139,4 @@ function createServiceReviews({db,auth,actor}){
  }
  return {api,moderate};
 }
-module.exports={reviewId,createServiceReviews,ratingSummary,content,eligible};
+module.exports={completionReason,reviewId,createServiceReviews,ratingSummary,content,eligible};

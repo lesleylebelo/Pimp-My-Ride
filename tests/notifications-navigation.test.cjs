@@ -36,7 +36,7 @@ test('both feed headers place the bell beside unchanged Messages with matching a
    const bell=button(tree,'Notifications'),messages=button(tree,'Messages');assert.ok(bell);assert.ok(messages);
    const title=tree.root.findAllByType('Text').find(node=>node.props.children===(role==='owner'?'Discover':'Find Jobs'));
    const copy=role==='owner'?title.parent.parent:title.parent;
-   assert.deepEqual(copy.parent.findAllByType('Pressable').map(node=>node.props.accessibilityLabel),['Notifications','Messages']);
+   assert.deepEqual(copy.parent.findAllByType('Pressable').map(node=>node.props.accessibilityLabel),role==='owner'?['Notifications','Messages','Open PimpPilot Studio']:['Notifications','Messages']);
    assert.equal(copy.props.style.minWidth,0);assert.equal(copy.props.style.flex,1);
    assert.equal(bell.props.accessibilityRole,'button');assert.equal(bell.findByType('Icon').props.name,'notifications-outline');
    assert.equal(bell.findByType('Icon').props.color,messages.findByType('Icon').props.color);

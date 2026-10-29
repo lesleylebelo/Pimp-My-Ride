@@ -70,7 +70,7 @@ function customerDisplayName(profile){
  const safe=name.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,'').replace(/(?:\+?\d[\d\s().-]{7,}\d)/g,'').replace(/\s+/g,' ').trim();
  return safe||'Customer';
 }
-function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvider(),mockPaymentEnv=process.env}){
+function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvider(),mockPaymentEnv=process.env,completionNow=Date.now}){
  const audit=(tx,uid,action,target,details={})=>tx.create(db.collection('auditLogs').doc(),{actor:uid,action:`marketplace.${action}`,target,details,createdAt:stamp()});
  const quotationHead=async(tx,requestId,shopId,headDoc,legacyDoc)=>{
   if(!headDoc.exists){
@@ -86,6 +86,9 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
   return {id:head.quoteId,doc,quote,hasHead:true};
  };
  const notify=(tx,uid,name,bookingId=null,details={})=>{
+  if(name==='service_completed'&&details.reviewInvitation){
+   tx.create(db.doc('notifications/service_complete_'+bookingId),{recipientUid:uid,event:name,bookingId,title:'Your service is complete!',body:`${customerDisplayName({fullName:details.shopName||'Your workshop'})} has completed ${customerDisplayName({fullName:details.requestTitle||'your service'})}. Share your experience by rating and reviewing the workshop.`,target:{type:'booking',id:bookingId},readAt:null,createdAt:stamp()});return;
+  }
   tx.create(db.collection('notifications').doc(),{recipientUid:uid,event:name,bookingId,...details,...C.message(name,bookingId,details),target:C.target(name,bookingId,details),readAt:null,simulated:true,testTransaction:true,createdAt:stamp()});
  };
  const event=(tx,uid,name,bookingId,details={})=>{
@@ -512,8 +515,9 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
     await current(tx,a.uid,'shop');const booking=ownBooking(await tx.get(ref),a);
     const legacyService=!Object.prototype.hasOwnProperty.call(booking,'serviceStatus')&&!Object.prototype.hasOwnProperty.call(booking,'serviceCompletedAt');
     if(booking.status!=='confirmed'||booking.serviceStatus!=='not_started'&&!legacyService)D.fail('Only a confirmed, not-yet-completed service can be marked complete.','failed-precondition');
+    B.requireServiceStarted(booking,completionNow());
     tx.update(ref,{serviceStatus:'completed',serviceCompletedAt:stamp(),updatedAt:stamp()});
-    event(tx,booking.ownerId,'service_completed',ref.id);
+    event(tx,booking.ownerId,'service_completed',ref.id,{reviewInvitation:true,shopName:booking.shopName||'Your workshop',requestTitle:booking.requestTitle||'your service'});
     event(tx,a.uid,'service_completed',ref.id);
     audit(tx,a.uid,op,ref.id);return {id:ref.id,serviceStatus:'completed'};
    });
@@ -540,6 +544,7 @@ function createMarketplace({db,auth,actor,paymentProvider=createMockPaymentProvi
    const ref=db.doc(`bookings/${D.id(input.id)}`),reason=D.text(input.reason,'Cancellation reason',500);
    return receipt.atomic(async tx=>{
     await current(tx,a.uid,role);const value=ownBooking(await tx.get(ref),a);
+    if(B.serviceCompleted(value))D.fail('Completed services cannot be cancelled. Contact support about a service dispute.','failed-precondition');
     if(!['pending_payment','pending_confirmation','confirmed'].includes(value.status))D.fail('This booking is already cancelled.','failed-precondition');
     await assertAuth(a.uid);
     // The current participant may cancel even if the other account is blocked.

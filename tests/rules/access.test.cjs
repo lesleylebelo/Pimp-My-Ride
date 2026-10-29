@@ -127,3 +127,7 @@ test('verified service reviews and rating totals cannot be forged or read direct
  for(const role of ['owner','shop','admin']){await seed(role,role);const client=ctx(role,true,role==='admin').firestore();await assertFails(getDoc(doc(client,'serviceReviews','review')));await assertFails(getDocs(collection(client,'serviceReviews')));await assertFails(setDoc(doc(client,'serviceReviews','forged'),{customerId:role,rating:5}));await assertFails(updateDoc(doc(client,'serviceReviews','review'),{rating:1,status:'hidden'}));await assertFails(deleteDoc(doc(client,'serviceReviews','review')));await assertFails(updateDoc(doc(client,'users','shop'),{verifiedRating:{count:99,sum:495}}));}
  await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(),'serviceReviews','review')));
 });
+
+test('self-service account lifecycle and upload ledgers remain backend-only for every client role',async()=>{
+ for(const role of ['owner','shop','admin']){await seed(role,role);const client=ctx(role,true,role==='admin').firestore();for(const name of ['accountLifecycleJobs','postPhotoUploads']){await assertFails(getDoc(doc(client,name,'owner')));await assertFails(getDocs(collection(client,name)));await assertFails(setDoc(doc(client,name,'owner'),{uid:role,state:'completed'}));await assertFails(deleteDoc(doc(client,name,'owner')));}}
+});

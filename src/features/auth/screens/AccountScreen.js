@@ -1,3 +1,4 @@
+import ManageProfile from '../components/ManageProfile';
 import React,{useCallback,useRef,useState} from 'react';
 import {KeyboardAvoidingView,Platform,Pressable,ScrollView,Text,View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
@@ -18,6 +19,7 @@ export default function AccountScreen({ navigation }) {
  const {user,profile,error,refresh,logout,offline,requireConnection}=useAuth();
  const { mode, toggleTheme, theme } = useTheme();
  const styles = makeStyles(theme);
+ const [managing,setManaging]=useState(false);
  const [busy,setBusy]=useState(false),[message,setMessage]=useState(''),[resendAt,setResendAt]=useState(0);
  const [uploadBusy,setUploadBusy]=useState(false),[documentRefresh,setDocumentRefresh]=useState(0);
  const [locationBusy,setLocationBusy]=useState(false);
@@ -28,6 +30,7 @@ export default function AccountScreen({ navigation }) {
  const titles={restricted:'Account access restricted',verify:'Verify your email',pending:'Shop verification pending',rejected:'Shop registration not approved',ready:'You’re signed in',incomplete:'Profile unavailable',invalid:'Account role needs attention'};
  async function action(fn,success='') {if(actionLock.current||uploadLock.current)return;actionLock.current=true;setBusy(true);setMessage('');try {await fn();setMessage(success);}catch(e){setMessage(authError(e));}finally{actionLock.current=false;setBusy(false);}}
 
+ if(managing&&['owner','shop'].includes(profile?.role)&&stage!=='restricted'&&user?.emailVerified&&!error)return <SafeAreaView style={styles.safeArea}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scroll}><PrimaryButton title="Back to account" onPress={()=>setManaging(false)}/><ManageProfile/></ScrollView></SafeAreaView>;
  if(profile?.role==='owner'&&stage==='ready'&&!error)return <CustomerAccountScreen {...{navigation,user,profile,mode,toggleTheme,busy,photoBusy,error,message}} onPhotoBusy={setPhotoBusy} onLogout={()=>action(logout)}/>;
 
  return (
@@ -69,11 +72,12 @@ export default function AccountScreen({ navigation }) {
       <PrimaryButton title="Resend verification email" disabled={busy || offline} onPress={()=>action(async()=>{if(Date.now()<resendAt)throw new Error('Please wait one minute before resending.');await requireConnection();await sendEmailVerification(firebase().auth.currentUser);setResendAt(Date.now()+60000);},'Verification email sent.')}/>
     </>}
 
-    {stage==='restricted' && <Text style={styles.body}>Your account has been suspended or archived. Contact the project administrator.</Text>}
+    {stage==='restricted' && <Text style={styles.body}>{profile?.accountStatus==='deactivated'?'Your account is self-deactivated. Sign out and use account recovery on the sign-in screen.':profile?.accountStatus==='deleting'?'Deletion cleanup is pending. Marketplace access is restricted. Use account status at sign-in to check progress.':'Your account has been suspended or archived. Contact the project administrator.'}</Text>}
     {profile?.reviewReason && <Text style={styles.body}>Shop review: {profile.reviewReason}</Text>}
     {stage==='pending' && <Text style={styles.body}>{profile?.verificationStatus==='reviewing' ? 'An administrator is reviewing your application. Document replacement is paused until this review finishes.' : 'Your shop needs administrator approval before it can use the marketplace. Upload each document below and check that all three show as saved.'}</Text>}
     {stage==='rejected' && <Text style={styles.body}>Contact the project administrator to discuss the review. Marketplace access is restricted.</Text>}
     {(stage==='incomplete'||stage==='invalid') && <Text style={styles.body}>Your sign-in account exists, but its profile is missing or invalid. Profile setup is not part of sign-in. For an incomplete signup, return to Create account and submit the original details to retry saving the profile; otherwise contact support.</Text>}
+    {profile?.role==='shop'&&stage!=='restricted'&&user?.emailVerified&&!error&&<PrimaryButton title="Manage Profile" disabled={busy||photoBusy||uploadBusy||locationBusy} onPress={()=>setManaging(true)}/>}
     {stage==='ready' && <Text style={styles.body}>{profile?.role==='shop'?'Manage your business location, verification documents and account preferences here.':'Your account is ready.'}</Text>}
 
     {stage!=='restricted' && user?.emailVerified && profile?.role==='shop' && <BusinessLocation disabled={busy || uploadBusy || !!error || !!profile.reviewOperation || !!profile.statusOperation} onBusyChange={setLocationBusy}/>}

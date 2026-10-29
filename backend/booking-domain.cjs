@@ -8,4 +8,12 @@ function appointment(input){
  return {appointmentDate:date,appointmentTime:time,appointmentMillis:Date.parse(`${date}T${time}:00+02:00`)};
 }
 function requireFutureAppointment(value){if(value.appointmentMillis<=Date.now())D.fail('Choose an appointment in the future (South African time).');}
-module.exports={appointment,requireFutureAppointment};
+function serviceCompleted(booking){return booking?.serviceStatus==='completed'||!!booking?.serviceCompletedAt;}
+function requireServiceStarted(booking,now=Date.now()){
+ const at=booking.appointmentAt?.toMillis?.();
+ const typed=booking.appointmentDate||booking.appointmentTime?appointment(booking).appointmentMillis:null;
+ if(booking.appointmentAt!=null&&!Number.isFinite(at))D.fail('The saved appointment needs reconciliation.','failed-precondition');
+ if((Number.isFinite(at)&&at>now)||(typed!==null&&typed>now))D.fail('A service cannot be completed before its scheduled appointment (SAST).','failed-precondition');
+ // Confirmed legacy bookings with no scheduled values keep their existing workflow.
+}
+module.exports={appointment,requireFutureAppointment,serviceCompleted,requireServiceStarted};
